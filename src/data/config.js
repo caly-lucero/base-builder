@@ -21,30 +21,42 @@ export const ECONOMY = {
   startGold: 200,
   baseCap: 500, // oro máximo sin almacenes
   maxOfflineMs: 8 * 60 * 60 * 1000, // la producción sin conexión se limita a 8 h
-  refundRate: 0.5, // al demoler se devuelve el 50 % del costo
+  refundRate: 0.5, // al demoler se devuelve el 50 % de lo invertido (construcción + mejoras)
+  builders: 2, // mejoras que pueden hacerse al mismo tiempo
 };
 
+// Cada edificio tiene una lista de niveles. El nivel 1 es el que se construye
+// con `cost`; los siguientes indican lo que cuesta y tarda mejorar HASTA ese nivel
+// (`upgradeCost`, `upgradeSec`). Las demás claves son las estadísticas del nivel.
 export const BUILDINGS = {
   mine: {
     name: 'Mina',
     short: 'M',
     cost: 50,
     color: 0xd4a017,
-    ratePerSec: 0.5, // oro por segundo
-    capacity: 120, // oro que puede acumular antes de recolectarse
+    levels: [
+      { ratePerSec: 0.5, capacity: 120 },
+      { ratePerSec: 0.9, capacity: 240, upgradeCost: 100, upgradeSec: 30 },
+      { ratePerSec: 1.5, capacity: 480, upgradeCost: 250, upgradeSec: 120 },
+    ],
   },
   storage: {
     name: 'Almacén',
     short: 'A',
     cost: 100,
     color: 0x8b5a2b,
-    capBonus: 500, // sube el máximo de oro
+    levels: [
+      { capBonus: 500 },
+      { capBonus: 1000, upgradeCost: 150, upgradeSec: 45 },
+      { capBonus: 2000, upgradeCost: 400, upgradeSec: 180 },
+    ],
   },
   tower: {
     name: 'Torre',
     short: 'T',
     cost: 150,
     color: 0x4a6fa5,
-    // La defensa se implementará en la fase de combate.
+    // Las estadísticas de defensa llegan en la fase de combate.
+    levels: [{}, { upgradeCost: 200, upgradeSec: 60 }, { upgradeCost: 500, upgradeSec: 240 }],
   },
 };

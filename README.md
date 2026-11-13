@@ -2,12 +2,13 @@
 
 Prototipo de juego de estrategia con construcción de base (un jugador), hecho como PWA con **Phaser 4 + Vite**. Inspirado en el género de Backyard Monsters / Clash of Clans; arte y nombres propios.
 
-## Qué hay hoy (fase 1)
+## Qué hay hoy (fases 1 y 2)
 - Mapa de 12×12 casillas. Elige un edificio abajo y toca una casilla para construir.
 - **Mina**: produce oro con el tiempo (hasta llenarse); tócala para recolectar.
 - **Almacén**: sube el máximo de oro. **Torre**: aún sin función (defensa en la fase de combate).
-- **Demoler**: devuelve el 50 % del costo.
-- La producción **sigue mientras no juegas** (máximo 8 h).
+- **Demoler**: devuelve el 50 % de lo invertido (construcción + mejoras).
+- **Mejoras (fase 2)**: toca un edificio para ver su panel y mejorarlo hasta el nivel 3. Cada mejora cuesta oro y **tarda tiempo real**; mientras se mejora, el edificio no produce. Hay 2 «obreros», es decir, 2 mejoras a la vez.
+- La producción y las mejoras **siguen mientras no juegas** (máximo 8 h de producción); al volver, el juego avisa qué terminó.
 - Guardado automático, exportar/importar partida y funcionamiento sin conexión.
 
 ## Uso
@@ -37,9 +38,9 @@ npm run preview    # sirve dist/ en http://localhost:4173
 ## Limitaciones conocidas
 - Abrir el juego en dos pestañas a la vez: la última en guardar gana.
 - Las pruebas de PWA se hicieron a mano (instalación, sin conexión); falta pasar **Lighthouse**.
-- Si cambia el formato del guardado, subir `SAVE_VERSION` y añadir el paso en `migrate()` de `save.js`.
+- Las mejoras usan la hora del sistema: adelantar el reloj las termina antes. El juego limita el daño (una mejora nunca puede quedar más lejos que su duración total), pero no puede impedirlo del todo; es aceptable sin ranking.
+- Si cambia el formato del guardado, subir `SAVE_VERSION` y añadir el paso en `migrate()` de `save.js` (la v1→v2 de la fase 2 es el ejemplo).
 
 ## Siguientes fases
-1. Mejoras de edificios con temporizador.
-2. Combate: unidades, torres que disparan, pathfinding (A*).
-3. Campaña con bases enemigas generadas.
+1. Combate: unidades, torres que disparan, pathfinding (A*).
+2. Campaña con bases enemigas generadas.

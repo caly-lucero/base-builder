@@ -6,6 +6,7 @@ let state = null;
 const changeListeners = new Set();
 let statusHandler = () => {};
 let saveFailedNotified = false;
+const pendingEvents = []; // mejoras terminadas, etc., que la escena aún no ha mostrado
 
 export const get = () => state;
 
@@ -22,7 +23,21 @@ function emit() {
   for (const fn of changeListeners) fn(state);
 }
 
-/** Carga la partida y aplica la producción de mientras estuviste fuera. */
+/**
+ * Avanza el tiempo de toda la partida (producción y mejoras en curso).
+ * Es el único sitio que lo hace, para que ningún evento se pierda.
+ * Devuelve el oro generado.
+ */
+export function tick(now = Date.now()) {
+  return tickAll(state, now, pendingEvents);
+}
+
+/** Entrega (y vacía) los eventos acumulados: [{ type:'upgraded', building, level, id }]. */
+export function drainEvents() {
+  return pendingEvents.splice(0);
+}
+
+/** Carga la partida y aplica lo ocurrido mientras estuviste fuera. */
 export function init(now = Date.now()) {
   const loaded = loadGame();
   state = loaded.state ?? createNewState(now);
@@ -32,7 +47,7 @@ export function init(now = Date.now()) {
     for (const b of state.buildings) b.lastTick = Math.min(b.lastTick, now);
   }
 
-  const gained = tickAll(state, now);
+  const gained = tick(now);
   if (loaded.warning) statusHandler(loaded.warning);
   return { source: loaded.source, gained, warning: loaded.warning };
 }
@@ -40,7 +55,7 @@ export function init(now = Date.now()) {
 /** Guarda sin avisar a la UI (autoguardado). */
 export function persist(now = Date.now()) {
   if (!state) return false;
-  tickAll(state, now);
+  tick(now);
   state.savedAt = now;
   const ok = saveGame(state, now);
   if (!ok && !saveFailedNotified) {
@@ -60,6 +75,7 @@ export function commit() {
 /** Sustituye toda la partida (importar o nueva partida). */
 export function replace(newState) {
   state = newState;
+  pendingEvents.length = 0;
   persist();
   emit();
 }

@@ -7,7 +7,7 @@
 import { BUILDINGS, ECONOMY, GRID } from '../data/config.js';
 import { MAX_BUILDINGS, isBuildingType } from './logic.js';
 
-export const SAVE_VERSION = 1;
+export const SAVE_VERSION = 2;
 export const MAX_SAVE_BYTES = 200_000;
 
 const KEY = 'basebuilder.save';
@@ -29,7 +29,7 @@ function fnv1a(text) {
   return (h >>> 0).toString(16).padStart(8, '0');
 }
 
-const checksum = (data) => fnv1a('bb1|' + JSON.stringify(data));
+export const checksum = (data) => fnv1a('bb1|' + JSON.stringify(data)); // exportado para las pruebas
 
 /* ---------- serializar / parsear ---------- */
 
@@ -64,10 +64,22 @@ export function parseSave(text) {
 /* ---------- migraciones ---------- */
 
 // Cuando cambie el formato: sube SAVE_VERSION y agrega aquí un paso por versión.
-// Ej.: if (version < 2) { data = { ...data, newField: 0 }; }
+// Los datos llegan sin validar: cada paso debe tolerar formas inesperadas
+// (la validación estricta se hace después, sobre el resultado final).
 function migrate(data, version) {
-  void version;
-  return data;
+  let d = data;
+
+  if (version < 2) {
+    // v1 → v2: los edificios no tenían nivel ni mejoras en curso.
+    d = {
+      ...d,
+      buildings: Array.isArray(d.buildings)
+        ? d.buildings.map((b) => (isPlainObject(b) ? { ...b, level: 1, upgradeEndsAt: null } : b))
+        : d.buildings,
+    };
+  }
+
+  return d;
 }
 
 /* ---------- validación estricta ---------- */
@@ -92,25 +104,44 @@ export function validateState(d) {
 
   const ids = new Set();
   const cells = new Set();
+  let upgrading = 0;
   const buildings = d.buildings.map((b) => {
     if (!isPlainObject(b)) bad('Edificio inválido');
     if (!isBuildingType(b.type)) bad('Tipo de edificio desconocido');
     if (!isInt(b.id, 1, 10_000_000) || b.id >= d.nextId) bad('Id de edificio inválido');
     if (!isInt(b.x, 0, GRID.cols - 1) || !isInt(b.y, 0, GRID.rows - 1)) bad('Posición inválida');
-    const capacity = BUILDINGS[b.type].capacity ?? 0;
+
+    const levels = BUILDINGS[b.type].levels;
+    if (!isInt(b.level, 1, levels.length)) bad('Nivel inválido');
+    const capacity = levels[b.level - 1].capacity ?? 0;
     if (!isNum(b.stored, 0, capacity)) bad('Producción inválida');
     if (!isNum(b.lastTick, 0, MAX_TIME)) bad('Fecha de edificio inválida');
+
+    if (b.upgradeEndsAt !== null) {
+      if (b.level >= levels.length) bad('Mejora imposible: ya es nivel máximo');
+      if (!isNum(b.upgradeEndsAt, 0, MAX_TIME)) bad('Fecha de mejora inválida');
+      if (++upgrading > ECONOMY.builders) bad('Más mejoras simultáneas de las permitidas');
+    }
 
     const cell = b.x + ',' + b.y;
     if (ids.has(b.id)) bad('Id repetido');
     if (cells.has(cell)) bad('Dos edificios en la misma casilla');
     ids.add(b.id);
     cells.add(cell);
-    return { id: b.id, type: b.type, x: b.x, y: b.y, stored: b.stored, lastTick: b.lastTick };
+    return {
+      id: b.id,
+      type: b.type,
+      level: b.level,
+      upgradeEndsAt: b.upgradeEndsAt,
+      x: b.x,
+      y: b.y,
+      stored: b.stored,
+      lastTick: b.lastTick,
+    };
   });
 
   let cap = ECONOMY.baseCap;
-  for (const b of buildings) cap += BUILDINGS[b.type].capBonus ?? 0;
+  for (const b of buildings) cap += BUILDINGS[b.type].levels[b.level - 1].capBonus ?? 0;
 
   return {
     gold: Math.min(d.gold, cap),
