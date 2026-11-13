@@ -1,0 +1,84 @@
+:root {
+  --bg: #1b2a1b;
+  --panel: #243624;
+  --text: #e8efe0;
+  --muted: #9fb39a;
+  --accent: #d4a017;
+  --danger: #b04a3a;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  overscroll-behavior: none;
+}
+
+main {
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom)
+    env(safe-area-inset-left);
+}
+
+#game {
+  flex: 1;
+  min-height: 0;
+}
+
+#game canvas {
+  touch-action: none;
+}
+
+footer {
+  padding: 8px 12px 12px;
+  background: var(--panel);
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
+}
+
+button {
+  font: inherit;
+  font-size: 0.85rem;
+  color: var(--text);
+  background: #324a32;
+  border: 1px solid #4a6a4a;
+  border-radius: 6px;
+  padding: 8px 12px;
+  min-height: 40px;
+  cursor: pointer;
+}
+
+button:hover {
+  background: #3d5a3d;
+}
+
+button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+button.danger {
+  border-color: var(--danger);
+}
+
+#status {
+  min-height: 1.3em;
+  margin: 8px 0 0;
+  text-align: center;
+  font-size: 0.8rem;
+  color: var(--muted);
+}

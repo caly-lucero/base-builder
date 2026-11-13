@@ -1,0 +1,17 @@
+{
+  "name": "Base Builder",
+  "short_name": "BaseBuilder",
+  "description": "Prototipo de juego de estrategia con construcción de base. Un jugador, funciona sin conexión.",
+  "lang": "es",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#1b2a1b",
+  "theme_color": "#1b2a1b",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
