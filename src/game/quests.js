@@ -1,7 +1,7 @@
 // Misiones: lógica pura. El progreso se calcula mirando la partida (no se guarda); solo se
 // guarda cuáles ya se reclamaron (state.claimedQuests).
 import { QUESTS, RESOURCES } from '../data/config.js';
-import { countOf, isUpgrading, resourceCap, townHallLevel } from './logic.js';
+import { armyCount, countOf, isUpgrading, resourceCap, townHallLevel } from './logic.js';
 
 export const questIds = () => QUESTS.map((q) => q.id);
 
@@ -20,6 +20,14 @@ export function questProgress(state, quest) {
   } else if (g.kind === 'townhall') {
     current = townHallLevel(state);
     target = g.level;
+  } else if (g.kind === 'army') {
+    current = armyCount(state);
+    target = g.min;
+  } else if (g.kind === 'unit') {
+    current = state.army[g.unit] ?? 0;
+    target = g.min;
+  } else if (g.kind === 'hero') {
+    current = state.hero ? 1 : 0;
   } else if (g.kind === 'anyLevel') {
     current = state.buildings.reduce((max, b) => (b.type === 'townhall' || isUpgrading(b) ? max : Math.max(max, b.level)), 0);
     target = g.level;

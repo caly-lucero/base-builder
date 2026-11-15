@@ -7,8 +7,9 @@ export const DECOR_SEED = 20261115;
 
 export const DECOR_KEYS = {
   tree: ['tree_a', 'tree_b', 'tree_c'],
-  rock: ['rock_a', 'rock_b', 'rock_c'],
+  rock: ['rock_a', 'rock_b', 'rock_c', 'rock_d', 'rock_e', 'rock_f'],
   bush: ['bush_a', 'bush_b'],
+  misc: ['stump', 'log'],
 };
 
 // Generador pseudoaleatorio determinista (mulberry32).
@@ -40,7 +41,7 @@ export function generateDecor(seed = DECOR_SEED) {
       const variant = rand();
       if (roll >= chance) continue;
 
-      const kind = pick < 0.55 ? 'tree' : pick < 0.85 ? 'rock' : 'bush';
+      const kind = pick < 0.5 ? 'tree' : pick < 0.75 ? 'rock' : pick < 0.9 ? 'bush' : 'misc';
       const keys = DECOR_KEYS[kind];
       items.push({ x, y, key: keys[Math.floor(variant * keys.length)] });
     }

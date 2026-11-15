@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { ECONOMY } from '../src/data/config.js';
-import { TOWN_HALL_CELL, createNewState, place, startUpgrade, townHall } from '../src/game/logic.js';
+import { TOWN_HALL_CELL, createNewState, place, startTraining, startUpgrade, townHall } from '../src/game/logic.js';
 import { MAX_SAVE_BYTES, SAVE_VERSION, checksum, parseSave, serialize } from '../src/game/save.js';
 
 const T0 = 1_700_000_000_000;
@@ -91,6 +91,30 @@ test('la validación rechaza datos con checksum correcto pero contenido imposibl
     'más mejoras que obreros': (s) => {
       for (const b of s.buildings) b.upgradeEndsAt = T0 + 1000; // 3 a la vez, con 2 obreros
     },
+    'ejército no es objeto': (s) => (s.army = 5),
+    'ejército sin un tipo': (s) => delete s.army.soldier,
+    'soldados negativos': (s) => (s.army.soldier = -1),
+    'soldados decimales': (s) => (s.army.soldier = 1.5),
+    'soldados como texto': (s) => (s.army.soldier = '3'),
+    'ejército imposible de sostener': (s) => (s.army.soldier = 999),
+    'héroe como texto': (s) => (s.hero = 'rey'),
+    'héroe sin nivel': (s) => (s.hero = {}),
+    'héroe con nivel absurdo': (s) => (s.hero = { level: 99 }),
+    'sin héroe (undefined)': (s) => delete s.hero,
+    'entrenamiento sin campo (undefined)': (s) => delete s.buildings[MINE].training,
+    'entrenamiento en un edificio que no entrena': (s) => (s.buildings[MINE].training = { unit: 'soldier', endsAt: T0 + 1000 }),
+    'entrenamiento de una unidad que no corresponde': (s) => {
+      s.buildings.push({ id: 7, type: 'barracks', level: 1, upgradeEndsAt: null, training: { unit: 'hero', endsAt: T0 + 1000 }, x: 9, y: 9, stored: 0, lastTick: T0 });
+      s.nextId = 8;
+    },
+    'entrenamiento con fecha inválida': (s) => {
+      s.buildings.push({ id: 7, type: 'barracks', level: 1, upgradeEndsAt: null, training: { unit: 'soldier', endsAt: 'x' }, x: 9, y: 9, stored: 0, lastTick: T0 });
+      s.nextId = 8;
+    },
+    'mejora y entrenamiento a la vez': (s) => {
+      s.buildings.push({ id: 7, type: 'barracks', level: 1, upgradeEndsAt: T0 + 1000, training: { unit: 'soldier', endsAt: T0 + 1000 }, x: 9, y: 9, stored: 0, lastTick: T0 });
+      s.nextId = 8;
+    },
     'misiones no es lista': (s) => (s.claimedQuests = 'q_sawmill'),
     'misión desconocida': (s) => (s.claimedQuests = ['no_existe']),
     'misión repetida': (s) => (s.claimedQuests = ['q_sawmill', 'q_sawmill']),
@@ -99,7 +123,7 @@ test('la validación rechaza datos con checksum correcto pero contenido imposibl
     'más misiones de las que existen': (s) => (s.claimedQuests = Array.from({ length: 99 }, (_, i) => `q${i}`)),
     'sin Ayuntamiento': (s) => s.buildings.splice(HALL, 1),
     'dos Ayuntamientos': (s) => {
-      s.buildings.push({ id: 9, type: 'townhall', level: 1, upgradeEndsAt: null, x: 20, y: 20, stored: 0, lastTick: T0 });
+      s.buildings.push({ id: 9, type: 'townhall', level: 1, upgradeEndsAt: null, training: null, x: 20, y: 20, stored: 0, lastTick: T0 });
       s.nextId = 10;
     },
   };
@@ -130,6 +154,24 @@ test('una mejora en curso se guarda y se recupera igual', () => {
   assert.equal(r.ok, true);
   assert.deepEqual(r.state, s);
   assert.equal(r.state.buildings[MINE].upgradeEndsAt, s.buildings[MINE].upgradeEndsAt);
+});
+
+test('el ejército, el héroe y un entrenamiento en curso se guardan y se recuperan', () => {
+  const s = sampleState();
+  s.gold = 450; // dentro del tope de 500 y suficiente para lo que sigue
+  s.wood = 300;
+  const barracks = place(s, 'barracks', 9, 9, T0).building;
+  place(s, 'farm', 10, 9, T0);
+  s.army = { soldier: 3, mage: 1, knight: 0 };
+  s.hero = { level: 2 };
+  assert.equal(startTraining(s, barracks.id, 'soldier', T0).ok, true);
+
+  const r = parseSave(serialize(s));
+  assert.equal(r.ok, true);
+  assert.deepEqual(r.state, s);
+  assert.deepEqual(r.state.army, { soldier: 3, mage: 1, knight: 0 });
+  assert.deepEqual(r.state.hero, { level: 2 });
+  assert.deepEqual(r.state.buildings.find((b) => b.type === 'barracks').training, { unit: 'soldier', endsAt: T0 + 15_000 });
 });
 
 test('las misiones reclamadas se guardan y se recuperan', () => {
@@ -239,6 +281,24 @@ test('migración v3 → v4: una partida con Ayuntamiento y madera sigue igual y 
   assert.equal(r.state.wood, 120, 'no se toca la madera que ya tenía');
   assert.equal(r.state.buildings.length, 3);
   assert.equal(townHall(r.state).level, 2);
+});
+
+test('migración v4 → v5: una partida con misiones sigue igual y sin ejército, héroe ni entrenamientos', () => {
+  const data = {
+    gold: 300,
+    wood: 120,
+    nextId: 4,
+    savedAt: T0,
+    claimedQuests: ['q_sawmill'],
+    buildings: [b2(1, 'townhall', 11, 11, 2), b2(2, 'mine', 8, 8, 1), b2(3, 'wall', 9, 9)],
+  };
+  const r = parseSave(JSON.stringify({ v: 4, sum: checksum(data), data }));
+  assert.equal(r.ok, true);
+  assert.deepEqual(r.state.army, { soldier: 0, mage: 0, knight: 0 });
+  assert.equal(r.state.hero, null);
+  assert.ok(r.state.buildings.every((b) => b.training === null));
+  assert.deepEqual(r.state.claimedQuests, ['q_sawmill'], 'conserva las misiones');
+  assert.equal(r.state.wood, 120);
 });
 
 test('la migración no abre una partida antigua modificada, ni una con forma rara', () => {

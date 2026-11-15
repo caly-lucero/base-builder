@@ -1,8 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { BUILDINGS, ECONOMY } from '../src/data/config.js';
+import { BUILDINGS, ECONOMY, UNITS } from '../src/data/config.js';
 import {
   TOWN_HALL_CELL,
+  armyCount,
   busyBuilders,
   buildingAt,
   collect,
@@ -20,9 +21,13 @@ import {
   place,
   placementError,
   resourceCap,
+  startTraining,
   startUpgrade,
+  supplyCap,
+  supplyUsed,
   tickAll,
   townHall,
+  trainableUnits,
 } from '../src/game/logic.js';
 
 const T0 = 1_700_000_000_000;
@@ -366,6 +371,154 @@ test('mover valida casilla ocupada, fuera del mapa, misma casilla y existencia',
 test('el Ayuntamiento se puede mover', () => {
   const s = fresh();
   assert.equal(moveBuilding(s, townHall(s).id, 3, 3).ok, true);
+});
+
+/* ---------- población y entrenamiento ---------- */
+
+const FARM = BUILDINGS.farm.levels;
+const TH1_SUPPLY = TH[0].baseSupply;
+
+test('la población máxima suma la del Ayuntamiento y la de cada granja', () => {
+  const s = fresh(5000, 5000, 1);
+  assert.equal(supplyCap(s), TH1_SUPPLY);
+  const farm = place(s, 'farm', 0, 0, T0).building;
+  assert.equal(supplyCap(s), TH1_SUPPLY + FARM[0].supply);
+  farm.level = 2;
+  assert.equal(supplyCap(s), TH1_SUPPLY + FARM[1].supply);
+  townHall(s).level = 2;
+  assert.equal(supplyCap(s), TH[1].baseSupply + FARM[1].supply);
+});
+
+test('entrenar cobra, reserva población y la unidad llega al terminar', () => {
+  const s = fresh(1000, 1000, 1);
+  const barracks = place(s, 'barracks', 0, 0, T0).building;
+  const gold = s.gold;
+  const wood = s.wood;
+
+  const r = startTraining(s, barracks.id, 'soldier', T0);
+  assert.equal(r.ok, true);
+  assert.equal(s.gold, gold - UNITS.soldier.cost.gold);
+  assert.equal(s.wood, wood - UNITS.soldier.cost.wood);
+  assert.equal(supplyUsed(s), UNITS.soldier.supply, 'la población se reserva desde el inicio');
+  assert.equal(s.army.soldier, 0, 'todavía no existe');
+
+  const events = [];
+  tickAll(s, T0 + UNITS.soldier.trainSec * 1000 - 1000, events);
+  assert.equal(s.army.soldier, 0);
+  tickAll(s, T0 + UNITS.soldier.trainSec * 1000, events);
+  assert.equal(s.army.soldier, 1);
+  assert.equal(barracks.training, null);
+  assert.deepEqual(events, [{ type: 'trained', id: barracks.id, unit: 'soldier' }]);
+  assert.equal(supplyUsed(s), UNITS.soldier.supply, 'ahora cuenta como ejército, no se cobra dos veces');
+  assert.equal(armyCount(s), 1);
+});
+
+test('un cuartel entrena de a uno: no acepta otra orden hasta terminar', () => {
+  const s = fresh(1000, 1000, 1);
+  const b = place(s, 'barracks', 0, 0, T0).building;
+  assert.equal(startTraining(s, b.id, 'soldier', T0).ok, true);
+  assert.equal(startTraining(s, b.id, 'soldier', T0).reason, 'Ya está entrenando');
+  tickAll(s, T0 + 60_000);
+  assert.equal(startTraining(s, b.id, 'soldier', T0 + 60_000).ok, true);
+});
+
+test('el entrenamiento sigue mientras no juegas', () => {
+  const s = fresh(1000, 1000, 1);
+  const b = place(s, 'barracks', 0, 0, T0).building;
+  startTraining(s, b.id, 'soldier', T0);
+  tickAll(s, T0 + 3 * 60 * 60 * 1000); // 3 horas después
+  assert.equal(s.army.soldier, 1);
+});
+
+test('las unidades avanzadas piden nivel de cuartel', () => {
+  const s = fresh(5000, 5000, 3);
+  const b = place(s, 'barracks', 0, 0, T0).building;
+  assert.deepEqual(trainableUnits(b), ['soldier']);
+  assert.match(startTraining(s, b.id, 'mage', T0).reason, /Cuartel nivel 2/);
+  assert.match(startTraining(s, b.id, 'knight', T0).reason, /Cuartel nivel 3/);
+  b.level = 3;
+  assert.deepEqual(trainableUnits(b), ['soldier', 'mage', 'knight']);
+  assert.equal(startTraining(s, b.id, 'knight', T0).ok, true);
+});
+
+test('sin población libre no se entrena, y una granja la libera', () => {
+  const s = fresh(5000, 5000, 1);
+  const b = place(s, 'barracks', 0, 0, T0).building;
+  s.army.soldier = TH1_SUPPLY; // población llena
+  assert.equal(startTraining(s, b.id, 'soldier', T0).reason, 'Población al máximo: construye granjas');
+  place(s, 'farm', 1, 0, T0);
+  assert.equal(startTraining(s, b.id, 'soldier', T0).ok, true);
+});
+
+test('faltan recursos: el mensaje dice cuál', () => {
+  const s = fresh(1000, 1000, 1);
+  const b = place(s, 'barracks', 0, 0, T0).building;
+  s.gold = 5;
+  assert.equal(startTraining(s, b.id, 'soldier', T0).reason, 'Oro insuficiente');
+  s.gold = 1000;
+  s.wood = 1;
+  assert.equal(startTraining(s, b.id, 'soldier', T0).reason, 'Madera insuficiente');
+});
+
+test('el altar solo se construye con el Ayuntamiento en nivel 2 y solo invoca un héroe', () => {
+  const s = fresh(5000, 5000, 1);
+  assert.match(place(s, 'altar', 0, 0, T0).reason, /Aún no puedes construir Altar/);
+  townHall(s).level = 2;
+  const altar = place(s, 'altar', 0, 0, T0).building;
+  assert.equal(startTraining(s, altar.id, 'hero', T0).ok, true);
+  assert.equal(supplyUsed(s), UNITS.hero.supply);
+  tickAll(s, T0 + UNITS.hero.trainSec * 1000);
+  assert.deepEqual(s.hero, { level: 1 });
+  assert.equal(startTraining(s, altar.id, 'hero', T0 + 100_000).reason, 'Ya tienes un héroe');
+  assert.equal(armyCount(s), 0, 'el héroe no cuenta como ejército');
+});
+
+test('el cuartel no entrena héroes y el altar no entrena soldados', () => {
+  const s = fresh(5000, 5000, 2);
+  const barracks = place(s, 'barracks', 0, 0, T0).building;
+  const altar = place(s, 'altar', 1, 0, T0).building;
+  assert.equal(startTraining(s, barracks.id, 'hero', T0).reason, 'Este edificio no entrena eso');
+  assert.equal(startTraining(s, altar.id, 'soldier', T0).reason, 'Este edificio no entrena eso');
+  assert.equal(startTraining(s, townHall(s).id, 'soldier', T0).reason, 'Este edificio no entrena eso');
+  assert.equal(startTraining(s, 999, 'soldier', T0).reason, 'No existe ese edificio');
+});
+
+test('mientras entrena no se mejora ni se demuele; mientras mejora no se entrena', () => {
+  const s = fresh(5000, 5000, 3);
+  const b = place(s, 'barracks', 0, 0, T0).building;
+  startTraining(s, b.id, 'soldier', T0);
+  assert.equal(startUpgrade(s, b.id, T0).reason, 'Espera a que termine el entrenamiento');
+  assert.equal(demolish(s, b.id).reason, 'Espera a que termine el entrenamiento');
+  tickAll(s, T0 + 60_000);
+
+  assert.equal(startUpgrade(s, b.id, T0 + 60_000).ok, true);
+  assert.equal(startTraining(s, b.id, 'soldier', T0 + 60_000).reason, 'El edificio está en obras');
+});
+
+test('no se demuele una granja que sostiene al ejército, y sí cuando sobra población', () => {
+  const s = fresh(5000, 5000, 1);
+  const farm = place(s, 'farm', 0, 0, T0).building;
+  s.army.soldier = TH1_SUPPLY + 1; // solo cabe gracias a la granja
+  assert.equal(demolish(s, farm.id).reason, 'Hay demasiadas unidades para demoler esta granja');
+  s.army.soldier = 2;
+  assert.equal(demolish(s, farm.id).ok, true);
+});
+
+test('un guardado manipulado no puede dejar un entrenamiento más lejos que su duración', () => {
+  const s = fresh(1000, 1000, 1);
+  const b = place(s, 'barracks', 0, 0, T0).building;
+  startTraining(s, b.id, 'soldier', T0);
+  b.training.endsAt = T0 + 1e12;
+  tickAll(s, T0 + 5_000);
+  assert.equal(b.training.endsAt, T0 + 5_000 + UNITS.soldier.trainSec * 1000);
+});
+
+test('un entrenamiento con una unidad desconocida se descarta sin romper nada', () => {
+  const s = fresh();
+  const b = place(s, 'barracks', 0, 0, T0).building;
+  b.training = { unit: 'dragon', endsAt: T0 + 1000 };
+  tickAll(s, T0 + 5_000);
+  assert.equal(b.training, null);
 });
 
 /* ---------- utilidades ---------- */

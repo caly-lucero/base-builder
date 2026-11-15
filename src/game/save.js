@@ -4,10 +4,19 @@
 // Nota de seguridad: el checksum NO impide hacer trampa (el código está en el
 // navegador y cualquiera puede recalcularlo). Solo detecta archivos dañados o
 // editados a mano sin querer. En un juego de un jugador está bien así.
-import { BUILDINGS, ECONOMY, GRID, QUESTS } from '../data/config.js';
-import { MAX_BUILDINGS, TOWN_HALL_CELL, createBuilding, findFreeCell, isBuildingType } from './logic.js';
+import { ARMY_UNITS, BUILDINGS, ECONOMY, GRID, QUESTS } from '../data/config.js';
+import {
+  MAX_BUILDINGS,
+  TOWN_HALL_CELL,
+  createBuilding,
+  emptyArmy,
+  findFreeCell,
+  isBuildingType,
+  supplyCap,
+  supplyUsed,
+} from './logic.js';
 
-export const SAVE_VERSION = 4;
+export const SAVE_VERSION = 5;
 export const MAX_SAVE_BYTES = 200_000;
 
 const KEY = 'basebuilder.save';
@@ -84,6 +93,16 @@ function migrate(data, version) {
   // v3 → v4: aparecieron las misiones. Una base ya avanzada las tendrá cumplidas y podrá reclamarlas.
   if (version < 4) d = { ...d, claimedQuests: [] };
 
+  // v4 → v5: aparecieron el ejército, el héroe y el entrenamiento en los edificios.
+  if (version < 5) {
+    d = {
+      ...d,
+      army: emptyArmy(),
+      hero: null,
+      buildings: Array.isArray(d.buildings) ? d.buildings.map((b) => (isPlainObject(b) ? { ...b, training: null } : b)) : d.buildings,
+    };
+  }
+
   return d;
 }
 
@@ -157,6 +176,15 @@ export function validateState(d) {
   });
   if (new Set(claimedQuests).size !== claimedQuests.length) bad('Misión repetida');
 
+  if (!isPlainObject(d.army)) bad('Ejército inválido');
+  const army = {};
+  for (const u of ARMY_UNITS) {
+    if (!isInt(d.army[u], 0, 999)) bad('Ejército inválido');
+    army[u] = d.army[u];
+  }
+  if (d.hero !== null && !(isPlainObject(d.hero) && isInt(d.hero.level, 1, 10))) bad('Héroe inválido');
+  const hero = d.hero === null ? null : { level: d.hero.level };
+
   const ids = new Set();
   const cells = new Set();
   let upgrading = 0;
@@ -179,6 +207,16 @@ export function validateState(d) {
       if (++upgrading > ECONOMY.builders) bad('Más mejoras simultáneas de las permitidas');
     }
 
+    let training = null;
+    if (b.training !== null) {
+      if (!isPlainObject(b.training)) bad('Entrenamiento inválido');
+      const trains = BUILDINGS[b.type].trains ?? [];
+      if (typeof b.training.unit !== 'string' || !trains.includes(b.training.unit)) bad('Unidad de entrenamiento inválida');
+      if (!isNum(b.training.endsAt, 0, MAX_TIME)) bad('Fecha de entrenamiento inválida');
+      if (b.upgradeEndsAt !== null) bad('No puede mejorar y entrenar a la vez');
+      training = { unit: b.training.unit, endsAt: b.training.endsAt };
+    }
+
     if (b.type === 'townhall') townHalls++;
 
     const cell = b.x + ',' + b.y;
@@ -191,6 +229,7 @@ export function validateState(d) {
       type: b.type,
       level: b.level,
       upgradeEndsAt: b.upgradeEndsAt,
+      training,
       x: b.x,
       y: b.y,
       stored: b.stored,
@@ -203,14 +242,19 @@ export function validateState(d) {
   let cap = ECONOMY.baseCap;
   for (const b of buildings) cap += BUILDINGS[b.type].levels[b.level - 1].capBonus ?? 0;
 
-  return {
+  const state = {
     gold: Math.min(d.gold, cap),
     wood: Math.min(d.wood, cap),
     nextId: d.nextId,
     savedAt: d.savedAt,
     claimedQuests,
+    army,
+    hero,
     buildings,
   };
+  // Un guardado no puede traer más unidades de las que sostiene la población.
+  if (supplyUsed(state) > supplyCap(state)) bad('El ejército excede la población disponible');
+  return state;
 }
 
 /* ---------- localStorage ---------- */

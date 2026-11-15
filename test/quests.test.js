@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { QUESTS } from '../src/data/config.js';
+import { BUILDINGS, QUESTS, UNITS } from '../src/data/config.js';
 import { createNewState, place, startUpgrade, tickAll, townHall, resourceCap } from '../src/game/logic.js';
 import { claimQuest, currentQuest, questById, questCounts, questIds, questProgress } from '../src/game/quests.js';
 
@@ -18,7 +18,9 @@ test('los datos de las misiones son coherentes: ids únicos, objetivos y recompe
   assert.equal(new Set(questIds()).size, QUESTS.length, 'ids únicos');
   for (const q of QUESTS) {
     assert.ok(q.text && q.id, `misión sin texto o id: ${q.id}`);
-    assert.ok(['count', 'townhall', 'anyLevel'].includes(q.goal.kind), `${q.id}: objetivo desconocido`);
+    assert.ok(['count', 'townhall', 'anyLevel', 'army', 'unit', 'hero'].includes(q.goal.kind), `${q.id}: objetivo desconocido`);
+    if (q.goal.kind === 'count') assert.ok(Object.hasOwn(BUILDINGS, q.goal.building), `${q.id}: edificio desconocido`);
+    if (q.goal.kind === 'unit') assert.ok(Object.hasOwn(UNITS, q.goal.unit), `${q.id}: unidad desconocida`);
     assert.ok(Object.keys(q.reward).length > 0, `${q.id}: sin recompensa`);
     for (const [res, n] of Object.entries(q.reward)) {
       assert.ok(['gold', 'wood'].includes(res) && Number.isInteger(n) && n > 0, `${q.id}: recompensa inválida`);
@@ -66,6 +68,30 @@ test('«mejora un edificio al nivel 2» ignora al Ayuntamiento y a lo que aún e
   assert.equal(questProgress(s, q).done, true);
 });
 
+test('las misiones de ejército y héroe siguen lo entrenado', () => {
+  const s = fresh();
+  const soldiers = questById('q_soldiers');
+  const army8 = questById('q_army8');
+  const hero = questById('q_hero');
+  assert.deepEqual(questProgress(s, soldiers), { current: 0, target: 3, done: false });
+  s.army.soldier = 2;
+  assert.deepEqual(questProgress(s, soldiers), { current: 2, target: 3, done: false });
+  s.army.soldier = 5; // más de los pedidos: se muestra 3/3
+  assert.deepEqual(questProgress(s, soldiers), { current: 3, target: 3, done: true });
+
+  s.army = { soldier: 3, mage: 3, knight: 2 };
+  assert.equal(questProgress(s, army8).done, true);
+  assert.equal(questProgress(s, hero).done, false);
+  s.hero = { level: 1 };
+  assert.equal(questProgress(s, hero).done, true);
+});
+
+test('el héroe no cuenta como unidad de ejército', () => {
+  const s = fresh();
+  s.hero = { level: 1 };
+  assert.equal(questProgress(s, questById('q_army8')).current, 0);
+});
+
 test('no se reclama una misión sin cumplir ni una que no es la actual', () => {
   const s = fresh();
   assert.equal(claimQuest(s, QUESTS[0].id).reason, 'Aún no cumpliste la misión');
@@ -106,8 +132,14 @@ test('se pueden reclamar varias misiones seguidas si ya estaban cumplidas, y al 
     { id: 120, type: 'sawmill', level: 1, upgradeEndsAt: null, x: 0, y: 1, stored: 0, lastTick: T0 },
     { id: 121, type: 'storage', level: 3, upgradeEndsAt: null, x: 1, y: 1, stored: 0, lastTick: T0 },
     { id: 122, type: 'tower', level: 1, upgradeEndsAt: null, x: 2, y: 1, stored: 0, lastTick: T0 },
+    { id: 123, type: 'farm', level: 1, upgradeEndsAt: null, x: 3, y: 1, stored: 0, lastTick: T0 },
+    { id: 124, type: 'barracks', level: 1, upgradeEndsAt: null, x: 4, y: 1, stored: 0, lastTick: T0 },
+    { id: 125, type: 'altar', level: 1, upgradeEndsAt: null, x: 5, y: 1, stored: 0, lastTick: T0 },
+    { id: 126, type: 'gate', level: 1, upgradeEndsAt: null, x: 6, y: 1, stored: 0, lastTick: T0 },
     ...Array.from({ length: 20 }, (_, i) => ({ id: 200 + i, type: 'wall', level: 1, upgradeEndsAt: null, x: i, y: 2, stored: 0, lastTick: T0 })),
   );
+  s.army = { soldier: 4, mage: 3, knight: 2 };
+  s.hero = { level: 1 };
   let claimed = 0;
   while (currentQuest(s)) {
     const r = claimQuest(s, currentQuest(s).id);

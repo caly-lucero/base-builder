@@ -55,17 +55,24 @@ export const BUILDINGS = {
     buildable: false, // lo trae la partida; no se construye ni se demuele
     cost: {},
     levelNames: ['Ayuntamiento', 'Fortaleza', 'Castillo'],
+    // `baseSupply`: población que da el propio Ayuntamiento (las granjas suman más).
     levels: [
-      { sprite: 'townhall_1', limits: { mine: 3, sawmill: 2, storage: 1, tower: 2, wall: 20 } },
+      {
+        sprite: 'townhall_1',
+        baseSupply: 5,
+        limits: { mine: 3, sawmill: 2, farm: 2, storage: 1, barracks: 1, altar: 0, tower: 2, wall: 20, gate: 4 },
+      },
       {
         sprite: 'townhall_2',
-        limits: { mine: 5, sawmill: 3, storage: 2, tower: 4, wall: 50 },
+        baseSupply: 10,
+        limits: { mine: 5, sawmill: 3, farm: 4, storage: 2, barracks: 2, altar: 1, tower: 4, wall: 50, gate: 10 },
         upgradeCost: { gold: 300, wood: 150 },
         upgradeSec: 90,
       },
       {
         sprite: 'townhall_3',
-        limits: { mine: 8, sawmill: 5, storage: 3, tower: 6, wall: 100 },
+        baseSupply: 15,
+        limits: { mine: 8, sawmill: 5, farm: 6, storage: 3, barracks: 3, altar: 1, tower: 6, wall: 100, gate: 20 },
         upgradeCost: { gold: 800, wood: 400 },
         upgradeSec: 300,
       },
@@ -119,25 +126,90 @@ export const BUILDINGS = {
       { sprite: 'wall_3', upgradeCost: { wood: 50 }, upgradeSec: 20 },
     ],
   },
+  gate: {
+    name: 'Puerta',
+    cost: { wood: 30 },
+    // Como un muro con paso: en el combate dejará pasar a las unidades propias.
+    levels: [
+      { sprite: 'gate_1' },
+      { sprite: 'gate_2', upgradeCost: { wood: 60 }, upgradeSec: 15 },
+      { sprite: 'gate_3', upgradeCost: { wood: 120 }, upgradeSec: 30 },
+    ],
+  },
+  farm: {
+    name: 'Granja',
+    cost: { gold: 60, wood: 20 },
+    // `supply`: población que suma. Sin población libre no se pueden entrenar más unidades.
+    levels: [
+      { sprite: 'farm_1', supply: 6 },
+      { sprite: 'farm_2', supply: 10, upgradeCost: { gold: 90, wood: 40 }, upgradeSec: 30 },
+      { sprite: 'farm_3', supply: 16, upgradeCost: { gold: 200, wood: 80 }, upgradeSec: 120 },
+    ],
+  },
+  barracks: {
+    name: 'Cuartel',
+    cost: { gold: 120, wood: 60 },
+    trains: ['soldier', 'mage', 'knight'], // cada unidad pide un nivel mínimo del cuartel (ver UNITS)
+    levels: [
+      { sprite: 'barracks_1' },
+      { sprite: 'barracks_2', upgradeCost: { gold: 180, wood: 90 }, upgradeSec: 60 },
+      { sprite: 'barracks_3', upgradeCost: { gold: 400, wood: 200 }, upgradeSec: 180 },
+    ],
+  },
+  altar: {
+    name: 'Altar del héroe',
+    shortName: 'Altar',
+    cost: { gold: 200, wood: 100 },
+    trains: ['hero'],
+    levels: [{ sprite: 'altar_1' }],
+  },
 };
+
+// Unidades que se entrenan. `minLevel` es el nivel que debe tener el edificio que la entrena.
+// Cada unidad ocupa `supply` de población desde que empieza a entrenarse.
+export const UNITS = {
+  soldier: { name: 'Soldado', sprite: 'unit_soldier', cost: { gold: 40, wood: 10 }, supply: 1, trainSec: 15, minLevel: 1 },
+  mage: { name: 'Hechicero', sprite: 'unit_mage', cost: { gold: 70, wood: 30 }, supply: 1, trainSec: 25, minLevel: 2 },
+  knight: { name: 'Caballero', sprite: 'unit_knight', cost: { gold: 120, wood: 60 }, supply: 2, trainSec: 40, minLevel: 3 },
+  hero: { name: 'Héroe', sprite: 'unit_hero', cost: { gold: 300, wood: 150 }, supply: 3, trainSec: 60, minLevel: 1, hero: true },
+};
+
+/** Unidades del ejército (el héroe va aparte: solo puede haber uno). */
+export const ARMY_UNITS = Object.keys(UNITS).filter((u) => !UNITS[u].hero);
+
+// La barra de herramientas se reparte en páginas para que quepan los botones.
+export const TOOL_PAGES = [
+  { name: 'Economía', tools: ['mine', 'sawmill', 'farm', 'storage', 'wall'] },
+  { name: 'Militar', tools: ['barracks', 'altar', 'tower', 'gate'] },
+];
 
 // Misiones: una cadena que guía al jugador (se hacen en orden). Cada una tiene un objetivo
 // que se evalúa mirando la partida y una recompensa que se reclama al cumplirla.
 //   { kind: 'count', building, min }   tener al menos `min` edificios de ese tipo
 //   { kind: 'townhall', level }        Ayuntamiento al menos en ese nivel
 //   { kind: 'anyLevel', level }        algún edificio (que no sea el Ayuntamiento) al menos en ese nivel
+//   { kind: 'army', min }              al menos `min` unidades de ejército (sin contar al héroe)
+//   { kind: 'unit', unit, min }        al menos `min` unidades de ese tipo
+//   { kind: 'hero' }                   haber invocado al héroe
 export const QUESTS = [
   { id: 'q_sawmill', text: 'Construye un Aserradero', goal: { kind: 'count', building: 'sawmill', min: 1 }, reward: { wood: 40 } },
   { id: 'q_mines', text: 'Ten 2 Minas de oro', goal: { kind: 'count', building: 'mine', min: 2 }, reward: { gold: 60 } },
   { id: 'q_storage', text: 'Construye un Almacén', goal: { kind: 'count', building: 'storage', min: 1 }, reward: { gold: 80, wood: 20 } },
+  { id: 'q_farm', text: 'Construye una Granja', goal: { kind: 'count', building: 'farm', min: 1 }, reward: { gold: 80 } },
   { id: 'q_walls', text: 'Levanta 5 Muros', goal: { kind: 'count', building: 'wall', min: 5 }, reward: { wood: 40 } },
+  { id: 'q_barracks', text: 'Construye un Cuartel', goal: { kind: 'count', building: 'barracks', min: 1 }, reward: { gold: 100, wood: 50 } },
+  { id: 'q_soldiers', text: 'Entrena 3 Soldados', goal: { kind: 'unit', unit: 'soldier', min: 3 }, reward: { gold: 120 } },
   { id: 'q_tower', text: 'Construye una Torre', goal: { kind: 'count', building: 'tower', min: 1 }, reward: { gold: 100 } },
   { id: 'q_hall2', text: 'Sube el Ayuntamiento a Fortaleza', goal: { kind: 'townhall', level: 2 }, reward: { gold: 200, wood: 100 } },
+  { id: 'q_altar', text: 'Construye un Altar del héroe', goal: { kind: 'count', building: 'altar', min: 1 }, reward: { gold: 150 } },
+  { id: 'q_hero', text: 'Invoca a tu Héroe', goal: { kind: 'hero' }, reward: { gold: 300, wood: 150 } },
   { id: 'q_upgrade', text: 'Mejora un edificio al nivel 2', goal: { kind: 'anyLevel', level: 2 }, reward: { gold: 120 } },
+  { id: 'q_army8', text: 'Reúne un ejército de 8 unidades', goal: { kind: 'army', min: 8 }, reward: { gold: 250, wood: 100 } },
   { id: 'q_mines4', text: 'Ten 4 Minas de oro', goal: { kind: 'count', building: 'mine', min: 4 }, reward: { gold: 200 } },
+  { id: 'q_gate', text: 'Construye una Puerta', goal: { kind: 'count', building: 'gate', min: 1 }, reward: { wood: 60 } },
   { id: 'q_walls20', text: 'Levanta 20 Muros', goal: { kind: 'count', building: 'wall', min: 20 }, reward: { wood: 120 } },
   { id: 'q_hall3', text: 'Sube el Ayuntamiento a Castillo', goal: { kind: 'townhall', level: 3 }, reward: { gold: 500, wood: 300 } },
 ];
 
 /** Edificios que el jugador puede construir, en el orden de la barra de herramientas. */
-export const BUILDABLE = Object.keys(BUILDINGS).filter((k) => BUILDINGS[k].buildable !== false);
+export const BUILDABLE = TOOL_PAGES.flatMap((p) => p.tools);

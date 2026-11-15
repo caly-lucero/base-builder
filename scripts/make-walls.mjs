@@ -137,8 +137,54 @@ function castleWall() {
   return c;
 }
 
+/* ---- puertas: el mismo muro con una abertura en el centro ---- */
+function door(c, x, w, top, line) {
+  c.box(x, top, w, 52 - top, 0x5a3a22, line, 1.4); // hueco oscuro
+  c.rect(x + w / 2 - 0.5, top + 2, 1, 52 - top - 4, 0x7a5232); // juntura de las dos hojas
+}
+
+function woodGate() {
+  const c = new Canvas();
+  const line = 0x7a4a22;
+  const fill = 0xc88a4a;
+  c.post(9, 18, 9, 51, fill, line); // jambas altas
+  c.post(46, 18, 9, 51, fill, line);
+  c.box(8, 17, 48, 6, 0xa3693a, line, 1.2); // dintel
+  door(c, 20, 24, 27, line);
+  return c;
+}
+
+function stoneGate() {
+  const c = new Canvas();
+  const line = 0x6f7a7e;
+  const fill = 0xb4bbbd;
+  for (const x of [8, 27, 46]) c.box(x, 17, 10, 11, fill, line);
+  c.box(8, 25, 48, 27, fill, line);
+  door(c, 22, 20, 33, line);
+  return c;
+}
+
+function castleGate() {
+  const c = new Canvas();
+  const line = 0x5f6a6f;
+  const fill = 0xc9ced0;
+  const redLine = 0x9c3f2a;
+  const red = 0xd9674b;
+  for (const x of [6, 26, 46]) {
+    c.box(x, 12, 12, 14, fill, line);
+    c.box(x - 0.5, 9, 13, 5, red, redLine, 1.2);
+  }
+  c.box(6, 24, 52, 29, fill, line);
+  c.box(6, 22, 52, 6, red, redLine, 1.2);
+  door(c, 22, 20, 33, line);
+  return c;
+}
+
 mkdirSync('public/assets/art', { recursive: true });
-for (const [name, make] of [['wall_1', palisade], ['wall_2', stoneWall], ['wall_3', castleWall]]) {
+for (const [name, make] of [
+  ['wall_1', palisade], ['wall_2', stoneWall], ['wall_3', castleWall],
+  ['gate_1', woodGate], ['gate_2', stoneGate], ['gate_3', castleGate],
+]) {
   writeFileSync(`public/assets/art/${name}.png`, encodePng(SIZE, SIZE, make().toRgba()));
   console.log(`public/assets/art/${name}.png`);
 }

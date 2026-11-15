@@ -1,6 +1,6 @@
 // Lógica pura del juego: no toca el DOM, Phaser ni localStorage.
 // Todas las funciones reciben el estado y el tiempo (`now`) para poder probarlas.
-import { BUILDINGS, ECONOMY, GRID, RESOURCES, RESOURCE_NAMES } from '../data/config.js';
+import { ARMY_UNITS, BUILDINGS, ECONOMY, GRID, RESOURCES, RESOURCE_NAMES, UNITS } from '../data/config.js';
 
 export const MAX_BUILDINGS = GRID.cols * GRID.rows;
 
@@ -8,8 +8,11 @@ export const MAX_BUILDINGS = GRID.cols * GRID.rows;
 export const TOWN_HALL_CELL = { x: Math.floor(GRID.cols / 2) - 1, y: Math.floor(GRID.rows / 2) - 1 };
 
 export function createBuilding(id, type, x, y, now, level = 1) {
-  return { id, type, level, upgradeEndsAt: null, x, y, stored: 0, lastTick: now };
+  return { id, type, level, upgradeEndsAt: null, training: null, x, y, stored: 0, lastTick: now };
 }
+
+/** Ejército vacío: { soldier: 0, mage: 0, knight: 0 }. */
+export const emptyArmy = () => Object.fromEntries(ARMY_UNITS.map((u) => [u, 0]));
 
 export function createNewState(now = Date.now()) {
   return {
@@ -18,6 +21,8 @@ export function createNewState(now = Date.now()) {
     nextId: 2,
     buildings: [createBuilding(1, 'townhall', TOWN_HALL_CELL.x, TOWN_HALL_CELL.y, now)],
     claimedQuests: [], // ids de las misiones ya reclamadas (ver quests.js)
+    army: emptyArmy(), // unidades entrenadas, por tipo
+    hero: null, // null o { level }: solo puede haber un héroe
     savedAt: now,
   };
 }
@@ -97,9 +102,35 @@ export function nextLevelOf(b) {
 }
 
 export const isUpgrading = (b) => b.upgradeEndsAt !== null;
+export const isTraining = (b) => Boolean(b.training);
 
 export function busyBuilders(state) {
   return state.buildings.filter(isUpgrading).length;
+}
+
+/* ---------- población y ejército ---------- */
+
+/** Población máxima: la del Ayuntamiento más la de cada granja. */
+export function supplyCap(state) {
+  let cap = statsOf('townhall', townHallLevel(state)).baseSupply ?? 0;
+  for (const b of state.buildings) cap += statsOf(b.type, b.level).supply ?? 0;
+  return cap;
+}
+
+/** Población usada: el ejército, el héroe y lo que está entrenándose (se reserva al empezar). */
+export function supplyUsed(state) {
+  let used = 0;
+  for (const u of ARMY_UNITS) used += (state.army[u] ?? 0) * UNITS[u].supply;
+  if (state.hero) used += UNITS.hero.supply;
+  for (const b of state.buildings) if (b.training) used += UNITS[b.training.unit].supply;
+  return used;
+}
+
+export const armyCount = (state) => ARMY_UNITS.reduce((n, u) => n + (state.army[u] ?? 0), 0);
+
+/** Unidades que este edificio puede entrenar ahora (según su nivel). */
+export function trainableUnits(b) {
+  return (BUILDINGS[b.type].trains ?? []).filter((u) => b.level >= UNITS[u].minLevel);
 }
 
 /** Lo invertido en un edificio, por recurso: construcción más todas las mejoras ya terminadas. */
@@ -188,6 +219,25 @@ export function tickBuilding(b, now, events) {
   return b.stored - before;
 }
 
+/** Termina el entrenamiento de un edificio si le toca: suma la unidad (o crea al héroe). */
+function tickTraining(state, b, now, events) {
+  if (!b.training) return;
+  const unit = UNITS[b.training.unit];
+  if (!unit) {
+    b.training = null; // unidad desconocida: se descarta
+    return;
+  }
+  // Igual que las mejoras: nunca queda más lejos que la duración completa.
+  b.training.endsAt = Math.min(b.training.endsAt, now + unit.trainSec * 1000);
+  if (now < b.training.endsAt) return;
+
+  const key = b.training.unit;
+  b.training = null;
+  if (unit.hero) state.hero = { level: 1 };
+  else state.army[key] = (state.army[key] ?? 0) + 1;
+  events?.push({ type: 'trained', id: b.id, unit: key });
+}
+
 /** Avanza el tiempo de todos los edificios. Devuelve lo generado: { gold, wood }. */
 export function tickAll(state, now, events) {
   const gained = { gold: 0, wood: 0 };
@@ -195,6 +245,7 @@ export function tickAll(state, now, events) {
     const amount = tickBuilding(b, now, events);
     const resource = statsOf(b.type, b.level).produces;
     if (amount && resource) gained[resource] += amount;
+    tickTraining(state, b, now, events);
   }
   return gained;
 }
@@ -233,6 +284,7 @@ export function startUpgrade(state, id, now) {
   const b = state.buildings.find((x) => x.id === id);
   if (!b) return fail('No existe ese edificio');
   if (isUpgrading(b)) return fail('Ya se está mejorando');
+  if (isTraining(b)) return fail('Espera a que termine el entrenamiento');
   const next = nextLevelOf(b);
   if (!next) return fail('Ya está al nivel máximo');
   if (b.type !== 'townhall' && b.level >= townHallLevel(state)) return fail('Mejora antes el Ayuntamiento');
@@ -246,12 +298,42 @@ export function startUpgrade(state, id, now) {
   return { ok: true, endsAt: b.upgradeEndsAt };
 }
 
+/**
+ * Empieza a entrenar una unidad en un edificio (cuartel o altar). Se paga y se reserva la
+ * población al empezar; la unidad llega cuando termina el tiempo (también sin conexión).
+ */
+export function startTraining(state, id, unitKey, now) {
+  const b = state.buildings.find((x) => x.id === id);
+  if (!b) return fail('No existe ese edificio');
+  const def = BUILDINGS[b.type];
+  if (!def.trains?.includes(unitKey)) return fail('Este edificio no entrena eso');
+  const unit = UNITS[unitKey];
+  if (isUpgrading(b)) return fail('El edificio está en obras');
+  if (isTraining(b)) return fail('Ya está entrenando');
+  if (b.level < unit.minLevel) return fail(`Pide ${def.name} nivel ${unit.minLevel}`);
+  if (unit.hero && (state.hero || state.buildings.some((x) => x.training?.unit === unitKey))) return fail('Ya tienes un héroe');
+  if (supplyUsed(state) + unit.supply > supplyCap(state)) return fail('Población al máximo: construye granjas');
+  const missing = missingResource(state, unit.cost);
+  if (missing) return fail(insufficient(missing));
+
+  spend(state, unit.cost);
+  b.training = { unit: unitKey, endsAt: now + unit.trainSec * 1000 };
+  return { ok: true, endsAt: b.training.endsAt };
+}
+
 export function demolish(state, id) {
   const index = state.buildings.findIndex((b) => b.id === id);
   if (index === -1) return fail('No existe ese edificio');
   const b = state.buildings[index];
   if (b.type === 'townhall') return fail('El Ayuntamiento no se puede demoler');
   if (isUpgrading(b)) return fail('Espera a que termine la mejora');
+  if (isTraining(b)) return fail('Espera a que termine el entrenamiento');
+
+  // Una granja que sostiene a las unidades actuales no se puede demoler.
+  const supplyBonus = statsOf(b.type, b.level).supply ?? 0;
+  if (supplyBonus > 0 && supplyUsed(state) > supplyCap(state) - supplyBonus) {
+    return fail('Hay demasiadas unidades para demoler esta granja');
+  }
 
   // Solo un almacén cambia el tope: si lo que hay no cabría sin él, no se puede demoler.
   const bonus = statsOf(b.type, b.level).capBonus ?? 0;

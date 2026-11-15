@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 import { ASSET_BASE, IMAGES, SOUNDS } from '../data/assets.js';
-import { ART_SIZE, BUILDABLE, BUILDINGS, CAMERA, ECONOMY, GRID, LAYOUT } from '../data/config.js';
+import { ART_SIZE, ARMY_UNITS, BUILDINGS, CAMERA, ECONOMY, GRID, LAYOUT, TOOL_PAGES, UNITS } from '../data/config.js';
 import { generateDecor } from '../game/decor.js';
 import * as logic from '../game/logic.js';
 import * as prefs from '../game/prefs.js';
@@ -24,7 +24,6 @@ import { contentBounds } from '../game/sprites.js';
 import * as store from '../game/store.js';
 import { createWorker, plannedWorkers, stepWorker, workerPosition } from '../game/workers.js';
 
-const TOOLS = [...BUILDABLE, 'demolish'];
 const FONT = 'system-ui, "Segoe UI", Roboto, sans-serif';
 
 // Capas de dibujado (mayor = más arriba). Lo del HUD va por encima del mundo para tapar
@@ -60,6 +59,7 @@ function describe(stats) {
   if (stats.produces === 'gold') return `Produce ${stats.ratePerSec} oro/s · guarda ${stats.capacity}`;
   if (stats.produces === 'wood') return `Produce ${stats.ratePerSec} madera/s · guarda ${stats.capacity}`;
   if (stats.capBonus) return `+${stats.capBonus} de tope de oro y de madera`;
+  if (stats.supply) return `+${stats.supply} de población`;
   return null;
 }
 
@@ -83,6 +83,11 @@ export default class BaseScene extends Phaser.Scene {
     this.firstBuild = true; // la primera vez los edificios ya existían: no hacen «pop»
     this.questInit = false; // para no avisar de misiones que ya venían cumplidas
     this.notifiedQuest = null;
+    this.army = []; // unidades dibujadas (ver syncArmy)
+    this.armySignature = null;
+    this.heroView = null;
+    this.camp = null;
+    this.shrine = null;
   }
 
   preload() {
@@ -106,6 +111,7 @@ export default class BaseScene extends Phaser.Scene {
     this.createPanel();
     this.createZoomButtons();
     this.createQuestBanner();
+    this.createTrainStrip();
 
     this.ghost = this.add.image(0, 0, iconKey('mine')).setAlpha(0.7).setVisible(false).setDepth(DEPTH.ghost);
     this.selector = this.add
@@ -262,30 +268,47 @@ export default class BaseScene extends Phaser.Scene {
     );
   }
 
+  /**
+   * Barra de herramientas con 7 casillas: hasta 5 edificios de la página actual, «Demoler» y el
+   * botón que cambia de página (Economía / Militar). Cada herramienta tiene su casilla fija, así que
+   * cambiar de página solo muestra u oculta botones.
+   */
   createToolbar() {
-    const w = LAYOUT.width / TOOLS.length;
-    const top = LAYOUT.barTop;
-    const cy = top + LAYOUT.barHeight / 2;
+    const slots = 7;
+    const w = LAYOUT.width / slots;
+    const cy = LAYOUT.barTop + LAYOUT.barHeight / 2;
     this.ui(this.add.rectangle(LAYOUT.width / 2, cy, LAYOUT.width, LAYOUT.barHeight, COLORS.hud));
+    this.toolPage = 0;
 
-    TOOLS.forEach((tool, i) => {
-      const def = BUILDINGS[tool];
-      const cx = i * w + w / 2;
+    const makeButton = (slot, tool, page) => {
+      const def = BUILDINGS[tool]; // undefined para «demolish»
+      const cx = slot * w + w / 2;
+      const parts = [];
+      const add = (obj) => {
+        parts.push(obj);
+        return obj;
+      };
 
-      const rect = this.ui(
-        this.add
-          .rectangle(cx, cy, w - 6, LAYOUT.barHeight - 14, COLORS.button)
-          .setStrokeStyle(2, 0x4a6a4a)
-          .setInteractive({ useHandCursor: true }),
-        DEPTH.ui + 1,
+      const rect = add(
+        this.ui(
+          this.add
+            .rectangle(cx, cy, w - 6, LAYOUT.barHeight - 14, COLORS.button)
+            .setStrokeStyle(2, 0x4a6a4a)
+            .setInteractive({ useHandCursor: true }),
+          DEPTH.ui + 1,
+        ),
       );
 
-      if (def) this.ui(this.fitIcon(this.add.image(0, 0, iconKey(tool)), iconKey(tool), cx, cy - 24, 32), DEPTH.ui + 2);
-      else this.ui(this.add.text(cx, cy - 24, '✕', { fontFamily: FONT, fontSize: '24px', color: '#ff9a8a' }).setOrigin(0.5), DEPTH.ui + 2);
+      if (def) add(this.ui(this.fitIcon(this.add.image(0, 0, iconKey(tool)), iconKey(tool), cx, cy - 30, 28), DEPTH.ui + 2));
+      else add(this.ui(this.add.text(cx, cy - 30, '✕', { fontFamily: FONT, fontSize: '22px', color: '#ff9a8a' }).setOrigin(0.5), DEPTH.ui + 2));
 
-      const label = this.ui(
-        this.add.text(cx, cy + 2, '', { fontFamily: FONT, fontSize: '13px', color: TEXT.normal }).setOrigin(0.5),
-        DEPTH.ui + 2,
+      const label = add(
+        this.ui(
+          this.add
+            .text(cx, cy - 6, def ? (def.shortName ?? def.name) : 'Demoler', { fontFamily: FONT, fontSize: '11px', color: TEXT.normal, align: 'center', lineSpacing: 2 })
+            .setOrigin(0.5),
+          DEPTH.ui + 2,
+        ),
       );
 
       // Costos: un ícono + número por cada recurso que cueste.
@@ -293,24 +316,55 @@ export default class BaseScene extends Phaser.Scene {
       if (def) {
         const items = ['gold', 'wood'].filter((r) => (def.cost[r] ?? 0) > 0);
         items.forEach((res, k) => {
-          const x = items.length === 1 ? cx : cx + (k === 0 ? -24 : 24);
-          const icon = res === 'gold' ? [this.goldIcon(x - 13, cy + 22, 5)] : this.woodIcon(x - 13, cy + 22, 11);
-          const text = this.ui(
-            this.add.text(x - 6, cy + 22, String(def.cost[res]), { fontFamily: FONT, fontSize: '12px', color: TEXT[res] }).setOrigin(0, 0.5),
-            DEPTH.ui + 2,
+          const x = items.length === 1 ? cx : cx + (k === 0 ? -20 : 20);
+          const icon = [].concat(res === 'gold' ? this.goldIcon(x - 12, cy + 25, 5) : this.woodIcon(x - 12, cy + 25, 11));
+          const text = add(
+            this.ui(this.add.text(x - 5, cy + 25, String(def.cost[res]), { fontFamily: FONT, fontSize: '11px', color: TEXT[res] }).setOrigin(0, 0.5), DEPTH.ui + 2),
           );
-          costs.push({ res, text, icon });
+          icon.forEach(add);
+          costs.push({ res, text });
         });
       } else {
-        this.ui(this.add.text(cx, cy + 22, '50 % devuelto', { fontFamily: FONT, fontSize: '11px', color: TEXT.gold }).setOrigin(0.5), DEPTH.ui + 2);
+        add(this.ui(this.add.text(cx, cy + 25, '50 % devuelto', { fontFamily: FONT, fontSize: '9px', color: TEXT.gold }).setOrigin(0.5), DEPTH.ui + 2));
       }
 
       rect.on('pointerdown', () => {
         this.play('select');
         this.selectTool(this.tool === tool ? null : tool);
       });
-      this.toolButtons.set(tool, { rect, label, costs, def });
+      this.toolButtons.set(tool, { rect, label, costs, def, parts, page });
+    };
+
+    TOOL_PAGES.forEach((p, pageIndex) => p.tools.forEach((tool, slot) => makeButton(slot, tool, pageIndex)));
+    makeButton(5, 'demolish', null);
+
+    // Botón para cambiar de página.
+    const cx = 6 * w + w / 2;
+    const pageRect = this.ui(
+      this.add.rectangle(cx, cy, w - 6, LAYOUT.barHeight - 14, 0x2a3f5a).setStrokeStyle(2, 0x5a82ad).setInteractive({ useHandCursor: true }),
+      DEPTH.ui + 1,
+    );
+    this.pageLabel = this.ui(
+      this.add.text(cx, cy, '', { fontFamily: FONT, fontSize: '12px', color: '#cfe3ff', align: 'center', lineSpacing: 4 }).setOrigin(0.5),
+      DEPTH.ui + 2,
+    );
+    pageRect.on('pointerdown', () => {
+      this.play('select');
+      this.setToolPage((this.toolPage + 1) % TOOL_PAGES.length);
     });
+    this.setToolPage(0);
+  }
+
+  /** Muestra los botones de una página de la barra (y quita la herramienta si queda oculta). */
+  setToolPage(page) {
+    this.toolPage = page;
+    for (const [tool, b] of this.toolButtons) {
+      const visible = b.page === null || b.page === page;
+      for (const p of b.parts) p.setVisible(visible);
+      if (!visible && this.tool === tool) this.selectTool(null);
+    }
+    const next = TOOL_PAGES[(page + 1) % TOOL_PAGES.length];
+    this.pageLabel.setText(`${next.name}\n▶`);
   }
 
   /** Panel de un edificio seleccionado: ocupa el lugar de la barra de herramientas. */
@@ -455,6 +509,73 @@ export default class BaseScene extends Phaser.Scene {
     );
   }
 
+  /* ---------- entrenar unidades ---------- */
+
+  /** Tarjetas para entrenar: aparecen sobre el mapa cuando se elige un cuartel o el altar. */
+  createTrainStrip() {
+    const cardW = 182;
+    const cardH = 64;
+    const y = LAYOUT.barTop - cardH - 10;
+    const d = DEPTH.panel - 5;
+    this.trainCards = [0, 1, 2].map((i) => {
+      const left = 8 + i * (cardW + 6);
+      const cx = left + cardW / 2;
+      const cy = y + cardH / 2;
+      const rect = this.add
+        .rectangle(cx, cy, cardW, cardH, 0x1a2a1a, 0.94)
+        .setStrokeStyle(2, 0x8cc4f5)
+        .setInteractive({ useHandCursor: true })
+        .setDepth(d);
+      const icon = this.add.image(0, 0, 'unit_soldier').setDepth(d + 1);
+      const text = (dy, size, color, bold) =>
+        this.add.text(left + 54, y + dy, '', { fontFamily: FONT, fontSize: size, color, fontStyle: bold ? 'bold' : 'normal' }).setDepth(d + 1);
+      const name = text(8, '13px', '#ffffff', true);
+      const cost = text(27, '11px', TEXT.gold, false);
+      const info = text(44, '11px', '#9fc8ef', false);
+      const card = { rect, icon, name, cost, info, unit: null, ix: left + 28, iy: cy, parts: [rect, icon, name, cost, info] };
+      rect.on('pointerdown', () => this.onTrainClick(card.unit));
+      for (const p of card.parts) p.setVisible(false);
+      return card;
+    });
+  }
+
+  /** Muestra las unidades que entrena el edificio elegido (o esconde las tarjetas si no entrena). */
+  updateTrainStrip(b) {
+    const state = store.get();
+    const units = b ? (BUILDINGS[b.type].trains ?? []) : [];
+    this.trainCards.forEach((card, i) => {
+      const key = units[i];
+      card.unit = key ?? null;
+      for (const p of card.parts) p.setVisible(Boolean(key));
+      if (!key) return;
+
+      const u = UNITS[key];
+      const locked = b.level < u.minLevel;
+      const busy = logic.isTraining(b) || logic.isUpgrading(b);
+      const heroTaken = u.hero && (state.hero || state.buildings.some((x) => x.training?.unit === key));
+      const affordable = logic.canAfford(state, u.cost) && logic.supplyUsed(state) + u.supply <= logic.supplyCap(state);
+      const usable = !locked && !busy && !heroTaken && affordable;
+
+      this.fitIcon(card.icon, u.sprite, card.ix, card.iy, 38);
+      card.name.setText(u.hero && heroTaken ? `${u.name} (invocado)` : u.name);
+      card.cost.setText(locked ? `Requiere nivel ${u.minLevel}` : logic.formatCost(u.cost));
+      card.info.setText(`${logic.formatDuration(u.trainSec * 1000)} · Población ${u.supply}`);
+      for (const p of card.parts) p.setAlpha(usable ? 1 : 0.5);
+      card.rect.setStrokeStyle(2, usable ? 0x8cc4f5 : 0x4a6a4a);
+    });
+  }
+
+  onTrainClick(unit) {
+    const id = this.selectedId;
+    if (id === null || !unit) return;
+    this.doAction(
+      () => logic.startTraining(store.get(), id, unit, Date.now()),
+      (r) => `Entrenando ${UNITS[unit].name}: ${logic.formatDuration(r.endsAt - Date.now())}`,
+      'upgrade_start',
+    );
+    this.updatePanel();
+  }
+
   /* ---------- efectos ---------- */
 
   /** Texto que sube y se desvanece (por ejemplo «+44» al recolectar). */
@@ -542,6 +663,80 @@ export default class BaseScene extends Phaser.Scene {
     }
   }
 
+  /* ---------- ejército y héroe ---------- */
+
+  /**
+   * El ejército se ve formado cerca del primer cuartel (o del Ayuntamiento si no hay), y el héroe
+   * junto al altar. Es solo la representación de `state.army` y `state.hero`.
+   */
+  syncArmy() {
+    const state = store.get();
+    const first = (type) => state.buildings.filter((b) => b.type === type).sort((a, b) => a.id - b.id)[0];
+    const camp = first('barracks') ?? logic.townHall(state);
+    const shrine = first('altar') ?? camp;
+    this.camp = camp ? { x: camp.x, y: camp.y } : null;
+    this.shrine = shrine ? { x: shrine.x, y: shrine.y } : null;
+
+    // Se muestran como mucho 24 unidades para no saturar la pantalla.
+    const want = [];
+    for (const u of ARMY_UNITS) for (let i = 0; i < (state.army[u] ?? 0) && want.length < 24; i++) want.push(u);
+    const signature = want.join(',');
+    if (signature !== this.armySignature) {
+      this.armySignature = signature;
+      for (const a of this.army ?? []) a.img.destroy();
+      this.army = want.map((type, slot) => ({ type, slot, img: this.add.image(0, 0, UNITS[type].sprite).setVisible(false) }));
+    }
+
+    if (state.hero && !this.heroView) {
+      this.heroView = {
+        img: this.add.image(0, 0, UNITS.hero.sprite).setVisible(false),
+        label: this.add
+          .text(0, 0, '', { fontFamily: FONT, fontSize: '10px', color: '#ffe9a0', fontStyle: 'bold', stroke: '#000000', strokeThickness: 3 })
+          .setOrigin(0.5)
+          .setVisible(false),
+      };
+    } else if (!state.hero && this.heroView) {
+      this.heroView.img.destroy();
+      this.heroView.label.destroy();
+      this.heroView = null;
+    }
+    if (this.heroView) this.heroView.label.setText(`Héroe nv. ${state.hero.level}`);
+  }
+
+  /** Coloca (cada cuadro) al ejército en formación y al héroe, con un leve balanceo. */
+  animateArmy(timeMs) {
+    const zoom = view.zoom;
+    if (this.camp) {
+      for (const a of this.army ?? []) {
+        const col = a.slot % 4;
+        const row = Math.floor(a.slot / 4);
+        const x = this.camp.x + 1.1 + col * 0.42;
+        const y = this.camp.y + 0.55 + row * 0.36;
+        if (!isTileVisible(Math.round(x), Math.round(y))) {
+          a.img.setVisible(false);
+          continue;
+        }
+        const sway = Math.sin(timeMs / 700 + a.slot * 1.7) * 1.2 * zoom;
+        this.placeOnTile(a.img, UNITS[a.type].sprite, x, y, WORKER_GROW).setDepth(DEPTH.world + y + 0.55).setVisible(true);
+        a.img.x += sway;
+      }
+    }
+    const h = this.heroView;
+    if (h && this.shrine) {
+      const x = this.shrine.x + 0.55;
+      const y = this.shrine.y + 1.25;
+      const visible = isTileVisible(Math.round(x), Math.round(y));
+      h.img.setVisible(visible);
+      h.label.setVisible(visible);
+      if (visible) {
+        this.placeOnTile(h.img, UNITS.hero.sprite, x, y, WORKER_GROW * 1.35).setDepth(DEPTH.world + y + 0.6);
+        h.img.y -= Math.abs(Math.sin(timeMs / 600)) * 2 * zoom;
+        const headroom = contentBounds(this.textures, UNITS.hero.sprite).h * spriteScale() * WORKER_GROW * 1.35;
+        h.label.setPosition(h.img.x, h.img.y - headroom - 6 * zoom).setScale(zoom).setDepth(h.img.depth + 0.01);
+      }
+    }
+  }
+
   /* ---------- selección ---------- */
 
   selectTool(tool) {
@@ -566,6 +761,8 @@ export default class BaseScene extends Phaser.Scene {
     if (b) {
       this.selectTool(null);
       this.updatePanel();
+    } else {
+      this.updateTrainStrip(null); // sin edificio elegido, fuera las tarjetas de entrenar
     }
     this.viewDirty = true;
   }
@@ -578,19 +775,27 @@ export default class BaseScene extends Phaser.Scene {
 
     if (b.type === 'townhall') {
       const lim = (type, label) => `${label} ${logic.countOf(state, type)}/${logic.limitFor(state, type)}`;
-      lines.push(`${lim('mine', 'Minas')} · ${lim('sawmill', 'Aserraderos')} · ${lim('storage', 'Almacenes')}`);
-      lines.push(`${lim('tower', 'Torres')} · ${lim('wall', 'Muros')}`);
-      lines.push(next ? `Nivel ${b.level + 1} (${logic.displayName('townhall', b.level + 1)}): más edificios y mejoras` : 'Nivel máximo');
+      lines.push(`${lim('mine', 'Minas')} · ${lim('sawmill', 'Aserraderos')} · ${lim('farm', 'Granjas')}`);
+      lines.push(`${lim('storage', 'Almacenes')} · ${lim('barracks', 'Cuarteles')} · ${lim('altar', 'Altar')}`);
+      lines.push(`${lim('tower', 'Torres')} · ${lim('wall', 'Muros')} · ${lim('gate', 'Puertas')}`);
       return lines;
     }
 
-    const own = describe(stats);
-    if (own) lines.push(own);
-    else lines.push(b.type === 'wall' ? 'Bloquea el paso (en el combate frenará al enemigo)' : 'Defensa: se activa en la fase de combate');
+    const own = {
+      barracks: `Entrena: ${logic.trainableUnits(b).map((u) => UNITS[u].name).join(', ')}`,
+      altar: state.hero ? `Héroe invocado · nivel ${state.hero.level}` : 'Invoca a tu héroe (solo puede haber uno)',
+      wall: 'Bloquea el paso (en el combate frenará al enemigo)',
+      gate: 'Paso para tus unidades (en el combate)',
+      tower: 'Defensa: se activa en la fase de combate',
+    }[b.type];
+    lines.push(own ?? describe(stats) ?? '');
 
     if (!next) lines.push('Nivel máximo');
     else if (b.level >= logic.townHallLevel(state)) lines.push(`Para el nivel ${b.level + 1}, sube antes el Ayuntamiento`);
-    else lines.push(`Nivel ${b.level + 1}: ${describe(next) ?? 'más resistencia'}`);
+    else if (b.type === 'barracks') {
+      const unlocks = (BUILDINGS.barracks.trains ?? []).filter((u) => UNITS[u].minLevel === b.level + 1).map((u) => UNITS[u].name);
+      lines.push(`Nivel ${b.level + 1}: desbloquea ${unlocks.join(', ') || 'más resistencia'}`);
+    } else lines.push(`Nivel ${b.level + 1}: ${describe(next) ?? 'más resistencia'}`);
     return lines;
   }
 
@@ -606,7 +811,9 @@ export default class BaseScene extends Phaser.Scene {
     this.panel.hint.setVisible(true);
 
     this.fitIcon(icon, spriteOf(b), 40, cy - 4, 52);
-    title.setText(`${logic.displayName(b.type, b.level)} · Nivel ${b.level}/${logic.maxLevel(b.type)}`);
+    const arrow = b.type === 'townhall' && next ? ` → ${logic.displayName('townhall', b.level + 1)}` : '';
+    title.setText(`${logic.displayName(b.type, b.level)} · Nivel ${b.level}/${logic.maxLevel(b.type)}${arrow}`);
+    this.updateTrainStrip(b);
 
     const hideButton = () => {
       upgradeBtn.setVisible(false);
@@ -615,6 +822,12 @@ export default class BaseScene extends Phaser.Scene {
 
     if (logic.isUpgrading(b)) {
       detail.setText(`Mejorando al nivel ${b.level + 1}…\nTermina en ${logic.formatDuration(b.upgradeEndsAt - Date.now())}`);
+      hideButton();
+      return;
+    }
+    if (logic.isTraining(b)) {
+      const unit = UNITS[b.training.unit];
+      detail.setText(`Entrenando ${unit.name}…\nTermina en ${logic.formatDuration(b.training.endsAt - Date.now())}`);
       hideButton();
       return;
     }
@@ -902,6 +1115,9 @@ export default class BaseScene extends Phaser.Scene {
       if (e.type === 'upgraded') {
         out.push(`${logic.displayName(e.building, e.level)}: ¡mejora completada! Nivel ${e.level}`);
         finished = true;
+      } else if (e.type === 'trained') {
+        out.push(e.unit === 'hero' ? '¡Tu héroe ha llegado!' : `${UNITS[e.unit].name} listo para el combate`);
+        finished = true;
       }
     }
     if (finished) this.play('upgrade_done');
@@ -961,6 +1177,7 @@ export default class BaseScene extends Phaser.Scene {
     this.updateHud();
     this.updateQuestBanner();
     this.syncWorkers();
+    this.syncArmy();
     if (this.selectedId !== null) this.updatePanel();
     this.renderWorld();
   }
@@ -970,14 +1187,18 @@ export default class BaseScene extends Phaser.Scene {
     const cap = logic.resourceCap(state);
     this.goldText.setText(`${state.gold}/${cap}`);
     this.woodText.setText(`${state.wood}/${cap}`);
-    this.buildersText.setText(`Obreros ${logic.busyBuilders(state)}/${ECONOMY.builders} · Ayuntamiento nivel ${logic.townHallLevel(state)}`);
+    const used = logic.supplyUsed(state);
+    const supply = logic.supplyCap(state);
+    this.buildersText
+      .setText(`Obreros ${logic.busyBuilders(state)}/${ECONOMY.builders} · Población ${used}/${supply} · Ayuntamiento ${logic.townHallLevel(state)}`)
+      .setColor(used >= supply ? TEXT.bad : '#9fc8ef');
 
     for (const [tool, b] of this.toolButtons) {
       if (!b.def) continue;
       const count = logic.countOf(state, tool);
       const limit = logic.limitFor(state, tool);
       const full = count >= limit;
-      b.label.setText(`${b.def.shortName ?? b.def.name} ${count}/${limit}`).setColor(full ? TEXT.bad : TEXT.normal);
+      b.label.setText(`${b.def.shortName ?? b.def.name}\n${count}/${limit}`).setColor(full ? TEXT.bad : TEXT.normal);
       for (const c of b.costs) c.text.setColor(state[c.res] < (b.def.cost[c.res] ?? 0) ? TEXT.bad : TEXT[c.res]);
       b.rect.setAlpha(full ? 0.6 : 1);
     }
@@ -1058,6 +1279,11 @@ export default class BaseScene extends Phaser.Scene {
         const remaining = Math.max(0, b.upgradeEndsAt - Date.now());
         v.bar.fillStyle(COLORS.progress, 1).fillRect(bx, by, bw * (1 - remaining / total), bh);
         v.sub.setText(logic.formatDuration(remaining));
+      } else if (logic.isTraining(b)) {
+        const total = UNITS[b.training.unit].trainSec * 1000;
+        const remaining = Math.max(0, b.training.endsAt - Date.now());
+        v.bar.fillStyle(0xffb86b, 1).fillRect(bx, by, bw * (1 - remaining / total), bh);
+        v.sub.setText(logic.formatDuration(remaining));
       } else if (stats.capacity) {
         const ratio = b.stored / stats.capacity;
         v.bar.fillStyle(ratio >= 1 ? 0x55cc55 : 0xfff2b0, 1).fillRect(bx, by, bw * ratio, bh);
@@ -1114,6 +1340,7 @@ export default class BaseScene extends Phaser.Scene {
     }
 
     this.animateWorkers(Math.min(delta, 250) / 1000, this.time.now);
+    this.animateArmy(this.time.now);
 
     if (this.pop.size) this.viewDirty = true; // hay animaciones de construcción en curso
     if (this.viewDirty) {
