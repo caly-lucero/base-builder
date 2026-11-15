@@ -2,6 +2,11 @@
 
 Prototipo de juego de estrategia con construcción de base (un jugador), hecho como PWA con **Phaser 4 + Vite**. Referencias de diseño: **Backyard Monsters** y Clash of Clans (la base y el ataque) y **Warcraft III** (dos recursos, el Ayuntamiento que sube de nivel y manda sobre lo que se puede construir). Nombres propios y arte de terceros con licencia libre (ver *Créditos*).
 
+## Jugar online
+**https://caly-lucero.github.io/base-builder/** — funciona en el navegador y se puede **instalar como app** (en Android: menú del navegador → «Instalar app» / «Añadir a la pantalla de inicio») y jugar sin conexión.
+
+Cada vez que se sube algo a la rama `main`, GitHub corre las pruebas, compila y publica solo (ver `.github/workflows/deploy.yml`); si una prueba falla, no se publica. La partida se guarda **en el navegador de cada dispositivo**: la versión online y la de `localhost` tienen partidas separadas (se pueden pasar con *Exportar/Importar partida*).
+
 ## Qué hay hoy
 - **Mapa de 24×24** que se ve por una ventana: se desplaza y se hace zoom (ver *Controles*).
 - **Dos recursos, como en Warcraft III: oro y madera.** La **Mina de oro** produce oro y el **Aserradero** madera; tócalos para recolectar. Casi todo cuesta oro y madera.
