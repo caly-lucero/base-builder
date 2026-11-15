@@ -63,6 +63,7 @@ export default class BattleScene extends Phaser.Scene {
     this.cursors = this.input.keyboard?.createCursorKeys();
     this.wasd = this.input.keyboard?.addKeys('W,A,S,D');
 
+    store.holdRaids(true); // mientras tú atacas, nadie te ataca
     const state = store.get();
     this.mission = generateMission(this.level);
     this.battle = createBattle(this.mission, state.army, state.hero);

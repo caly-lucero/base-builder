@@ -7,7 +7,8 @@
 //  - ÓRDENES: el jugador puede darle a un grupo un objetivo concreto (atacar un edificio o enemigo)
 //    o un punto al que ir. Al cumplirlo, el grupo vuelve al modo automático.
 //  - Los muros se rodean si se puede; si el camino pasa por un muro, la unidad lo ataca para abrirse paso.
-import { ARMY_UNITS, COMBAT, ENEMY_BUILDINGS, ENEMY_UNITS, GRID, HERO_PER_LEVEL, UNITS } from '../data/config.js';
+import { ARMY_UNITS, COMBAT, DEFENSE, ENEMY_BUILDINGS, ENEMY_UNITS, GRID, HERO_PER_LEVEL, RAID, UNITS } from '../data/config.js';
+import { townHallLevel } from './logic.js';
 import { findPath } from './pathfinding.js';
 
 const BUILDING_RADIUS = 0.5;
@@ -29,6 +30,7 @@ export function heroCombat(level) {
  */
 export function createBattle(mission, army, hero) {
   const b = {
+    mode: 'attack',
     level: mission.level,
     time: 0,
     acc: 0,
@@ -94,6 +96,90 @@ function addUnit(b, side, kind, x, y, s) {
   return u;
 }
 
+/* ---------- defensa de tu base (ataque enemigo) ---------- */
+
+/** Vida de uno de tus edificios en una defensa: crece con el nivel; si ya está dañado entra a medias. */
+export function defenseHp(type, level, damaged = false) {
+  const base = DEFENSE.baseHp[type] ?? 120;
+  return Math.round(base * (1 + DEFENSE.hpPerLevel * (level - 1)) * (damaged ? DEFENSE.damagedHpFactor : 1));
+}
+
+/**
+ * Prepara la defensa de tu base contra una oleada (ver raids.js). Tus edificios son los defensores
+ * (las torres disparan, salvo las dañadas) junto con tu ejército y tu héroe, formados donde se ven en
+ * la base. Los atacantes son los enemigos de la oleada. Termina cuando el enemigo se retira tras
+ * destruir demasiado, tumba tu Ayuntamiento, es derrotado o se acaba el tiempo.
+ * `state` es la partida; no se modifica (el resultado se aplica con raids.js).
+ */
+export function createRaidBattle(state, raid) {
+  const b = {
+    mode: 'raid', level: raid.level, time: 0, acc: 0, over: false, result: null, nextId: 1,
+    units: [], buildings: [], byId: new Map(), events: [], loot: { gold: 0, wood: 0 },
+    destroyed: 0, kills: 0, hallId: null, countedBuildings: 0, destroyedIds: [],
+    maxDestroyed: RAID.maxDamaged(townHallLevel(state)),
+  };
+
+  for (const src of state.buildings) {
+    const hp = defenseHp(src.type, src.level, src.damaged);
+    const e = {
+      id: b.nextId++, side: 'd', kind: 'building', type: src.type, x: src.x, y: src.y,
+      hp, maxHp: hp, alive: true, loot: { gold: 0, wood: 0 }, sourceId: src.id,
+    };
+    if (src.type === 'tower' && !src.damaged) {
+      const t = DEFENSE.tower;
+      Object.assign(e, { dmg: Math.round(t.dmg * (1 + t.dmgPerLevel * (src.level - 1))), range: t.range, atkSec: t.atkSec, cd: 0 });
+    }
+    if (src.type === 'townhall') b.hallId = e.id;
+    b.buildings.push(e);
+    b.byId.set(e.id, e);
+  }
+
+  const first = (type) => state.buildings.filter((x) => x.type === type).sort((p, q) => p.id - q.id)[0];
+  const camp = first('barracks') ?? first('townhall');
+  const shrine = first('altar') ?? camp;
+  let slot = 0;
+  for (const kind of ARMY_UNITS) {
+    for (let i = 0; i < (state.army[kind] ?? 0) && slot < 24; i++, slot++) {
+      addUnit(b, 'd', kind, camp.x + 1.1 + (slot % 4) * 0.42, camp.y + 0.55 + Math.floor(slot / 4) * 0.36, UNITS[kind].combat);
+    }
+  }
+  if (state.hero) addUnit(b, 'd', 'hero', shrine.x + 0.55, shrine.y + 1.25, heroCombat(state.hero.level));
+
+  for (const a of raid.attackers) {
+    const def = ENEMY_UNITS[a.kind];
+    addUnit(b, 'a', a.kind, a.x, a.y, {
+      hp: Math.round(def.hp * raid.hpScale), dmg: Math.round(def.dmg * raid.dmgScale),
+      range: def.range, speed: def.speed, atkSec: def.atkSec,
+    });
+  }
+  return b;
+}
+
+function checkRaidEnd(b) {
+  const hall = b.byId.get(b.hallId);
+  if (hall && !hall.alive) return finishRaid(b, 'raided');
+  if (attackers(b).length === 0) return finishRaid(b, 'repelled');
+  if (b.destroyed >= b.maxDestroyed) return finishRaid(b, 'retreated'); // ya hicieron bastante daño y se van
+  if (b.time >= RAID.timeLimitSec) return finishRaid(b, b.destroyed > 0 ? 'retreated' : 'repelled');
+  return undefined;
+}
+
+function finishRaid(b, outcome) {
+  b.over = true;
+  const hall = b.byId.get(b.hallId);
+  b.result = {
+    mode: 'raid',
+    outcome, // 'repelled' (rechazado), 'retreated' (se retiró tras hacer daño) o 'raided' (tumbó el Ayuntamiento)
+    level: b.level,
+    timeSec: Math.round(b.time),
+    hallDown: Boolean(hall && !hall.alive),
+    destroyed: b.destroyed, // edificios importantes destruidos (sin contar muros ni puertas)
+    destroyedIds: [...b.destroyedIds], // ids de tus edificios destruidos, muros y puertas incluidos
+    kills: b.kills, // atacantes derrotados
+  };
+  b.events.push({ type: 'end', outcome });
+}
+
 /* ---------- consultas ---------- */
 
 export const attackers = (b) => b.units.filter((u) => u.side === 'a' && u.alive);
@@ -106,13 +192,15 @@ const centerDist = (a, c) => Math.hypot(a.x - c.x, a.y - c.y);
 const edgeDist = (a, c) => centerDist(a, c) - radiusOf(c);
 
 const buildingAt = (b, x, y) => b.buildings.find((e) => e.alive && e.x === x && e.y === y) ?? null;
+// Muros y puertas se rodean si se puede y se rompen si no; el resto de edificios es un obstáculo sólido.
+const isWallish = (type) => type === 'wall' || type === 'gate';
 const wallAt = (b, x, y) => {
   const e = buildingAt(b, x, y);
-  return e && e.type === 'wall' ? e : null;
+  return e && isWallish(e.type) ? e : null;
 };
 const solidAt = (b, x, y) => {
   const e = buildingAt(b, x, y);
-  return Boolean(e) && e.type !== 'wall';
+  return Boolean(e) && !isWallish(e.type);
 };
 
 /** Resumen para el HUD de la batalla. */
@@ -244,7 +332,7 @@ function chooseTarget(b, u) {
     let nearest = null;
     let nd = Infinity;
     for (const e of b.buildings) {
-      if (!e.alive || (e.type === 'wall') !== wallsToo) continue;
+      if (!e.alive || isWallish(e.type) !== wallsToo) continue;
       const d = centerDist(u, e);
       if (d < nd) {
         nearest = e;
@@ -347,9 +435,11 @@ function kill(b, target) {
   target.hp = 0;
   target.alive = false;
   b.events.push({ type: 'die', id: target.id });
-  if (target.kind === 'unit' && target.side === 'd') b.kills++;
+  // «Bajas del enemigo»: en un ataque tuyo son los defensores; en una defensa, los atacantes.
+  if (target.kind === 'unit' && target.side === (b.mode === 'raid' ? 'a' : 'd')) b.kills++;
   if (target.kind === 'building') {
-    if (target.type !== 'wall') b.destroyed++;
+    if (!isWallish(target.type)) b.destroyed++;
+    b.destroyedIds?.push(target.sourceId);
     b.loot.gold += target.loot.gold ?? 0;
     b.loot.wood += target.loot.wood ?? 0;
     b.events.push({ type: 'destroy', id: target.id });
@@ -357,6 +447,7 @@ function kill(b, target) {
 }
 
 function checkEnd(b) {
+  if (b.mode === 'raid') return checkRaidEnd(b);
   const hall = b.byId.get(b.hallId);
   if (hall && !hall.alive) return finish(b, true);
   if (attackers(b).length === 0) return finish(b, false);

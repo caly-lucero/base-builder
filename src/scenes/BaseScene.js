@@ -23,6 +23,7 @@ import { wallConnectors } from '../game/walls.js';
 import { renderConnectors } from './connectors.js';
 import { canAttack, nextCampaignLevel } from '../game/campaign.js';
 import { generateMission, missionName } from '../game/missions.js';
+import { raidCountdownMs, raidLevel } from '../game/raids.js';
 import * as quests from '../game/quests.js';
 import { contentBounds } from '../game/sprites.js';
 import * as store from '../game/store.js';
@@ -32,6 +33,7 @@ const FONT = 'system-ui, "Segoe UI", Roboto, sans-serif';
 
 // Capas de dibujado (mayor = más arriba). Lo del HUD va por encima del mundo para tapar
 // lo que sobresalga de la ventana del mapa al desplazarse o hacer zoom.
+const DAMAGED_TINT = 0x6a5a55;
 const DEPTH = { terrain: 0, world: 10, ghost: 100, selector: 101, ui: 150, zoomButtons: 160, panel: 200, toast: 300 };
 
 // Cuánto se agrandan los dibujos respecto a la casilla (el pack los trae pequeños en su lienzo).
@@ -127,7 +129,9 @@ export default class BaseScene extends Phaser.Scene {
     this.createPanel();
     this.createZoomButtons();
     this.createQuestBanner();
+    this.createRaidBanner();
     this.createTrainStrip();
+    store.holdRaids(false); // de vuelta en la base, los ataques enemigos se reanudan
 
     this.ghost = this.add.image(0, 0, iconKey('mine')).setAlpha(0.7).setVisible(false).setDepth(DEPTH.ghost);
     this.selector = this.add
@@ -136,7 +140,7 @@ export default class BaseScene extends Phaser.Scene {
       .setVisible(false)
       .setDepth(DEPTH.selector);
     this.toast = this.add
-      .text(LAYOUT.width / 2, LAYOUT.gridTop + 58, '', {
+      .text(LAYOUT.width / 2, LAYOUT.gridTop + 104, '', {
         fontFamily: FONT,
         fontSize: '16px',
         color: '#ffffff',
@@ -594,6 +598,104 @@ export default class BaseScene extends Phaser.Scene {
     );
   }
 
+  /* ---------- ataques enemigos: aviso, reparación e informe ---------- */
+
+  /** Cartel bajo el de la misión: cuenta regresiva del próximo ataque y, si hay, lo dañado (se toca para reparar). */
+  createRaidBanner() {
+    const x = 8;
+    const y = LAYOUT.gridTop + 54;
+    const w = 400;
+    const h = 42;
+    const d = DEPTH.zoomButtons;
+    const bg = this.add
+      .rectangle(x + w / 2, y + h / 2, w, h, 0x2a1a1a, 0.9)
+      .setStrokeStyle(2, 0xdd5555)
+      .setInteractive({ useHandCursor: true })
+      .setDepth(d);
+    const line1 = this.add.text(x + 10, y + 5, '', { fontFamily: FONT, fontSize: '12px', color: '#ffb0a0', fontStyle: 'bold' }).setDepth(d + 1);
+    const line2 = this.add.text(x + 10, y + 22, '', { fontFamily: FONT, fontSize: '11px', color: '#e8c79a' }).setDepth(d + 1);
+    bg.on('pointerdown', () => this.onRaidBannerClick());
+    this.raidBanner = { bg, line1, line2 };
+  }
+
+  updateRaidBanner() {
+    const state = store.get();
+    const ms = raidCountdownMs(state, Date.now());
+    const imminent = ms <= 60_000;
+    const damaged = logic.damagedBuildings(state);
+    const { bg, line1, line2 } = this.raidBanner;
+
+    line1.setText(imminent ? `¡Ataque enemigo inminente! ${logic.formatDuration(ms)}` : `Ataque enemigo en ${logic.formatDuration(ms)} · fuerza ${raidLevel(state)}`);
+    line1.setColor(imminent ? '#ffe08a' : '#ffb0a0');
+    line2.setText(
+      damaged.length
+        ? `Dañados: ${damaged.length} · toca para reparar todo (${logic.formatCost(logic.repairAllCost(state))})`
+        : 'Tus torres, muros y tropas defienden la base',
+    );
+    line2.setColor(damaged.length ? '#ffcf8a' : '#cfe0c8');
+    bg.setStrokeStyle(2, imminent ? 0xffd24d : damaged.length ? 0xe08a3a : 0xdd5555);
+  }
+
+  onRaidBannerClick() {
+    const state = store.get();
+    if (logic.damagedBuildings(state).length) {
+      this.doAction(
+        () => logic.repairAll(store.get(), Date.now()),
+        (r) => `Reparados ${r.repaired}${r.left ? ` · quedan ${r.left} (faltan recursos)` : ''}`,
+        'upgrade_done',
+      );
+    } else {
+      this.showToast(`Próximo ataque: fuerza ${raidLevel(state)}. Torres, muros y tropas ayudan a defender.`, 2400);
+      this.play('select');
+    }
+  }
+
+  /** Informe de un ataque enemigo ya resuelto. */
+  openRaidReport(r) {
+    this.closeModal();
+    const state = store.get();
+    const w = LAYOUT.width;
+    const d = DEPTH.panel + 100;
+    const cx = w / 2;
+    const cy = LAYOUT.gridTop + 250;
+    const good = r.outcome === 'repelled';
+    const title = { repelled: '¡Rechazaste el ataque!', retreated: 'El enemigo se retiró', raided: '¡Tumbaron tu Ayuntamiento!' }[r.outcome];
+    const stolen = rewardText(r.stolen);
+    const lines = [
+      `Fuerza ${r.level} · atacantes derrotados: ${r.kills}`,
+      r.damaged ? `Edificios dañados: ${r.damaged}` : 'Ningún edificio dañado',
+      stolen ? `Robaron: ${stolen}` : 'No robaron nada',
+      r.hero && r.xp ? `Héroe: +${r.xp} XP · nivel ${r.hero.level}${r.heroLevelUps ? ' · ¡SUBE DE NIVEL!' : ''}` : null,
+    ].filter(Boolean);
+
+    const parts = [];
+    const add = (o) => {
+      parts.push(o);
+      return o;
+    };
+    add(this.add.rectangle(w / 2, LAYOUT.height / 2, w, LAYOUT.height, 0x000000, 0.62).setDepth(d).setInteractive());
+    add(this.add.rectangle(cx, cy, 480, 270, 0x1a2a1a, 0.98).setStrokeStyle(3, good ? 0x66dd66 : 0xdd5555).setDepth(d + 1));
+    add(this.add.text(cx, cy - 100, `⚠ ${title}`, { fontFamily: FONT, fontSize: '24px', color: good ? '#b8f0b8' : '#ffb0a0', fontStyle: 'bold' }).setOrigin(0.5).setDepth(d + 2));
+    add(this.add.text(cx, cy - 15, lines.join('\n'), { fontFamily: FONT, fontSize: '15px', color: '#e8eee0', align: 'center', lineSpacing: 9 }).setOrigin(0.5).setDepth(d + 2));
+
+    const button = (x, width, label, fill, onClick) => {
+      const rect = add(this.add.rectangle(x, cy + 100, width, 44, fill).setStrokeStyle(2, 0xffffff, 0.5).setInteractive({ useHandCursor: true }).setDepth(d + 2));
+      add(this.add.text(x, cy + 100, label, { fontFamily: FONT, fontSize: '14px', color: '#ffffff', fontStyle: 'bold', align: 'center' }).setOrigin(0.5).setDepth(d + 3));
+      rect.on('pointerdown', onClick);
+    };
+    if (logic.damagedBuildings(state).length) {
+      button(cx - 120, 220, `Reparar todo\n${logic.formatCost(logic.repairAllCost(state))}`, 0x9a6a2a, () => {
+        this.closeModal();
+        this.onRaidBannerClick();
+      });
+      button(cx + 120, 180, 'Cerrar', 0x324a32, () => this.closeModal());
+    } else {
+      button(cx, 220, 'Cerrar', 0x324a32, () => this.closeModal());
+    }
+    this.modal = parts;
+    this.play(good ? 'win' : 'lose');
+  }
+
   /* ---------- entrenar unidades ---------- */
 
   /** Tarjetas para entrenar: aparecen sobre el mapa cuando se elige un cuartel o el altar. */
@@ -636,7 +738,7 @@ export default class BaseScene extends Phaser.Scene {
 
       const u = UNITS[key];
       const locked = b.level < u.minLevel;
-      const busy = logic.isTraining(b) || logic.isUpgrading(b);
+      const busy = logic.isTraining(b) || logic.isUpgrading(b) || b.damaged;
       const heroTaken = u.hero && (state.hero || state.buildings.some((x) => x.training?.unit === key));
       const affordable = logic.canAfford(state, u.cost) && logic.supplyUsed(state) + u.supply <= logic.supplyCap(state);
       const usable = !locked && !busy && !heroTaken && affordable;
@@ -923,6 +1025,15 @@ export default class BaseScene extends Phaser.Scene {
       return;
     }
 
+    if (b.damaged) {
+      const cost = logic.repairCost(b);
+      detail.setText('Dañado en un ataque enemigo.\nNo produce, ni entrena ni mejora hasta repararlo.');
+      this.panel.hint.setVisible(false);
+      upgradeBtn.setVisible(true).setAlpha(logic.canAfford(state, cost) ? 1 : 0.5);
+      upgradeLabel.setText(`Reparar\n${logic.formatCost(cost)}`).setVisible(true).setAlpha(logic.canAfford(state, cost) ? 1 : 0.5);
+      return;
+    }
+
     const lines = this.detailLines(state, b);
     detail.setText(lines.join('\n'));
     this.panel.hint.setVisible(lines.length <= 2); // con 3 líneas no hay sitio para el aviso
@@ -943,6 +1054,19 @@ export default class BaseScene extends Phaser.Scene {
   onUpgradeClick() {
     const id = this.selectedId;
     if (id === null) return;
+    if (store.get().buildings.find((b) => b.id === id)?.damaged) {
+      this.doAction(
+        () => {
+          const r = logic.repairBuilding(store.get(), id);
+          if (r.ok) store.get().buildings.find((b) => b.id === id).lastTick = Date.now();
+          return r;
+        },
+        () => 'Reparado',
+        'upgrade_done',
+      );
+      this.updatePanel();
+      return;
+    }
     this.doAction(
       () => logic.startUpgrade(store.get(), id, Date.now()),
       (r) => `Mejora iniciada: ${logic.formatDuration(r.endsAt - Date.now())}`,
@@ -1206,6 +1330,8 @@ export default class BaseScene extends Phaser.Scene {
       if (e.type === 'upgraded') {
         out.push(`${logic.displayName(e.building, e.level)}: ¡mejora completada! Nivel ${e.level}`);
         finished = true;
+      } else if (e.type === 'raid') {
+        this.openRaidReport(e.report); // se muestra tras recorrer los demás avisos
       } else if (e.type === 'trained') {
         out.push(e.unit === 'hero' ? '¡Tu héroe ha llegado!' : `${UNITS[e.unit].name} listo para el combate`);
         finished = true;
@@ -1267,6 +1393,7 @@ export default class BaseScene extends Phaser.Scene {
     this.announce();
     this.updateHud();
     this.updateQuestBanner();
+    this.updateRaidBanner();
     this.syncWorkers();
     this.syncArmy();
     if (this.selectedId !== null) this.updatePanel();
@@ -1351,7 +1478,8 @@ export default class BaseScene extends Phaser.Scene {
         else grow *= 0.55 + 0.45 * (1 - (1 - k) ** 3) + 0.14 * Math.sin(k * Math.PI);
       }
       this.placeOnTile(v.sprite, stats.sprite, b.x, b.y, grow);
-      if (stats.tint) v.sprite.setTint(stats.tint); // los niveles 4 y 5 se ven dorados
+      if (b.damaged) v.sprite.setTint(DAMAGED_TINT); // dañado: oscuro y chamuscado
+      else if (stats.tint) v.sprite.setTint(stats.tint); // los niveles 4 y 5 se ven dorados
       else v.sprite.clearTint();
       v.sprite.setAlpha(this.movingId === b.id ? 0.35 : upgrading ? 0.35 : 1);
       v.crate.setPosition(c.x, c.y).setScale(scale * 0.7).setVisible(upgrading);
@@ -1367,7 +1495,10 @@ export default class BaseScene extends Phaser.Scene {
       v.bar.clear();
       v.bar.fillStyle(0x000000, 0.5).fillRect(bx, by, bw, bh);
 
-      if (upgrading) {
+      if (b.damaged) {
+        v.bar.fillStyle(0xcc3333, 1).fillRect(bx, by, bw * 0.3, bh);
+        v.sub.setText('Dañado');
+      } else if (upgrading) {
         const total = logic.nextLevelOf(b).upgradeSec * 1000;
         const remaining = Math.max(0, b.upgradeEndsAt - Date.now());
         v.bar.fillStyle(COLORS.progress, 1).fillRect(bx, by, bw * (1 - remaining / total), bh);
@@ -1388,9 +1519,14 @@ export default class BaseScene extends Phaser.Scene {
     }
 
     // Los muros y puertas contiguos se dibujan unidos, como una sola pared.
+    const hurt = new Set(state.buildings.filter((b) => b.damaged).map((b) => `${b.x},${b.y}`));
+    const isHurt = (c) => {
+      const [x, y] = [Math.floor(c.x), Math.floor(c.y)];
+      return hurt.has(`${x},${y}`) || hurt.has(c.orient === 'h' ? `${x + 1},${y}` : `${x},${y + 1}`);
+    };
     renderConnectors(this, this.connectors, wallConnectors(state.buildings), {
       grow: BUILDING_GROW,
-      tintFor: (c) => BUILDINGS.wall.levels[Math.min(c.level, 5) - 1]?.tint ?? null,
+      tintFor: (c) => (isHurt(c) ? DAMAGED_TINT : (BUILDINGS.wall.levels[Math.min(c.level, 5) - 1]?.tint ?? null)),
     });
 
     const selected = this.selectedId !== null && state.buildings.find((b) => b.id === this.selectedId);

@@ -16,7 +16,7 @@ import {
   supplyUsed,
 } from './logic.js';
 
-export const SAVE_VERSION = 6;
+export const SAVE_VERSION = 7;
 export const MAX_SAVE_BYTES = 200_000;
 
 const KEY = 'basebuilder.save';
@@ -108,6 +108,16 @@ function migrate(data, version) {
     d = { ...d, campaign: { cleared: 0 }, hero: isPlainObject(d.hero) ? { ...d.hero, xp: 0 } : d.hero };
   }
 
+  // v6 → v7: aparecieron los ataques enemigos (calendario) y los edificios dañados.
+  // `nextAt: 0` significa «sin programar»: al abrir la partida se programa el primer ataque (ver store.init).
+  if (version < 7) {
+    d = {
+      ...d,
+      raid: { nextAt: 0, count: 0 },
+      buildings: Array.isArray(d.buildings) ? d.buildings.map((b) => (isPlainObject(b) ? { ...b, damaged: false } : b)) : d.buildings,
+    };
+  }
+
   return d;
 }
 
@@ -193,6 +203,9 @@ export function validateState(d) {
   if (!isPlainObject(d.campaign) || !isInt(d.campaign.cleared, 0, 9999)) bad('Campaña inválida');
   const campaign = { cleared: d.campaign.cleared };
 
+  if (!isPlainObject(d.raid) || !isNum(d.raid.nextAt, 0, MAX_TIME) || !isInt(d.raid.count, 0, 1_000_000)) bad('Calendario de ataques inválido');
+  const raid = { nextAt: d.raid.nextAt, count: d.raid.count };
+
   const ids = new Set();
   const cells = new Set();
   let upgrading = 0;
@@ -225,6 +238,9 @@ export function validateState(d) {
       training = { unit: b.training.unit, endsAt: b.training.endsAt };
     }
 
+    if (typeof b.damaged !== 'boolean') bad('Estado de daño inválido');
+    if (b.damaged && b.type === 'townhall') bad('El Ayuntamiento no puede estar dañado');
+
     if (b.type === 'townhall') townHalls++;
 
     const cell = b.x + ',' + b.y;
@@ -238,6 +254,7 @@ export function validateState(d) {
       level: b.level,
       upgradeEndsAt: b.upgradeEndsAt,
       training,
+      damaged: b.damaged,
       x: b.x,
       y: b.y,
       stored: b.stored,
@@ -259,6 +276,7 @@ export function validateState(d) {
     army,
     hero,
     campaign,
+    raid,
     buildings,
   };
   // Un guardado no puede traer más unidades de las que sostiene la población.

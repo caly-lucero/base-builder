@@ -1,5 +1,7 @@
 // Estado único de la partida + guardado automático + avisos a la UI.
+import { RAID } from '../data/config.js';
 import { createNewState, tickAll } from './logic.js';
+import { raidDue, resolveRaid } from './raids.js';
 import { clearSave, loadGame, saveGame } from './save.js';
 
 let state = null;
@@ -29,7 +31,22 @@ function emit() {
  * Devuelve el oro generado.
  */
 export function tick(now = Date.now()) {
-  return tickAll(state, now, pendingEvents);
+  const gained = tickAll(state, now, pendingEvents);
+  // Si llegó la hora de un ataque enemigo, se resuelve (uno solo, aunque hayas estado fuera mucho tiempo).
+  if (!raidsHeld && raidDue(state, now)) pendingEvents.push({ type: 'raid', report: resolveRaid(state, now) });
+  return gained;
+}
+
+let raidsHeld = false;
+
+/** Pausa o reanuda los ataques enemigos (mientras atacas tú, no te atacan a la vez). */
+export function holdRaids(held) {
+  raidsHeld = Boolean(held);
+}
+
+/** Una partida sin calendario (migrada o importada) programa su primer ataque. */
+function ensureRaidSchedule(s, now) {
+  if (!s.raid.nextAt) s.raid.nextAt = now + RAID.firstDelaySec * 1000;
 }
 
 /** Entrega (y vacía) los eventos acumulados: [{ type:'upgraded', building, level, id }]. */
@@ -46,6 +63,8 @@ export function init(now = Date.now()) {
   if (now < state.savedAt) {
     for (const b of state.buildings) b.lastTick = Math.min(b.lastTick, now);
   }
+
+  ensureRaidSchedule(state, now);
 
   const gained = tick(now);
   if (loaded.warning) statusHandler(loaded.warning);
@@ -75,6 +94,7 @@ export function commit() {
 /** Sustituye toda la partida (importar o nueva partida). */
 export function replace(newState) {
   state = newState;
+  ensureRaidSchedule(state, Date.now());
   pendingEvents.length = 0;
   persist();
   emit();

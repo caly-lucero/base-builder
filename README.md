@@ -28,6 +28,11 @@ Cada vez que se sube algo a la rama `main`, GitHub corre las pruebas, compila y 
   - **Automático con control de grupos**: tus unidades pelean solas (primero los enemigos cercanos, luego el edificio más cercano; los muros se rodean o se rompen). Tú puedes **elegir un grupo** (Todos, Soldados, Hechiceros, Caballeros, Héroe, tocando una unidad o con el recuadro ▭) y **darle un objetivo**: tocar un enemigo o edificio para atacarlo, o el suelo para moverlo. Al cumplir la orden vuelven al modo automático; **Auto** las devuelve de inmediato.
   - Se gana destruyendo el Ayuntamiento enemigo; se pierde si caen todas tus tropas, se acaba el tiempo (3 min) o tocas **Retirada** (dos toques). Hay botón de velocidad ×2.
   - **Resultado**: las tropas caídas se pierden (el héroe no), el botín entra sin pasar el tope y el **héroe gana experiencia siempre que pelea**: 6 XP por cada edificio destruido y 4 por cada defensor derrotado, más un bono por ganar. Al juntar la necesaria (100 × su nivel) **sube de nivel** (más vida y daño, hasta el 10). Su progreso se ve en el panel del altar y en la pantalla de resultado. Ganar el nivel que toca avanza la campaña.
+- **Ataques enemigos a tu base**: cada 12 minutos (el primero a los 10) llega una oleada. Un cartel rojo, bajo el de la misión, muestra la **cuenta regresiva** y la fuerza del ataque (crece con el Ayuntamiento y con la campaña superada). Se resuelve sola con la misma simulación del combate, también si no estás: **tus torres, muros, ejército y héroe defienden** (las tropas no mueren al defender). El enemigo se retira tras destruir `2 + nivel del Ayuntamiento` edificios. Un **informe** te cuenta cómo fue:
+  - los edificios destruidos quedan **dañados** (oscuros, con la etiqueta «Dañado»): no producen, no entrenan ni mejoran hasta **repararlos**, por una parte de lo invertido (30 %). Tócalos y pulsa *Reparar*, o toca el cartel rojo para **reparar todo** (en orden, mientras alcancen los recursos);
+  - te roban un porcentaje del oro y la madera (más si cae el Ayuntamiento, que nunca queda dañado);
+  - el héroe gana XP por cada atacante derrotado y un bono si rechazas la oleada.
+  Mientras tú atacas, las oleadas quedan en pausa. Si estuviste fuera mucho tiempo, solo se resuelve una.
 - **Puertas**: como un muro con paso (en el combate dejarán pasar a tus unidades).
 - **Barra por páginas**: *Economía* (mina, aserradero, granja, almacén, muro) y *Militar* (cuartel, altar, torre, puerta). El botón de la derecha cambia de página.
 - **Misiones**: una cadena de 17 objetivos que guía la partida («Construye un Aserradero», «Ten 2 Minas de oro», «Sube el Ayuntamiento a Fortaleza»…). El cartel de arriba a la izquierda muestra la actual y su avance; al cumplirla se pone verde y la tocas para **reclamar el premio**. Se hacen en orden; los premios no pasan del tope de recursos.
@@ -79,6 +84,7 @@ En Windows PowerShell, si `npm` da error de «ejecución de scripts deshabilitad
 - `src/game/battle.js` — simulación de la batalla (pura y determinista): objetivos automáticos, órdenes, torres, botín y fin.
 - `src/game/pathfinding.js` — A* sobre la cuadrícula (los muros cuestan más: se rodean, pero se pueden atravesar rompiéndolos).
 - `src/game/missions.js` — genera la base enemiga de cada nivel de campaña.
+- `src/game/raids.js` — ataques enemigos a tu base: fuerza y generación de oleadas, calendario, daño, robo y reparación del informe.
 - `src/game/campaign.js` — aplica el resultado de una batalla (bajas, botín, campaña, experiencia del héroe).
 - `src/scenes/BattleScene.js` — escena de la batalla: dibujo, selección, órdenes y pantalla de resultado.
 - `src/game/quests.js` — misiones: progreso (calculado, no guardado) y reclamo de premios. Los datos están en `QUESTS` de `config.js`.
@@ -107,7 +113,7 @@ Arte y sonido de [Kenney](https://kenney.nl) (packs Medieval RTS, Interface Soun
 - Las pruebas de PWA se hicieron a mano (instalación, sin conexión); falta pasar **Lighthouse**.
 - El pellizco con dos dedos está implementado pero **no se ha probado en un móvil real** (solo con ratón y teclado).
 - Las mejoras usan la hora del sistema: adelantar el reloj las termina antes. El juego limita el daño (una mejora nunca puede quedar más lejos que su duración total), pero no puede impedirlo del todo; es aceptable sin ranking.
-- Si cambia el formato del guardado, subir `SAVE_VERSION` y añadir el paso en `migrate()` de `save.js`. Ejemplos: v1→v2 (niveles), v2→v3 (mapa 12×12 → 24×24, madera y Ayuntamiento), v3→v4 (misiones), v4→v5 (ejército, héroe y entrenamiento) y v5→v6 (campaña y experiencia del héroe). Una base avanzada que se migra tendrá varias misiones ya cumplidas y podrá reclamarlas.
+- Si cambia el formato del guardado, subir `SAVE_VERSION` y añadir el paso en `migrate()` de `save.js`. Ejemplos: v1→v2 (niveles), v2→v3 (mapa 12×12 → 24×24, madera y Ayuntamiento), v3→v4 (misiones), v4→v5 (ejército, héroe y entrenamiento) v5→v6 (campaña y experiencia del héroe) y v6→v7 (ataques enemigos y edificios dañados). Una base avanzada que se migra tendrá varias misiones ya cumplidas y podrá reclamarlas.
 - Los sonidos son `.ogg`: algunos navegadores antiguos de Apple no los reproducen (el juego funciona igual, sin sonido).
 - El lienzo es de 576 px de ancho y se escala a la pantalla; en pantallas grandes los dibujos se ven algo suavizados.
 - Los enlaces entre muros usan solo dos piezas por nivel (horizontal y vertical): en esquinas y cruces se ven bien, pero no hay un dibujo especial para cada forma.
@@ -115,7 +121,8 @@ Arte y sonido de [Kenney](https://kenney.nl) (packs Medieval RTS, Interface Soun
 - Las unidades del ejército y el héroe están quietos (se balancean un poco); solo los aldeanos caminan. No tienen estadísticas de combate todavía.
 - Los cuarteles entrenan de a una unidad por vez; no hay cola de entrenamiento.
 - Una batalla en curso no se guarda: si cierras la página, no cuenta (tus tropas siguen intactas).
-- Las unidades no chocan entre sí (se superponen) y las torres de tu base todavía no defienden: el combate es solo ataque.
+- Las unidades no chocan entre sí (se superponen). La defensa de tu base no se ve en pantalla: la oleada se simula al instante y solo ves el informe.
+- Las oleadas usan la hora del sistema y no se pueden saltar ni aplazar; el equilibrio (fuerza, robo, costo de reparar) es una primera aproximación.
 - El equilibrio es una primera aproximación: con 8 soldados, 3 hechiceros y el héroe las primeras campañas se ganan sin bajas. Hay una prueba que exige que la 1 se gane con un ejército razonable y la 12 no, pero falta jugarla mucho.
 - Probado con ratón; el recuadro de selección y el pellizco en la batalla no se han probado en un móvil real.
 
@@ -124,5 +131,5 @@ Se decidió que el juego debía sentirse menos básico: *quieto, con poco que ha
 
 1. **Vida y metas** — hecho: aldeanos, efectos y misiones.
 2. **Más contenido** — hecho: granjas y población, cuartel con unidades, altar y héroe, puertas, más decoración y misiones. Pendiente de esta etapa: **logros** (metas sueltas, fuera de la cadena de misiones).
-3. **Combate y campaña** — decidido: ataque **automático con control de grupos** (ver arriba). Primera versión hecha. Pendiente: que el enemigo ataque TU base (defensa con torres y muros), elegir dónde desembarcan las tropas, habilidades del héroe, más tipos de enemigo y afinar el equilibrio.
+3. **Combate y campaña** — decidido: ataque **automático con control de grupos** (ver arriba). Primera versión hecha, y también los **ataques enemigos a tu base** (oleadas periódicas con aviso, daño y reparación). Pendiente: ver la defensa en pantalla, elegir dónde desembarcan las tropas, habilidades del héroe, más tipos de enemigo y afinar el equilibrio.
 4. En cualquier momento: publicarlo gratis (GitHub Pages) para instalarlo y probarlo en el celular, y pasar Lighthouse.

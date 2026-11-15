@@ -21,6 +21,11 @@ import {
   place,
   placementError,
   resourceCap,
+  damagedBuildings,
+  repairAll,
+  repairAllCost,
+  repairBuilding,
+  repairCost,
   startTraining,
   startUpgrade,
   supplyCap,
@@ -564,6 +569,78 @@ test('un entrenamiento con una unidad desconocida se descarta sin romper nada', 
   b.training = { unit: 'dragon', endsAt: T0 + 1000 };
   tickAll(s, T0 + 5_000);
   assert.equal(b.training, null);
+});
+
+/* ---------- daño y reparación ---------- */
+
+test('un edificio dañado no produce, ni se mejora, ni entrena, hasta repararlo', () => {
+  const s = fresh(5000, 5000, 3);
+  const mine = place(s, 'mine', 0, 0, T0).building;
+  const barracks = place(s, 'barracks', 1, 0, T0).building;
+  mine.damaged = true;
+  barracks.damaged = true;
+
+  tickAll(s, T0 + 60_000);
+  assert.equal(mine.stored, 0, 'no produce mientras está dañado');
+  assert.equal(startUpgrade(s, mine.id, T0 + 60_000).reason, 'Está dañado: repáralo primero');
+  assert.equal(startTraining(s, barracks.id, 'soldier', T0 + 60_000).reason, 'Está dañado: repáralo primero');
+
+  assert.equal(repairBuilding(s, mine.id).ok, true);
+  assert.equal(mine.damaged, false);
+  tickAll(s, T0 + 120_000);
+  assert.ok(mine.stored > 0 && mine.stored <= 0.5 * 60 + 1e-6, 'produce solo desde que se reparó');
+  assert.equal(startUpgrade(s, mine.id, T0 + 120_000).ok, true);
+});
+
+test('reparar cuesta una parte de lo invertido, valida y descuenta', () => {
+  const s = fresh(1000, 1000, 5);
+  const b = place(s, 'storage', 0, 0, T0).building; // 100 oro + 30 madera
+  b.level = 3; // + mejoras ya pagadas
+  const invested = investedCost(b);
+  const cost = repairCost(b);
+  assert.equal(cost.gold, Math.ceil(invested.gold * 0.3));
+  assert.equal(cost.wood, Math.ceil(invested.wood * 0.3));
+
+  assert.equal(repairBuilding(s, b.id).reason, 'No está dañado');
+  assert.equal(repairBuilding(s, 999).reason, 'No existe ese edificio');
+  b.damaged = true;
+  s.gold = 1;
+  assert.equal(repairBuilding(s, b.id).reason, 'Oro insuficiente');
+  s.gold = 1000;
+  const before = { gold: s.gold, wood: s.wood };
+  assert.equal(repairBuilding(s, b.id).ok, true);
+  assert.equal(s.gold, before.gold - cost.gold);
+  assert.equal(s.wood, before.wood - cost.wood);
+});
+
+test('reparar todo repara en orden mientras alcance, y avisa si no alcanza', () => {
+  const s = fresh(1000, 1000, 3);
+  const a = place(s, 'mine', 0, 0, T0).building;
+  const b = place(s, 'mine', 1, 0, T0).building;
+  const w = place(s, 'wall', 2, 0, T0).building;
+  for (const x of [a, b, w]) x.damaged = true;
+  assert.equal(repairAllCost(s).gold, repairCost(a).gold + repairCost(b).gold + repairCost(w).gold);
+
+  s.gold = repairCost(a).gold; // solo alcanza para una mina
+  s.wood = 1000;
+  const r = repairAll(s, T0 + 5000);
+  assert.equal(r.ok, true);
+  assert.ok(r.repaired >= 1 && r.left >= 1);
+  assert.equal(damagedBuildings(s).length, r.left);
+
+  s.gold = 0;
+  s.wood = 0;
+  assert.equal(repairAll(s).reason, 'No alcanzan los recursos para reparar');
+  for (const x of s.buildings) x.damaged = false;
+  assert.equal(repairAll(s).reason, 'No hay nada dañado');
+});
+
+test('un edificio dañado se puede demoler y mover', () => {
+  const s = fresh(1000, 1000, 3);
+  const b = place(s, 'mine', 0, 0, T0).building;
+  b.damaged = true;
+  assert.equal(moveBuilding(s, b.id, 4, 4).ok, true);
+  assert.equal(demolish(s, b.id).ok, true);
 });
 
 /* ---------- utilidades ---------- */

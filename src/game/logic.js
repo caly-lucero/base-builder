@@ -1,6 +1,6 @@
 // Lógica pura del juego: no toca el DOM, Phaser ni localStorage.
 // Todas las funciones reciben el estado y el tiempo (`now`) para poder probarlas.
-import { ARMY_UNITS, BUILDINGS, ECONOMY, GRID, RESOURCES, RESOURCE_NAMES, UNITS } from '../data/config.js';
+import { ARMY_UNITS, BUILDINGS, ECONOMY, GRID, RAID, RESOURCES, RESOURCE_NAMES, UNITS } from '../data/config.js';
 
 export const MAX_BUILDINGS = GRID.cols * GRID.rows;
 
@@ -8,7 +8,7 @@ export const MAX_BUILDINGS = GRID.cols * GRID.rows;
 export const TOWN_HALL_CELL = { x: Math.floor(GRID.cols / 2) - 1, y: Math.floor(GRID.rows / 2) - 1 };
 
 export function createBuilding(id, type, x, y, now, level = 1) {
-  return { id, type, level, upgradeEndsAt: null, training: null, x, y, stored: 0, lastTick: now };
+  return { id, type, level, upgradeEndsAt: null, training: null, damaged: false, x, y, stored: 0, lastTick: now };
 }
 
 /** Ejército vacío: { soldier: 0, mage: 0, knight: 0 }. */
@@ -21,6 +21,7 @@ export function createNewState(now = Date.now()) {
     nextId: 2,
     buildings: [createBuilding(1, 'townhall', TOWN_HALL_CELL.x, TOWN_HALL_CELL.y, now)],
     claimedQuests: [], // ids de las misiones ya reclamadas (ver quests.js)
+    raid: { nextAt: now + RAID.firstDelaySec * 1000, count: 0 }, // próximo ataque enemigo y cuántos ha habido (ver raids.js)
     army: emptyArmy(), // unidades entrenadas, por tipo
     hero: null, // null o { level, xp }: solo puede haber un héroe
     campaign: { cleared: 0 }, // niveles de campaña superados
@@ -202,6 +203,10 @@ export function tickBuilding(b, now, events) {
     }
   }
 
+  if (b.damaged) {
+    b.lastTick = now; // dañado: no produce hasta que se repare
+    return 0;
+  }
   const stats = statsOf(b.type, b.level);
   if (!stats.ratePerSec) {
     b.lastTick = now;
@@ -284,6 +289,7 @@ export function place(state, type, x, y, now) {
 export function startUpgrade(state, id, now) {
   const b = state.buildings.find((x) => x.id === id);
   if (!b) return fail('No existe ese edificio');
+  if (b.damaged) return fail('Está dañado: repáralo primero');
   if (isUpgrading(b)) return fail('Ya se está mejorando');
   if (isTraining(b)) return fail('Espera a que termine el entrenamiento');
   const next = nextLevelOf(b);
@@ -309,6 +315,7 @@ export function startTraining(state, id, unitKey, now) {
   const def = BUILDINGS[b.type];
   if (!def.trains?.includes(unitKey)) return fail('Este edificio no entrena eso');
   const unit = UNITS[unitKey];
+  if (b.damaged) return fail('Está dañado: repáralo primero');
   if (isUpgrading(b)) return fail('El edificio está en obras');
   if (isTraining(b)) return fail('Ya está entrenando');
   if (b.level < unit.minLevel) return fail(`Pide ${def.name} nivel ${unit.minLevel}`);
@@ -351,6 +358,54 @@ export function demolish(state, id) {
     if (refund > 0) state[r] = Math.min(newCap, state[r] + refund);
   }
   return { ok: true };
+}
+
+/* ---------- daño y reparación (ataques enemigos) ---------- */
+
+export const damagedBuildings = (state) => state.buildings.filter((b) => b.damaged);
+
+/** Lo que cuesta reparar un edificio: una parte de lo que se invirtió en él (redondeada hacia arriba). */
+export function repairCost(b) {
+  const invested = investedCost(b);
+  const cost = {};
+  for (const r of RESOURCES) cost[r] = Math.ceil(invested[r] * RAID.repairRate);
+  return cost;
+}
+
+export function repairBuilding(state, id) {
+  const b = state.buildings.find((x) => x.id === id);
+  if (!b) return fail('No existe ese edificio');
+  if (!b.damaged) return fail('No está dañado');
+  const cost = repairCost(b);
+  const missing = missingResource(state, cost);
+  if (missing) return fail(insufficient(missing));
+  spend(state, cost);
+  b.damaged = false;
+  b.lastTick = Math.max(b.lastTick, 0);
+  return { ok: true, cost };
+}
+
+/** Costo total de reparar todo lo dañado. */
+export function repairAllCost(state) {
+  const total = { gold: 0, wood: 0 };
+  for (const b of damagedBuildings(state)) for (const r of RESOURCES) total[r] += repairCost(b)[r];
+  return total;
+}
+
+/** Repara todo lo dañado, en orden, mientras alcancen los recursos. Devuelve cuántos y cuánto costó. */
+export function repairAll(state, now = Date.now()) {
+  const spent = { gold: 0, wood: 0 };
+  let repaired = 0;
+  for (const b of damagedBuildings(state)) {
+    const r = repairBuilding(state, b.id);
+    if (!r.ok) continue;
+    b.lastTick = now; // vuelve a producir desde ahora
+    repaired++;
+    for (const k of RESOURCES) spent[k] += r.cost[k];
+  }
+  const left = damagedBuildings(state).length;
+  if (!repaired) return fail(left ? 'No alcanzan los recursos para reparar' : 'No hay nada dañado');
+  return { ok: true, repaired, left, cost: spent };
 }
 
 /** Cambia un edificio de casilla (gratis). */

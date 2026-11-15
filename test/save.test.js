@@ -103,6 +103,15 @@ test('la validación rechaza datos con checksum correcto pero contenido imposibl
     'héroe sin experiencia': (s) => (s.hero = { level: 1 }),
     'héroe con experiencia negativa': (s) => (s.hero = { level: 1, xp: -5 }),
     'sin héroe (undefined)': (s) => delete s.hero,
+    'daño como texto': (s) => (s.buildings[MINE].damaged = 'si'),
+    'daño sin campo (undefined)': (s) => delete s.buildings[MINE].damaged,
+    'Ayuntamiento dañado': (s) => (s.buildings[HALL].damaged = true),
+    'calendario no es objeto': (s) => (s.raid = 5),
+    'calendario sin hora': (s) => (s.raid = { count: 0 }),
+    'calendario con hora negativa': (s) => (s.raid = { nextAt: -1, count: 0 }),
+    'calendario con cuenta decimal': (s) => (s.raid = { nextAt: T0, count: 1.5 }),
+    'calendario con cuenta negativa': (s) => (s.raid = { nextAt: T0, count: -1 }),
+    'sin calendario (undefined)': (s) => delete s.raid,
     'campaña no es objeto': (s) => (s.campaign = 3),
     'campaña sin progreso': (s) => (s.campaign = {}),
     'campaña con progreso negativo': (s) => (s.campaign = { cleared: -1 }),
@@ -111,15 +120,15 @@ test('la validación rechaza datos con checksum correcto pero contenido imposibl
     'entrenamiento sin campo (undefined)': (s) => delete s.buildings[MINE].training,
     'entrenamiento en un edificio que no entrena': (s) => (s.buildings[MINE].training = { unit: 'soldier', endsAt: T0 + 1000 }),
     'entrenamiento de una unidad que no corresponde': (s) => {
-      s.buildings.push({ id: 7, type: 'barracks', level: 1, upgradeEndsAt: null, training: { unit: 'hero', endsAt: T0 + 1000 }, x: 9, y: 9, stored: 0, lastTick: T0 });
+      s.buildings.push({ id: 7, type: 'barracks', level: 1, upgradeEndsAt: null, training: { unit: 'hero', endsAt: T0 + 1000 }, damaged: false, x: 9, y: 9, stored: 0, lastTick: T0 });
       s.nextId = 8;
     },
     'entrenamiento con fecha inválida': (s) => {
-      s.buildings.push({ id: 7, type: 'barracks', level: 1, upgradeEndsAt: null, training: { unit: 'soldier', endsAt: 'x' }, x: 9, y: 9, stored: 0, lastTick: T0 });
+      s.buildings.push({ id: 7, type: 'barracks', level: 1, upgradeEndsAt: null, training: { unit: 'soldier', endsAt: 'x' }, damaged: false, x: 9, y: 9, stored: 0, lastTick: T0 });
       s.nextId = 8;
     },
     'mejora y entrenamiento a la vez': (s) => {
-      s.buildings.push({ id: 7, type: 'barracks', level: 1, upgradeEndsAt: T0 + 1000, training: { unit: 'soldier', endsAt: T0 + 1000 }, x: 9, y: 9, stored: 0, lastTick: T0 });
+      s.buildings.push({ id: 7, type: 'barracks', level: 1, upgradeEndsAt: T0 + 1000, training: { unit: 'soldier', endsAt: T0 + 1000 }, damaged: false, x: 9, y: 9, stored: 0, lastTick: T0 });
       s.nextId = 8;
     },
     'misiones no es lista': (s) => (s.claimedQuests = 'q_sawmill'),
@@ -130,7 +139,7 @@ test('la validación rechaza datos con checksum correcto pero contenido imposibl
     'más misiones de las que existen': (s) => (s.claimedQuests = Array.from({ length: 99 }, (_, i) => `q${i}`)),
     'sin Ayuntamiento': (s) => s.buildings.splice(HALL, 1),
     'dos Ayuntamientos': (s) => {
-      s.buildings.push({ id: 9, type: 'townhall', level: 1, upgradeEndsAt: null, training: null, x: 20, y: 20, stored: 0, lastTick: T0 });
+      s.buildings.push({ id: 9, type: 'townhall', level: 1, upgradeEndsAt: null, training: null, damaged: false, x: 20, y: 20, stored: 0, lastTick: T0 });
       s.nextId = 10;
     },
   };
@@ -181,6 +190,41 @@ test('el ejército, el héroe y un entrenamiento en curso se guardan y se recupe
   assert.deepEqual(r.state.hero, { level: 2, xp: 35 });
   assert.deepEqual(r.state.campaign, { cleared: 4 });
   assert.deepEqual(r.state.buildings.find((b) => b.type === 'barracks').training, { unit: 'soldier', endsAt: T0 + 15_000 });
+});
+
+test('los edificios dañados y el calendario de ataques se guardan y se recuperan', () => {
+  const s = sampleState();
+  s.buildings[MINE].damaged = true;
+  s.raid = { nextAt: T0 + 123_456, count: 4 };
+  const r = parseSave(serialize(s));
+  assert.equal(r.ok, true);
+  assert.equal(r.state.buildings[MINE].damaged, true);
+  assert.equal(r.state.buildings[HALL].damaged, false);
+  assert.deepEqual(r.state.raid, { nextAt: T0 + 123_456, count: 4 });
+});
+
+test('migración v6 → v7: nada queda dañado y el calendario queda «sin programar»', () => {
+  const data = {
+    gold: 300,
+    wood: 120,
+    nextId: 4,
+    savedAt: T0,
+    claimedQuests: [],
+    army: { soldier: 1, mage: 0, knight: 0 },
+    hero: null,
+    campaign: { cleared: 2 },
+    buildings: [
+      { ...b2(1, 'townhall', 11, 11, 2), training: null },
+      { ...b2(2, 'mine', 8, 8, 3), training: null },
+      { ...b2(3, 'wall', 9, 9), training: null },
+    ],
+  };
+  const r = parseSave(JSON.stringify({ v: 6, sum: checksum(data), data }));
+  assert.equal(r.ok, true);
+  assert.ok(r.state.buildings.every((b) => b.damaged === false));
+  assert.deepEqual(r.state.raid, { nextAt: 0, count: 0 });
+  assert.deepEqual(r.state.campaign, { cleared: 2 }, 'conserva la campaña');
+  assert.equal(r.state.buildings.length, 3);
 });
 
 test('las misiones reclamadas se guardan y se recuperan', () => {

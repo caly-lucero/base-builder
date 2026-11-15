@@ -9,6 +9,24 @@ export const nextCampaignLevel = (state) => state.campaign.cleared + 1;
 export const canAttack = (state) => armyCount(state) > 0 || Boolean(state.hero);
 
 /**
+ * Da experiencia al héroe (si existe) y lo sube de nivel mientras le alcance.
+ * Devuelve { xp (lo dado), heroLevelUps, hero: { level, xp, next } | null }.
+ */
+export function grantHeroXp(state, amount) {
+  if (!state.hero) return { xp: 0, heroLevelUps: 0, hero: null };
+  let heroLevelUps = 0;
+  state.hero.xp += amount;
+  while (state.hero.level < HERO_MAX_LEVEL && state.hero.xp >= heroXpToNext(state.hero.level)) {
+    state.hero.xp -= heroXpToNext(state.hero.level);
+    state.hero.level += 1;
+    heroLevelUps += 1;
+  }
+  if (state.hero.level >= HERO_MAX_LEVEL) state.hero.xp = 0;
+  const next = state.hero.level >= HERO_MAX_LEVEL ? null : heroXpToNext(state.hero.level);
+  return { xp: amount, heroLevelUps, hero: { level: state.hero.level, xp: state.hero.xp, next } };
+}
+
+/**
  * Aplica el resultado de una batalla a la partida:
  *  - se pierden las unidades que cayeron (el héroe nunca se pierde);
  *  - el botín entra sin pasar el tope de recursos;
@@ -35,23 +53,11 @@ export function applyBattleResult(state, result) {
     cleared = true;
   }
 
-  // El héroe gana experiencia siempre que pelea: por lo que destruye y derrota, y un bono si ganas.
-  let xp = 0;
-  let heroLevelUps = 0;
-  if (state.hero) {
-    xp =
-      (result.destroyed ?? 0) * COMBAT.heroXpPerBuilding +
-      (result.kills ?? 0) * COMBAT.heroXpPerKill +
-      (result.won ? COMBAT.heroXpWin + COMBAT.heroXpPerLevel * result.level : 0);
-    state.hero.xp += xp;
-    while (state.hero.level < HERO_MAX_LEVEL && state.hero.xp >= heroXpToNext(state.hero.level)) {
-      state.hero.xp -= heroXpToNext(state.hero.level);
-      state.hero.level += 1;
-      heroLevelUps += 1;
-    }
-    if (state.hero.level >= HERO_MAX_LEVEL) state.hero.xp = 0;
-  }
+  const earned =
+    (result.destroyed ?? 0) * COMBAT.heroXpPerBuilding +
+    (result.kills ?? 0) * COMBAT.heroXpPerKill +
+    (result.won ? COMBAT.heroXpWin + COMBAT.heroXpPerLevel * result.level : 0);
+  const { xp, heroLevelUps, hero } = grantHeroXp(state, earned);
 
-  const hero = state.hero ? { level: state.hero.level, xp: state.hero.xp, next: state.hero.level >= HERO_MAX_LEVEL ? null : heroXpToNext(state.hero.level) } : null;
   return { won: result.won, level: result.level, percent: result.percent, loot, casualties: { ...result.casualties }, xp, heroLevelUps, hero, cleared };
 }

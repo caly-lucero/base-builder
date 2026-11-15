@@ -254,6 +254,29 @@ export const ENEMY_UNITS = {
   brute: { name: 'Bruto', sprite: 'enemy_brute', hp: 140, dmg: 12, range: 1.0, speed: 1.5, atkSec: 1.1 },
 };
 
+// Defensa de TU base cuando el enemigo la ataca. La vida de cada edificio crece con su nivel; las
+// torres disparan (más daño por nivel); tu ejército y tu héroe defienden desde donde están formados.
+export const DEFENSE = {
+  hpPerLevel: 0.35, // +35 % de vida por cada nivel sobre el 1
+  baseHp: { townhall: 700, tower: 260, wall: 110, gate: 110, mine: 140, sawmill: 140, storage: 160, barracks: 200, farm: 120, altar: 150 },
+  tower: { dmg: 9, range: 5, atkSec: 1.1, dmgPerLevel: 0.3 },
+  damagedHpFactor: 0.5, // un edificio ya dañado entra a la siguiente batalla con la mitad de vida
+};
+
+// Ataques enemigos periódicos (con aviso). Tiempos en segundos de reloj real.
+export const RAID = {
+  firstDelaySec: 10 * 60, // el primer ataque llega 10 min después de empezar
+  intervalSec: 12 * 60, // y luego uno cada 12 min (si no estás, se resuelve uno solo al volver)
+  timeLimitSec: 120, // si tu defensa aguanta este tiempo, el ataque fracasa
+  maxDamaged: (townHallLevel) => 2 + townHallLevel, // el enemigo se retira tras destruir tantos edificios (sin contar muros)
+  stealPerBuilding: 0.06, // por cada edificio importante destruido se roba el 6 % de tus recursos...
+  stealMax: 0.4, // ...hasta un máximo del 40 %
+  stealHall: 0.1, // y un 10 % extra si llegan a tumbar tu Ayuntamiento
+  repairRate: 0.3, // reparar un edificio cuesta el 30 % de lo invertido en él
+  heroXpPerKill: 4, // experiencia del héroe por cada atacante derrotado
+  heroXpRepel: 30, // bono si el ataque fracasa
+};
+
 // Edificios de una base enemiga: vida y, las torres, su ataque. Se escalan con el nivel de la misión.
 export const ENEMY_BUILDINGS = {
   hall: { name: 'Ayuntamiento enemigo', hp: 600 },
