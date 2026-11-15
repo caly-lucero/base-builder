@@ -12,6 +12,7 @@ const ART = [
   'townhall_1', 'townhall_2', 'townhall_3',
   'sawmill_1', 'sawmill_2', 'sawmill_3',
   'wall_1', 'wall_2', 'wall_3',
+  'worker_1', 'worker_2', 'worker_3', 'worker_4',
   'tree_a', 'tree_b', 'tree_c',
   'rock_a', 'rock_b', 'rock_c',
   'bush_a', 'bush_b',

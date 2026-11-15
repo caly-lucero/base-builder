@@ -19,8 +19,10 @@ import {
   view,
   zoomAt,
 } from '../game/projection.js';
+import * as quests from '../game/quests.js';
 import { contentBounds } from '../game/sprites.js';
 import * as store from '../game/store.js';
+import { createWorker, plannedWorkers, stepWorker, workerPosition } from '../game/workers.js';
 
 const TOOLS = [...BUILDABLE, 'demolish'];
 const FONT = 'system-ui, "Segoe UI", Roboto, sans-serif';
@@ -32,6 +34,12 @@ const DEPTH = { terrain: 0, world: 10, ghost: 100, selector: 101, ui: 150, zoomB
 // Cuánto se agrandan los dibujos respecto a la casilla (el pack los trae pequeños en su lienzo).
 const BUILDING_GROW = 1.25;
 const DECOR_GROW = 1.15;
+const WORKER_GROW = 1.6;
+const POP_MS = 320; // duración de la animación al construir
+
+const joinParts = (parts) => parts.filter(Boolean).join(' · ');
+const rewardText = (r, sign = '') =>
+  joinParts([r.gold > 0 && `${sign}${r.gold} oro`, r.wood > 0 && `${sign}${r.wood} madera`]);
 
 const COLORS = {
   hud: 0x243624,
@@ -70,6 +78,11 @@ export default class BaseScene extends Phaser.Scene {
     this.gesture = null; // gesto en curso (toque, arrastre, pellizco…)
     this.viewDirty = true; // la cámara cambió: hay que recolocar el mundo
     this.lastSound = {};
+    this.workers = new Map(); // id de edificio -> aldeano (adorno animado)
+    this.pop = new Map(); // id de edificio -> instante en que se construyó (animación)
+    this.firstBuild = true; // la primera vez los edificios ya existían: no hacen «pop»
+    this.questInit = false; // para no avisar de misiones que ya venían cumplidas
+    this.notifiedQuest = null;
   }
 
   preload() {
@@ -92,6 +105,7 @@ export default class BaseScene extends Phaser.Scene {
     this.createToolbar();
     this.createPanel();
     this.createZoomButtons();
+    this.createQuestBanner();
 
     this.ghost = this.add.image(0, 0, iconKey('mine')).setAlpha(0.7).setVisible(false).setDepth(DEPTH.ghost);
     this.selector = this.add
@@ -100,7 +114,7 @@ export default class BaseScene extends Phaser.Scene {
       .setVisible(false)
       .setDepth(DEPTH.selector);
     this.toast = this.add
-      .text(LAYOUT.width / 2, LAYOUT.gridTop + 24, '', {
+      .text(LAYOUT.width / 2, LAYOUT.gridTop + 58, '', {
         fontFamily: FONT,
         fontSize: '16px',
         color: '#ffffff',
@@ -377,6 +391,157 @@ export default class BaseScene extends Phaser.Scene {
     });
   }
 
+  /** Cartel de la misión en curso, arriba a la izquierda de la ventana del mapa. */
+  createQuestBanner() {
+    const x = 8;
+    const y = LAYOUT.gridTop + 6;
+    const w = 400;
+    const h = 44;
+    const d = DEPTH.zoomButtons;
+    const bg = this.add
+      .rectangle(x + w / 2, y + h / 2, w, h, 0x1a2a1a, 0.9)
+      .setStrokeStyle(2, COLORS.gold)
+      .setInteractive({ useHandCursor: true })
+      .setDepth(d);
+    const title = this.add
+      .text(x + 10, y + 6, '', { fontFamily: FONT, fontSize: '12px', color: TEXT.gold, fontStyle: 'bold' })
+      .setDepth(d + 1);
+    const detail = this.add.text(x + 10, y + 24, '', { fontFamily: FONT, fontSize: '11px', color: '#cfe0c8' }).setDepth(d + 1);
+    bg.on('pointerdown', () => this.onQuestClick());
+    this.questBanner = { bg, title, detail, parts: [bg, title, detail] };
+  }
+
+  updateQuestBanner() {
+    const state = store.get();
+    const { bg, title, detail, parts } = this.questBanner;
+    const quest = quests.currentQuest(state);
+    for (const p of parts) p.setVisible(Boolean(quest));
+    if (!quest) return;
+
+    const progress = quests.questProgress(state, quest);
+    const { claimed, total } = quests.questCounts(state);
+    title.setText(`Misión ${claimed + 1}/${total} · ${quest.text}`);
+    detail.setText(
+      progress.done
+        ? `¡Cumplida! Toca aquí para reclamar: ${rewardText(quest.reward, '+')}`
+        : `${progress.current}/${progress.target} · Premio: ${rewardText(quest.reward)}`,
+    );
+    bg.setStrokeStyle(2, progress.done ? COLORS.ok : COLORS.gold);
+    detail.setColor(progress.done ? '#b8f0b8' : '#cfe0c8');
+
+    // Avisa una sola vez cuando se cumple; las que ya venían cumplidas al abrir el juego no avisan.
+    if (progress.done && this.questInit && this.notifiedQuest !== quest.id) {
+      this.showToast('¡Misión cumplida! Toca el cartel para reclamar el premio', 2400);
+      this.play('upgrade_done');
+    }
+    if (progress.done) this.notifiedQuest = quest.id;
+    this.questInit = true;
+  }
+
+  onQuestClick() {
+    const state = store.get();
+    const quest = quests.currentQuest(state);
+    if (!quest) return;
+    const progress = quests.questProgress(state, quest);
+    if (!progress.done) {
+      this.showToast(`${quest.text}: ${progress.current}/${progress.target}`);
+      this.play('select');
+      return;
+    }
+    this.doAction(
+      () => quests.claimQuest(store.get(), quest.id),
+      (r) => `Misión cumplida · ${rewardText(r.granted, '+') || 'sin espacio para el premio'}`,
+      'collect_all',
+    );
+  }
+
+  /* ---------- efectos ---------- */
+
+  /** Texto que sube y se desvanece (por ejemplo «+44» al recolectar). */
+  floatText(x, y, text, color = TEXT.gold) {
+    const t = this.add
+      .text(x, y, text, { fontFamily: FONT, fontSize: '15px', fontStyle: 'bold', color, stroke: '#000000', strokeThickness: 3 })
+      .setOrigin(0.5)
+      .setDepth(DEPTH.toast - 10);
+    this.tweens.add({ targets: t, y: y - 36, alpha: 0, duration: 900, ease: 'Cubic.easeOut', onComplete: () => t.destroy() });
+  }
+
+  /** Nube de polvo al construir. */
+  dust(x, y) {
+    for (let i = 0; i < 7; i++) {
+      const a = (i / 7) * Math.PI * 2;
+      const puff = this.add.circle(x, y + 10, 3 + Math.random() * 2, 0xe8e0c8, 0.85).setDepth(DEPTH.ghost - 5);
+      this.tweens.add({
+        targets: puff,
+        x: x + Math.cos(a) * (16 + Math.random() * 10),
+        y: y + 10 + Math.sin(a) * 8,
+        alpha: 0,
+        scale: 0.4,
+        duration: 420,
+        onComplete: () => puff.destroy(),
+      });
+    }
+  }
+
+  /* ---------- aldeanos ---------- */
+
+  /** Crea o quita aldeanos para que haya uno por edificio productor, y actualiza su ruta. */
+  syncWorkers() {
+    const plan = new Map(plannedWorkers(store.get()).map((p) => [p.buildingId, p]));
+    for (const [id, w] of this.workers) {
+      if (plan.has(id)) continue;
+      w.img.destroy();
+      w.bundle.destroy();
+      this.workers.delete(id);
+    }
+    for (const [id, p] of plan) {
+      let w = this.workers.get(id);
+      if (!w) {
+        const key = p.resource === 'gold' ? 'worker_1' : 'worker_2';
+        const img = this.add.image(0, 0, key).setVisible(false);
+        const bundle = this.add
+          .rectangle(0, 0, 8, 6, p.resource === 'gold' ? COLORS.gold : COLORS.wood)
+          .setStrokeStyle(1, 0x000000, 0.7)
+          .setVisible(false);
+        w = { id, key, img, bundle, state: createWorker(id), plan: p };
+        this.workers.set(id, w);
+      }
+      w.plan = p; // el edificio pudo haberse movido
+    }
+  }
+
+  /** Mueve y dibuja a los aldeanos (cada cuadro). */
+  animateWorkers(dt, timeMs) {
+    const zoom = view.zoom;
+    for (const w of this.workers.values()) {
+      const { home, site } = w.plan;
+      stepWorker(w.state, dt, home, site);
+      const pos = workerPosition(w.state, home, site);
+
+      if (!isTileVisible(Math.round(pos.x), Math.round(pos.y))) {
+        w.img.setVisible(false);
+        w.bundle.setVisible(false);
+        continue;
+      }
+      const bob = pos.moving ? Math.abs(Math.sin(timeMs / 110 + w.id)) * 3 * zoom : 0;
+      const dirX = (site.x - home.x) * (w.state.phase === 'back' ? -1 : 1);
+
+      this.placeOnTile(w.img, w.key, pos.x, pos.y, WORKER_GROW)
+        .setDepth(DEPTH.world + pos.y + 0.6)
+        .setFlipX(dirX < 0)
+        .setVisible(true);
+      w.img.y -= bob;
+
+      // El bulto va sobre la cabeza: se usa el alto real del dibujo, no el del lienzo de 64 px.
+      const headroom = contentBounds(this.textures, w.key).h * spriteScale() * WORKER_GROW;
+      w.bundle
+        .setPosition(w.img.x, w.img.y - headroom - 2 * zoom)
+        .setScale(zoom)
+        .setDepth(w.img.depth + 0.01)
+        .setVisible(pos.carrying);
+    }
+  }
+
   /* ---------- selección ---------- */
 
   selectTool(tool) {
@@ -587,7 +752,8 @@ export default class BaseScene extends Phaser.Scene {
       const r = logic.collect(state, b);
       if (r.ok) {
         store.commit();
-        this.showToast(`+${r.amount} de ${r.resource === 'gold' ? 'oro' : 'madera'}`);
+        const c = tileCenter(b.x, b.y);
+        this.floatText(c.x, c.y - tileSize() / 2, `+${r.amount}`, r.resource === 'gold' ? TEXT.gold : TEXT.wood);
         this.play('collect');
       } else {
         this.play('select');
@@ -775,7 +941,15 @@ export default class BaseScene extends Phaser.Scene {
         .setDepth(depth + 0.4);
       const bar = this.add.graphics().setDepth(depth + 0.4);
       this.views.set(b.id, { type: b.type, objects: [sprite, crate, badge, level, sub, bar], sprite, crate, badge, level, sub, bar, depth });
+
+      if (!this.firstBuild) {
+        // Un edificio nuevo «salta» al aparecer y levanta polvo.
+        this.pop.set(b.id, this.time.now);
+        const c = tileCenter(b.x, b.y);
+        this.dust(c.x, c.y);
+      }
     }
+    this.firstBuild = false;
     this.refresh();
   }
 
@@ -785,6 +959,8 @@ export default class BaseScene extends Phaser.Scene {
     store.tick(now);
     this.announce();
     this.updateHud();
+    this.updateQuestBanner();
+    this.syncWorkers();
     if (this.selectedId !== null) this.updatePanel();
     this.renderWorld();
   }
@@ -854,7 +1030,15 @@ export default class BaseScene extends Phaser.Scene {
         for (const o of [v.level, v.sub, v.bar]) o.setDepth(depth + 0.4);
       }
 
-      this.placeOnTile(v.sprite, stats.sprite, b.x, b.y, BUILDING_GROW);
+      // Animación de «pop» al construir: crece con un pequeño rebote.
+      let grow = BUILDING_GROW;
+      const born = this.pop.get(b.id);
+      if (born !== undefined) {
+        const k = (this.time.now - born) / POP_MS;
+        if (k >= 1) this.pop.delete(b.id);
+        else grow *= 0.55 + 0.45 * (1 - (1 - k) ** 3) + 0.14 * Math.sin(k * Math.PI);
+      }
+      this.placeOnTile(v.sprite, stats.sprite, b.x, b.y, grow);
       v.sprite.setAlpha(this.movingId === b.id ? 0.35 : upgrading ? 0.35 : 1);
       v.crate.setPosition(c.x, c.y).setScale(scale * 0.7).setVisible(upgrading);
 
@@ -929,6 +1113,9 @@ export default class BaseScene extends Phaser.Scene {
       }
     }
 
+    this.animateWorkers(Math.min(delta, 250) / 1000, this.time.now);
+
+    if (this.pop.size) this.viewDirty = true; // hay animaciones de construcción en curso
     if (this.viewDirty) {
       this.viewDirty = false;
       this.renderWorld();

@@ -4,10 +4,10 @@
 // Nota de seguridad: el checksum NO impide hacer trampa (el código está en el
 // navegador y cualquiera puede recalcularlo). Solo detecta archivos dañados o
 // editados a mano sin querer. En un juego de un jugador está bien así.
-import { BUILDINGS, ECONOMY, GRID } from '../data/config.js';
+import { BUILDINGS, ECONOMY, GRID, QUESTS } from '../data/config.js';
 import { MAX_BUILDINGS, TOWN_HALL_CELL, createBuilding, findFreeCell, isBuildingType } from './logic.js';
 
-export const SAVE_VERSION = 3;
+export const SAVE_VERSION = 4;
 export const MAX_SAVE_BYTES = 200_000;
 
 const KEY = 'basebuilder.save';
@@ -81,6 +81,9 @@ function migrate(data, version) {
 
   if (version < 3) d = migrateV2toV3(d);
 
+  // v3 → v4: aparecieron las misiones. Una base ya avanzada las tendrá cumplidas y podrá reclamarlas.
+  if (version < 4) d = { ...d, claimedQuests: [] };
+
   return d;
 }
 
@@ -146,6 +149,14 @@ export function validateState(d) {
   if (!isNum(d.savedAt, 0, MAX_TIME)) bad('Fecha inválida');
   if (!Array.isArray(d.buildings) || d.buildings.length > MAX_BUILDINGS) bad('Edificios inválidos');
 
+  if (!Array.isArray(d.claimedQuests) || d.claimedQuests.length > QUESTS.length) bad('Misiones inválidas');
+  const knownQuests = new Set(QUESTS.map((q) => q.id));
+  const claimedQuests = d.claimedQuests.map((id) => {
+    if (typeof id !== 'string' || !knownQuests.has(id)) bad('Misión desconocida');
+    return id;
+  });
+  if (new Set(claimedQuests).size !== claimedQuests.length) bad('Misión repetida');
+
   const ids = new Set();
   const cells = new Set();
   let upgrading = 0;
@@ -197,6 +208,7 @@ export function validateState(d) {
     wood: Math.min(d.wood, cap),
     nextId: d.nextId,
     savedAt: d.savedAt,
+    claimedQuests,
     buildings,
   };
 }

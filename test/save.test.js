@@ -91,6 +91,12 @@ test('la validación rechaza datos con checksum correcto pero contenido imposibl
     'más mejoras que obreros': (s) => {
       for (const b of s.buildings) b.upgradeEndsAt = T0 + 1000; // 3 a la vez, con 2 obreros
     },
+    'misiones no es lista': (s) => (s.claimedQuests = 'q_sawmill'),
+    'misión desconocida': (s) => (s.claimedQuests = ['no_existe']),
+    'misión repetida': (s) => (s.claimedQuests = ['q_sawmill', 'q_sawmill']),
+    'misión como número': (s) => (s.claimedQuests = [5]),
+    'sin misiones (undefined)': (s) => delete s.claimedQuests,
+    'más misiones de las que existen': (s) => (s.claimedQuests = Array.from({ length: 99 }, (_, i) => `q${i}`)),
     'sin Ayuntamiento': (s) => s.buildings.splice(HALL, 1),
     'dos Ayuntamientos': (s) => {
       s.buildings.push({ id: 9, type: 'townhall', level: 1, upgradeEndsAt: null, x: 20, y: 20, stored: 0, lastTick: T0 });
@@ -124,6 +130,14 @@ test('una mejora en curso se guarda y se recupera igual', () => {
   assert.equal(r.ok, true);
   assert.deepEqual(r.state, s);
   assert.equal(r.state.buildings[MINE].upgradeEndsAt, s.buildings[MINE].upgradeEndsAt);
+});
+
+test('las misiones reclamadas se guardan y se recuperan', () => {
+  const s = sampleState();
+  s.claimedQuests = ['q_sawmill', 'q_mines'];
+  const r = parseSave(serialize(s));
+  assert.equal(r.ok, true);
+  assert.deepEqual(r.state.claimedQuests, ['q_sawmill', 'q_mines']);
 });
 
 test('el oro y la madera que exceden el tope se recortan al cargar', () => {
@@ -209,6 +223,22 @@ test('migración: si el centro está ocupado, el Ayuntamiento va a la casilla li
   const hall = townHall(r.state);
   assert.notDeepEqual([hall.x, hall.y], [TOWN_HALL_CELL.x, TOWN_HALL_CELL.y]);
   assert.ok(Math.max(Math.abs(hall.x - TOWN_HALL_CELL.x), Math.abs(hall.y - TOWN_HALL_CELL.y)) === 1);
+});
+
+test('migración v3 → v4: una partida con Ayuntamiento y madera sigue igual y empieza sin misiones reclamadas', () => {
+  const data = {
+    gold: 300,
+    wood: 120,
+    nextId: 4,
+    savedAt: T0,
+    buildings: [b2(1, 'townhall', 11, 11, 2), b2(2, 'mine', 8, 8, 3), b2(3, 'wall', 9, 9)],
+  };
+  const r = parseSave(JSON.stringify({ v: 3, sum: checksum(data), data }));
+  assert.equal(r.ok, true);
+  assert.deepEqual(r.state.claimedQuests, []);
+  assert.equal(r.state.wood, 120, 'no se toca la madera que ya tenía');
+  assert.equal(r.state.buildings.length, 3);
+  assert.equal(townHall(r.state).level, 2);
 });
 
 test('la migración no abre una partida antigua modificada, ni una con forma rara', () => {

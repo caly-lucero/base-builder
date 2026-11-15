@@ -121,5 +121,23 @@ export const BUILDINGS = {
   },
 };
 
+// Misiones: una cadena que guía al jugador (se hacen en orden). Cada una tiene un objetivo
+// que se evalúa mirando la partida y una recompensa que se reclama al cumplirla.
+//   { kind: 'count', building, min }   tener al menos `min` edificios de ese tipo
+//   { kind: 'townhall', level }        Ayuntamiento al menos en ese nivel
+//   { kind: 'anyLevel', level }        algún edificio (que no sea el Ayuntamiento) al menos en ese nivel
+export const QUESTS = [
+  { id: 'q_sawmill', text: 'Construye un Aserradero', goal: { kind: 'count', building: 'sawmill', min: 1 }, reward: { wood: 40 } },
+  { id: 'q_mines', text: 'Ten 2 Minas de oro', goal: { kind: 'count', building: 'mine', min: 2 }, reward: { gold: 60 } },
+  { id: 'q_storage', text: 'Construye un Almacén', goal: { kind: 'count', building: 'storage', min: 1 }, reward: { gold: 80, wood: 20 } },
+  { id: 'q_walls', text: 'Levanta 5 Muros', goal: { kind: 'count', building: 'wall', min: 5 }, reward: { wood: 40 } },
+  { id: 'q_tower', text: 'Construye una Torre', goal: { kind: 'count', building: 'tower', min: 1 }, reward: { gold: 100 } },
+  { id: 'q_hall2', text: 'Sube el Ayuntamiento a Fortaleza', goal: { kind: 'townhall', level: 2 }, reward: { gold: 200, wood: 100 } },
+  { id: 'q_upgrade', text: 'Mejora un edificio al nivel 2', goal: { kind: 'anyLevel', level: 2 }, reward: { gold: 120 } },
+  { id: 'q_mines4', text: 'Ten 4 Minas de oro', goal: { kind: 'count', building: 'mine', min: 4 }, reward: { gold: 200 } },
+  { id: 'q_walls20', text: 'Levanta 20 Muros', goal: { kind: 'count', building: 'wall', min: 20 }, reward: { wood: 120 } },
+  { id: 'q_hall3', text: 'Sube el Ayuntamiento a Castillo', goal: { kind: 'townhall', level: 3 }, reward: { gold: 500, wood: 300 } },
+];
+
 /** Edificios que el jugador puede construir, en el orden de la barra de herramientas. */
 export const BUILDABLE = Object.keys(BUILDINGS).filter((k) => BUILDINGS[k].buildable !== false);

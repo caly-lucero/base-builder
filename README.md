@@ -14,7 +14,9 @@ Prototipo de juego de estrategia con construcción de base (un jugador), hecho c
 - **Mover edificios** arrastrándolos (gratis).
 - **Demoler**: devuelve el 50 % de lo invertido (construcción + mejoras).
 - La producción y las mejoras **siguen mientras no juegas** (máximo 8 h de producción); al volver, el juego avisa qué terminó.
-- **Arte y sonido (Kenney, CC0)**: terreno, edificios con un dibujo distinto por nivel, adornos (árboles, rocas, arbustos), 10 efectos de sonido y botón **Sonido: sí/no**.
+- **Misiones**: una cadena de 10 objetivos que guía la partida («Construye un Aserradero», «Ten 2 Minas de oro», «Sube el Ayuntamiento a Fortaleza»…). El cartel de arriba a la izquierda muestra la actual y su avance; al cumplirla se pone verde y la tocas para **reclamar el premio**. Se hacen en orden; los premios no pasan del tope de recursos.
+- **Vida**: un **aldeano** por cada mina y aserradero camina entre el Ayuntamiento y su edificio llevando la carga (es adorno: no cambia la economía). Al recolectar suben números flotantes (+120); al construir, el edificio «salta» con una nube de polvo.
+- **Arte y sonido (Kenney, CC0)**: terreno, edificios con un dibujo distinto por nivel, adornos (árboles, rocas, arbustos), aldeanos, 10 efectos de sonido y botón **Sonido: sí/no**.
 - Guardado automático, exportar/importar partida y funcionamiento sin conexión.
 
 ## Controles
@@ -50,6 +52,8 @@ En Windows PowerShell, si `npm` da error de «ejecución de scripts deshabilitad
 - `src/game/store.js` — estado único, autoguardado y avisos.
 - `src/game/projection.js` — **único** lugar que convierte casillas ↔ pantalla y que lleva la cámara (desplazamiento y zoom). Hoy cenital 2D; ver *Pasar a isométrico*.
 - `src/game/sprites.js` — mide el área real de cada dibujo para apoyarlo bien sobre su casilla.
+- `src/game/quests.js` — misiones: progreso (calculado, no guardado) y reclamo de premios. Los datos están en `QUESTS` de `config.js`.
+- `src/game/workers.js` — rutas y tiempos de los aldeanos (lógica pura; el dibujo está en la escena).
 - `src/game/decor.js` — adornos del mapa generados con semilla fija (no se guardan).
 - `src/game/prefs.js` — preferencias del dispositivo (sonido), aparte de la partida.
 - `src/scenes/BaseScene.js` — dibujo, gestos (tocar, arrastrar, pellizcar), sonido y HUD con Phaser.
@@ -74,12 +78,15 @@ Arte y sonido de [Kenney](https://kenney.nl) (packs Medieval RTS, Interface Soun
 - Las pruebas de PWA se hicieron a mano (instalación, sin conexión); falta pasar **Lighthouse**.
 - El pellizco con dos dedos está implementado pero **no se ha probado en un móvil real** (solo con ratón y teclado).
 - Las mejoras usan la hora del sistema: adelantar el reloj las termina antes. El juego limita el daño (una mejora nunca puede quedar más lejos que su duración total), pero no puede impedirlo del todo; es aceptable sin ranking.
-- Si cambia el formato del guardado, subir `SAVE_VERSION` y añadir el paso en `migrate()` de `save.js`. Ejemplos: v1→v2 (niveles) y v2→v3 (mapa 12×12 → 24×24, madera y Ayuntamiento).
+- Si cambia el formato del guardado, subir `SAVE_VERSION` y añadir el paso en `migrate()` de `save.js`. Ejemplos: v1→v2 (niveles), v2→v3 (mapa 12×12 → 24×24, madera y Ayuntamiento) y v3→v4 (misiones). Una base avanzada que se migra tendrá varias misiones ya cumplidas y podrá reclamarlas.
 - Los sonidos son `.ogg`: algunos navegadores antiguos de Apple no los reproducen (el juego funciona igual, sin sonido).
 - El lienzo es de 576 px de ancho y se escala a la pantalla; en pantallas grandes los dibujos se ven algo suavizados.
 - Los muros son piezas sueltas (no se unen entre sí al dibujarse).
 
-## Siguientes pasos
-1. **Combate**, con dos formas posibles (a decidir): ataque automático contra bases generadas, al estilo Backyard Monsters, o control directo de unidades y un **héroe**, al estilo Warcraft III.
-2. Unidades entrenables y suministro (granjas, como en Warcraft III).
-3. Campaña con bases enemigas generadas.
+## Hoja de ruta
+Se decidió que el juego debía sentirse menos básico: *quieto, con poco que hacer, sin objetivos y sin combate*. Por etapas:
+
+1. **Vida y metas** — hecho: aldeanos, efectos y misiones.
+2. **Más contenido**: granja (limita la población, como en Warcraft III), cuartel, altar del héroe, murallas con puertas, más decoración y más misiones (una segunda cadena y logros). Algunas de esas piezas también preparan el combate.
+3. **Combate y campaña**, con dos formas posibles (a decidir): ataque automático contra bases generadas, al estilo Backyard Monsters, o control directo de unidades y un **héroe**, al estilo Warcraft III.
+4. En cualquier momento: publicarlo gratis (GitHub Pages) para instalarlo y probarlo en el celular, y pasar Lighthouse.

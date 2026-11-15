@@ -26,6 +26,7 @@ Las imágenes son las del tamaño «Default size» (64×64 px), renombradas.
 | `tree_a`, `tree_b`, `tree_c` | `medievalEnvironment_02`, `_03`, `_04` |
 | `rock_a`, `rock_b`, `rock_c` | `medievalEnvironment_08`, `_09`, `_10` |
 | `bush_a`, `bush_b` | `medievalEnvironment_13`, `_20` |
+| `worker_1` … `worker_4` | `medievalUnit_06`, `_12`, `_18`, `_24` |
 | `crate` | `medievalTile_55` |
 
 | Archivo en `audio/` | Original | Pack |

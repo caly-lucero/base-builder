@@ -17,6 +17,7 @@ export function createNewState(now = Date.now()) {
     wood: ECONOMY.start.wood,
     nextId: 2,
     buildings: [createBuilding(1, 'townhall', TOWN_HALL_CELL.x, TOWN_HALL_CELL.y, now)],
+    claimedQuests: [], // ids de las misiones ya reclamadas (ver quests.js)
     savedAt: now,
   };
 }
