@@ -5,9 +5,9 @@
 // navegador y cualquiera puede recalcularlo). Solo detecta archivos dañados o
 // editados a mano sin querer. En un juego de un jugador está bien así.
 import { BUILDINGS, ECONOMY, GRID } from '../data/config.js';
-import { MAX_BUILDINGS, isBuildingType } from './logic.js';
+import { MAX_BUILDINGS, TOWN_HALL_CELL, createBuilding, findFreeCell, isBuildingType } from './logic.js';
 
-export const SAVE_VERSION = 2;
+export const SAVE_VERSION = 3;
 export const MAX_SAVE_BYTES = 200_000;
 
 const KEY = 'basebuilder.save';
@@ -79,7 +79,50 @@ function migrate(data, version) {
     };
   }
 
+  if (version < 3) d = migrateV2toV3(d);
+
   return d;
+}
+
+// v2 → v3: el mapa pasó de 12×12 a 24×24, apareció la madera y el Ayuntamiento.
+// Las constantes son las de aquella época a propósito: describen cómo eran las partidas v2,
+// no cómo es el juego hoy.
+const V2_TO_V3_SHIFT = 6; // (24 − 12) / 2: la base antigua queda centrada en el mapa nuevo
+const V3_WOOD_GIFT = 60;
+
+function migrateV2toV3(data) {
+  const d = { ...data, wood: V3_WOOD_GIFT };
+  if (!Array.isArray(d.buildings) || !Number.isInteger(d.nextId)) return d; // la validación lo rechazará
+
+  const buildings = d.buildings.map((b) =>
+    isPlainObject(b) && Number.isInteger(b.x) && Number.isInteger(b.y)
+      ? { ...b, x: b.x + V2_TO_V3_SHIFT, y: b.y + V2_TO_V3_SHIFT }
+      : b,
+  );
+  const valid = buildings.filter((b) => isPlainObject(b) && isBuildingType(b.type));
+
+  // El Ayuntamiento nace en el centro (o en la casilla libre más cercana) y con el nivel
+  // mínimo que permita que lo que el jugador ya tenía siga siendo legal.
+  const cell = findFreeCell(new Set(valid.map((b) => `${b.x},${b.y}`)), TOWN_HALL_CELL.x, TOWN_HALL_CELL.y);
+  if (!cell) return { ...d, buildings };
+
+  const counts = {};
+  let highest = 1;
+  for (const b of valid) {
+    counts[b.type] = (counts[b.type] ?? 0) + 1;
+    if (Number.isInteger(b.level)) highest = Math.max(highest, b.level);
+  }
+  const halls = BUILDINGS.townhall.levels;
+  let level = Math.min(Math.max(highest, 1), halls.length);
+  while (level < halls.length && Object.entries(counts).some(([type, n]) => n > (halls[level - 1].limits[type] ?? Infinity))) {
+    level++;
+  }
+
+  return {
+    ...d,
+    nextId: d.nextId + 1,
+    buildings: [...buildings, createBuilding(d.nextId, 'townhall', cell.x, cell.y, Number.isFinite(d.savedAt) ? d.savedAt : 0, level)],
+  };
 }
 
 /* ---------- validación estricta ---------- */
@@ -98,6 +141,7 @@ function bad(msg) {
 export function validateState(d) {
   if (!isPlainObject(d)) bad('Estado inválido');
   if (!isInt(d.gold, 0, MAX_GOLD)) bad('Oro inválido');
+  if (!isInt(d.wood, 0, MAX_GOLD)) bad('Madera inválida');
   if (!isInt(d.nextId, 1, 10_000_000)) bad('Contador inválido');
   if (!isNum(d.savedAt, 0, MAX_TIME)) bad('Fecha inválida');
   if (!Array.isArray(d.buildings) || d.buildings.length > MAX_BUILDINGS) bad('Edificios inválidos');
@@ -105,6 +149,7 @@ export function validateState(d) {
   const ids = new Set();
   const cells = new Set();
   let upgrading = 0;
+  let townHalls = 0;
   const buildings = d.buildings.map((b) => {
     if (!isPlainObject(b)) bad('Edificio inválido');
     if (!isBuildingType(b.type)) bad('Tipo de edificio desconocido');
@@ -123,6 +168,8 @@ export function validateState(d) {
       if (++upgrading > ECONOMY.builders) bad('Más mejoras simultáneas de las permitidas');
     }
 
+    if (b.type === 'townhall') townHalls++;
+
     const cell = b.x + ',' + b.y;
     if (ids.has(b.id)) bad('Id repetido');
     if (cells.has(cell)) bad('Dos edificios en la misma casilla');
@@ -140,11 +187,14 @@ export function validateState(d) {
     };
   });
 
+  if (townHalls !== 1) bad('Debe haber exactamente un Ayuntamiento');
+
   let cap = ECONOMY.baseCap;
   for (const b of buildings) cap += BUILDINGS[b.type].levels[b.level - 1].capBonus ?? 0;
 
   return {
     gold: Math.min(d.gold, cap),
+    wood: Math.min(d.wood, cap),
     nextId: d.nextId,
     savedAt: d.savedAt,
     buildings,

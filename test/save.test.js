@@ -1,26 +1,38 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createNewState, place, startUpgrade } from '../src/game/logic.js';
+import { ECONOMY } from '../src/data/config.js';
+import { TOWN_HALL_CELL, createNewState, place, startUpgrade, townHall } from '../src/game/logic.js';
 import { MAX_SAVE_BYTES, SAVE_VERSION, checksum, parseSave, serialize } from '../src/game/save.js';
 
 const T0 = 1_700_000_000_000;
 
+// Índices en state.buildings de la partida de ejemplo: [0] Ayuntamiento, [1] mina, [2] torre.
+const HALL = 0;
+const MINE = 1;
+const TOWER = 2;
+
 function sampleState() {
   const s = createNewState(T0);
   s.gold = 1000;
+  s.wood = 1000;
+  townHall(s).level = 3;
   place(s, 'mine', 2, 2, T0);
   place(s, 'tower', 5, 5, T0);
-  s.gold = 300; // dentro del límite de oro sin almacenes
+  s.gold = 300; // dentro del tope de recursos sin almacenes
+  s.wood = 200;
   return s;
 }
 
-/** Reescribe un guardado con datos alterados pero con checksum "válido" (como haría un tramposo). */
+/** Reescribe un guardado con datos alterados pero sin recalcular el checksum (como haría alguien torpe). */
 function tamper(state, mutate) {
   const env = JSON.parse(serialize(state));
   mutate(env.data);
-  // Recalcular el checksum importando la misma función indirectamente: serializamos de nuevo.
   return JSON.stringify(env);
 }
+
+// serialize() no valida: calcula el checksum del dato que le pasen, así podemos probar
+// la validación con datos imposibles pero con checksum correcto (como haría un tramposo hábil).
+const serializeRaw = (state) => serialize(state);
 
 test('ida y vuelta: lo que se guarda se recupera igual', () => {
   const s = sampleState();
@@ -38,8 +50,7 @@ test('rechaza texto vacío, no JSON y archivos enormes', () => {
 });
 
 test('un cambio manual sin recalcular el checksum se detecta', () => {
-  const s = sampleState();
-  const text = tamper(s, (d) => {
+  const text = tamper(sampleState(), (d) => {
     d.gold = 999_999;
   });
   const r = parseSave(text);
@@ -49,40 +60,41 @@ test('un cambio manual sin recalcular el checksum se detecta', () => {
 
 test('rechaza una versión más nueva que la del juego', () => {
   const env = JSON.parse(serialize(sampleState()));
-  env.v = 99;
+  env.v = SAVE_VERSION + 1;
   assert.equal(parseSave(JSON.stringify(env)).ok, false);
 });
-
-// Para probar la validación saltando el checksum construimos el sobre con la misma
-// función de serialización de un estado ya inválido en memoria.
-function serializeRaw(state) {
-  return serialize(state); // serialize no valida: calcula el checksum del dato que le pasen
-}
 
 test('la validación rechaza datos con checksum correcto pero contenido imposible', () => {
   const cases = {
     'oro negativo': (s) => (s.gold = -5),
     'oro decimal': (s) => (s.gold = 1.5),
     'oro como texto': (s) => (s.gold = '100'),
-    'tipo desconocido': (s) => (s.buildings[0].type = 'dragon'),
-    'tipo __proto__': (s) => (s.buildings[0].type = '__proto__'),
-    'fuera del mapa': (s) => (s.buildings[0].x = 50),
-    'misma casilla': (s) => ((s.buildings[1].x = s.buildings[0].x), (s.buildings[1].y = s.buildings[0].y)),
-    'id repetido': (s) => (s.buildings[1].id = s.buildings[0].id),
-    'producción sobre capacidad': (s) => (s.buildings[0].stored = 99_999),
-    'NaN en producción': (s) => (s.buildings[0].stored = NaN),
+    'madera negativa': (s) => (s.wood = -1),
+    'madera como texto': (s) => (s.wood = '10'),
+    'sin madera (undefined)': (s) => delete s.wood,
+    'tipo desconocido': (s) => (s.buildings[MINE].type = 'dragon'),
+    'tipo __proto__': (s) => (s.buildings[MINE].type = '__proto__'),
+    'fuera del mapa': (s) => (s.buildings[MINE].x = 50),
+    'casilla negativa': (s) => (s.buildings[MINE].y = -1),
+    'misma casilla': (s) => ((s.buildings[TOWER].x = s.buildings[MINE].x), (s.buildings[TOWER].y = s.buildings[MINE].y)),
+    'id repetido': (s) => (s.buildings[TOWER].id = s.buildings[MINE].id),
+    'producción sobre capacidad': (s) => (s.buildings[MINE].stored = 99_999),
+    'NaN en producción': (s) => (s.buildings[MINE].stored = NaN),
     'edificios no es lista': (s) => (s.buildings = {}),
-    'nivel 0': (s) => (s.buildings[0].level = 0),
-    'nivel sobre el máximo': (s) => (s.buildings[0].level = 4),
-    'nivel decimal': (s) => (s.buildings[0].level = 1.5),
-    'mejora sin fecha (undefined)': (s) => delete s.buildings[0].upgradeEndsAt,
-    'fecha de mejora como texto': (s) => (s.buildings[0].upgradeEndsAt = '123'),
-    'fecha de mejora negativa': (s) => (s.buildings[0].upgradeEndsAt = -1),
-    'mejora en edificio de nivel máximo': (s) => ((s.buildings[0].level = 3), (s.buildings[0].upgradeEndsAt = T0 + 1000)),
+    'nivel 0': (s) => (s.buildings[MINE].level = 0),
+    'nivel sobre el máximo': (s) => (s.buildings[MINE].level = 4),
+    'nivel decimal': (s) => (s.buildings[MINE].level = 1.5),
+    'mejora sin fecha (undefined)': (s) => delete s.buildings[MINE].upgradeEndsAt,
+    'fecha de mejora como texto': (s) => (s.buildings[MINE].upgradeEndsAt = '123'),
+    'fecha de mejora negativa': (s) => (s.buildings[MINE].upgradeEndsAt = -1),
+    'mejora en edificio de nivel máximo': (s) => ((s.buildings[HALL].level = 3), (s.buildings[HALL].upgradeEndsAt = T0 + 1000)),
     'más mejoras que obreros': (s) => {
-      for (const b of s.buildings) b.upgradeEndsAt = T0 + 1000;
-      s.buildings.push({ id: 3, type: 'mine', level: 1, upgradeEndsAt: T0 + 1000, x: 8, y: 8, stored: 0, lastTick: T0 });
-      s.nextId = 4;
+      for (const b of s.buildings) b.upgradeEndsAt = T0 + 1000; // 3 a la vez, con 2 obreros
+    },
+    'sin Ayuntamiento': (s) => s.buildings.splice(HALL, 1),
+    'dos Ayuntamientos': (s) => {
+      s.buildings.push({ id: 9, type: 'townhall', level: 1, upgradeEndsAt: null, x: 20, y: 20, stored: 0, lastTick: T0 });
+      s.nextId = 10;
     },
   };
   for (const [name, mutate] of Object.entries(cases)) {
@@ -97,24 +109,36 @@ test('la validación rechaza datos con checksum correcto pero contenido imposibl
 test('descarta campos desconocidos del archivo', () => {
   const s = sampleState();
   s.extra = 'inyectado';
-  s.buildings[0].admin = true;
+  s.buildings[MINE].admin = true;
   const r = parseSave(serializeRaw(s));
   assert.equal(r.ok, true);
   assert.equal('extra' in r.state, false);
-  assert.equal('admin' in r.state.buildings[0], false);
+  assert.equal('admin' in r.state.buildings[MINE], false);
 });
 
 test('una mejora en curso se guarda y se recupera igual', () => {
   const s = sampleState();
   s.gold = 400;
-  startUpgrade(s, s.buildings[0].id, T0);
+  startUpgrade(s, s.buildings[MINE].id, T0);
   const r = parseSave(serialize(s));
   assert.equal(r.ok, true);
   assert.deepEqual(r.state, s);
-  assert.equal(r.state.buildings[0].upgradeEndsAt, s.buildings[0].upgradeEndsAt);
+  assert.equal(r.state.buildings[MINE].upgradeEndsAt, s.buildings[MINE].upgradeEndsAt);
 });
 
-/** Construye una partida tal como la guardaba la versión 1 (sin nivel ni mejoras). */
+test('el oro y la madera que exceden el tope se recortan al cargar', () => {
+  const s = sampleState();
+  s.gold = 900_000;
+  s.wood = 800_000;
+  const r = parseSave(serializeRaw(s));
+  assert.equal(r.ok, true);
+  assert.equal(r.state.gold, ECONOMY.baseCap);
+  assert.equal(r.state.wood, ECONOMY.baseCap);
+});
+
+/* ---------- migraciones ---------- */
+
+/** Partida tal como la guardaba la versión 1 (sin nivel, mejoras, madera ni Ayuntamiento; mapa de 12×12). */
 function v1Save(mutate = () => {}) {
   const data = {
     gold: 250,
@@ -129,17 +153,62 @@ function v1Save(mutate = () => {}) {
   return JSON.stringify({ v: 1, sum: checksum(data), data });
 }
 
-test('migración v1 → v2: una partida antigua se abre con todos los edificios en nivel 1', () => {
-  assert.ok(SAVE_VERSION >= 2);
+/** Partida v2: con niveles y mejoras, pero sin madera ni Ayuntamiento. */
+function v2Save(buildings, extra = {}) {
+  const data = { gold: 400, nextId: 20, savedAt: T0, buildings, ...extra };
+  return JSON.stringify({ v: 2, sum: checksum(data), data });
+}
+
+const b2 = (id, type, x, y, level = 1, upgradeEndsAt = null, stored = 0) => ({ id, type, level, upgradeEndsAt, x, y, stored, lastTick: T0 });
+
+test('migración v1 → v3: una partida de la fase 1 se abre centrada, con madera y Ayuntamiento', () => {
   const r = parseSave(v1Save());
   assert.equal(r.ok, true);
   assert.equal(r.state.gold, 250);
-  assert.equal(r.state.buildings.length, 2);
-  for (const b of r.state.buildings) {
-    assert.equal(b.level, 1);
-    assert.equal(b.upgradeEndsAt, null);
-  }
-  assert.equal(r.state.buildings[0].stored, 12.5); // conserva lo que había
+  assert.equal(r.state.wood, 60);
+
+  const mine = r.state.buildings.find((b) => b.type === 'mine');
+  const storage = r.state.buildings.find((b) => b.type === 'storage');
+  assert.deepEqual([mine.x, mine.y], [8, 8], 'la base se centra: +6 en cada eje');
+  assert.deepEqual([storage.x, storage.y], [10, 10]);
+  assert.equal(mine.level, 1);
+  assert.equal(mine.stored, 12.5, 'conserva lo que había');
+
+  const hall = townHall(r.state);
+  assert.ok(hall, 'tiene Ayuntamiento');
+  assert.deepEqual([hall.x, hall.y], [TOWN_HALL_CELL.x, TOWN_HALL_CELL.y]);
+  assert.equal(hall.level, 1);
+  assert.equal(r.state.buildings.length, 3);
+});
+
+test('migración v2 → v3: conserva niveles y mejoras en curso, y el Ayuntamiento sube lo necesario', () => {
+  const endsAt = T0 + 20_000;
+  const r = parseSave(
+    v2Save([b2(1, 'mine', 1, 1, 3), b2(2, 'storage', 2, 1, 2, endsAt), b2(3, 'tower', 3, 1, 1)]),
+  );
+  assert.equal(r.ok, true);
+  const hall = townHall(r.state);
+  assert.equal(hall.level, 3, 'hay una mina nivel 3: el Ayuntamiento no puede ser menor');
+  assert.equal(r.state.buildings.find((b) => b.type === 'storage').upgradeEndsAt, endsAt);
+  assert.equal(r.state.nextId, 21);
+  assert.equal(hall.id, 20, 'el Ayuntamiento toma el siguiente id libre');
+});
+
+test('migración: el Ayuntamiento sube de nivel si no, la partida antigua rompería los límites', () => {
+  // 5 minas de nivel 1: el nivel 1 solo permite 3, así que hace falta al menos el nivel 2.
+  const mines = [1, 2, 3, 4, 5].map((i) => b2(i, 'mine', i, 0));
+  const r = parseSave(v2Save(mines, { nextId: 10 }));
+  assert.equal(r.ok, true);
+  assert.equal(townHall(r.state).level, 2);
+});
+
+test('migración: si el centro está ocupado, el Ayuntamiento va a la casilla libre más cercana', () => {
+  // (5,5) en el mapa viejo es (11,11) en el nuevo: justo donde nace el Ayuntamiento.
+  const r = parseSave(v2Save([b2(1, 'mine', 5, 5)]));
+  assert.equal(r.ok, true);
+  const hall = townHall(r.state);
+  assert.notDeepEqual([hall.x, hall.y], [TOWN_HALL_CELL.x, TOWN_HALL_CELL.y]);
+  assert.ok(Math.max(Math.abs(hall.x - TOWN_HALL_CELL.x), Math.abs(hall.y - TOWN_HALL_CELL.y)) === 1);
 });
 
 test('la migración no abre una partida antigua modificada, ni una con forma rara', () => {
@@ -150,12 +219,6 @@ test('la migración no abre una partida antigua modificada, ni una con forma rar
   // forma rara pero con checksum correcto: la migración no debe lanzar, la validación debe rechazar
   assert.equal(parseSave(v1Save((d) => (d.buildings = 'no soy una lista'))).ok, false);
   assert.equal(parseSave(v1Save((d) => (d.buildings = [null, 5, 'x']))).ok, false);
-});
-
-test('el oro que excede la capacidad se recorta al cargar', () => {
-  const s = sampleState();
-  s.gold = 900_000;
-  const r = parseSave(serializeRaw(s));
-  assert.equal(r.ok, true);
-  assert.equal(r.state.gold, 500); // límite base sin almacenes
+  assert.equal(parseSave(v1Save((d) => (d.nextId = 'x'))).ok, false);
+  assert.equal(parseSave(v1Save((d) => (d.buildings[0].x = 'x'))).ok, false);
 });

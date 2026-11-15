@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { LAYOUT } from './data/config.js';
+import * as prefs from './game/prefs.js';
 import { MAX_SAVE_BYTES, parseSave, serialize } from './game/save.js';
 import * as store from './game/store.js';
 import BaseScene from './scenes/BaseScene.js';
@@ -28,6 +29,21 @@ const game = new Phaser.Game({
   scene: [],
 });
 game.scene.add('BaseScene', BaseScene, true, { gained: boot.gained });
+
+/* ---------- sonido ---------- */
+
+const soundBtn = $('btn-sound');
+function paintSoundButton() {
+  const on = !prefs.get().muted;
+  soundBtn.textContent = `Sonido: ${on ? 'sí' : 'no'}`;
+  soundBtn.setAttribute('aria-pressed', String(on));
+}
+paintSoundButton();
+soundBtn.addEventListener('click', () => {
+  prefs.setMuted(!prefs.get().muted);
+  game.sound.mute = prefs.get().muted;
+  paintSoundButton();
+});
 
 /* ---------- guardado en momentos clave ---------- */
 

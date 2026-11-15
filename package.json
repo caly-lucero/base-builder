@@ -9,6 +9,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "icons": "node scripts/make-icons.mjs",
+    "walls": "node scripts/make-walls.mjs",
     "test": "node --test test/"
   },
   "dependencies": {
