@@ -18,7 +18,7 @@ test('los datos de las misiones son coherentes: ids únicos, objetivos y recompe
   assert.equal(new Set(questIds()).size, QUESTS.length, 'ids únicos');
   for (const q of QUESTS) {
     assert.ok(q.text && q.id, `misión sin texto o id: ${q.id}`);
-    assert.ok(['count', 'townhall', 'anyLevel', 'army', 'unit', 'hero'].includes(q.goal.kind), `${q.id}: objetivo desconocido`);
+    assert.ok(['count', 'townhall', 'anyLevel', 'army', 'unit', 'hero', 'campaign'].includes(q.goal.kind), `${q.id}: objetivo desconocido`);
     if (q.goal.kind === 'count') assert.ok(Object.hasOwn(BUILDINGS, q.goal.building), `${q.id}: edificio desconocido`);
     if (q.goal.kind === 'unit') assert.ok(Object.hasOwn(UNITS, q.goal.unit), `${q.id}: unidad desconocida`);
     assert.ok(Object.keys(q.reward).length > 0, `${q.id}: sin recompensa`);
@@ -86,6 +86,16 @@ test('las misiones de ejército y héroe siguen lo entrenado', () => {
   assert.equal(questProgress(s, hero).done, true);
 });
 
+test('las misiones de campaña siguen los niveles superados', () => {
+  const s = fresh();
+  const q = questById('q_win3');
+  assert.deepEqual(questProgress(s, q), { current: 0, target: 3, done: false });
+  s.campaign.cleared = 2;
+  assert.equal(questProgress(s, q).done, false);
+  s.campaign.cleared = 5;
+  assert.deepEqual(questProgress(s, q), { current: 3, target: 3, done: true });
+});
+
 test('el héroe no cuenta como unidad de ejército', () => {
   const s = fresh();
   s.hero = { level: 1 };
@@ -124,11 +134,11 @@ test('la recompensa no pasa del tope de recursos', () => {
 });
 
 test('se pueden reclamar varias misiones seguidas si ya estaban cumplidas, y al final no queda ninguna', () => {
-  const s = fresh(1_000_000, 1_000_000, 3);
+  const s = fresh(1_000_000, 1_000_000, 5);
   s.gold = s.wood = 0;
   // Una base avanzada que cumple todo de una vez (se omiten los topes con almacenes grandes).
   s.buildings.push(
-    ...[1, 2, 3, 4, 5].map((i) => ({ id: 100 + i, type: 'mine', level: 3, upgradeEndsAt: null, x: i, y: 0, stored: 0, lastTick: T0 })),
+    ...[1, 2, 3, 4, 5].map((i) => ({ id: 100 + i, type: 'mine', level: 5, upgradeEndsAt: null, x: i, y: 0, stored: 0, lastTick: T0 })),
     { id: 120, type: 'sawmill', level: 1, upgradeEndsAt: null, x: 0, y: 1, stored: 0, lastTick: T0 },
     { id: 121, type: 'storage', level: 3, upgradeEndsAt: null, x: 1, y: 1, stored: 0, lastTick: T0 },
     { id: 122, type: 'tower', level: 1, upgradeEndsAt: null, x: 2, y: 1, stored: 0, lastTick: T0 },
@@ -139,7 +149,8 @@ test('se pueden reclamar varias misiones seguidas si ya estaban cumplidas, y al 
     ...Array.from({ length: 20 }, (_, i) => ({ id: 200 + i, type: 'wall', level: 1, upgradeEndsAt: null, x: i, y: 2, stored: 0, lastTick: T0 })),
   );
   s.army = { soldier: 4, mage: 3, knight: 2 };
-  s.hero = { level: 1 };
+  s.hero = { level: 1, xp: 0 };
+  s.campaign.cleared = 3;
   let claimed = 0;
   while (currentQuest(s)) {
     const r = claimQuest(s, currentQuest(s).id);

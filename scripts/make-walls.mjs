@@ -180,10 +180,63 @@ function castleGate() {
   return c;
 }
 
+/* ---- enlaces: lo que une un muro con el de al lado (h) o con el de abajo (v) ----
+   Cada pieza termina en la misma línea de apoyo que su muro (palisada 51, piedra 52, castillo 53),
+   porque el juego apoya los dibujos por su borde inferior. */
+// Horizontal: la cara frontal del muro, sin contorno en los lados para que se funda con las dos casillas.
+function slab(c, x, y, w, h, fill, line, t = 1.6) {
+  c.rect(x, y, w, h, line);
+  c.rect(x, y + t, w, h - 2 * t, fill);
+}
+// Vertical: la parte de arriba del muro, que se ve entre un muro y el que tiene debajo (sin contorno arriba ni abajo).
+function strip(c, x, y, w, h, fill, line, t = 1.6) {
+  c.rect(x, y, w, h, line);
+  c.rect(x + t, y, w - 2 * t, h, fill);
+}
+
+function linkH1() {
+  const c = new Canvas();
+  slab(c, 18, 33, 28, 5, 0xa3693a, 0x7a4a22, 1.2); // travesaño alto
+  slab(c, 18, 46, 28, 5, 0xa3693a, 0x7a4a22, 1.2); // travesaño bajo
+  return c;
+}
+function linkH2() {
+  const c = new Canvas();
+  slab(c, 18, 25, 28, 27, 0xb4bbbd, 0x6f7a7e);
+  for (const y of [34, 43]) c.rect(18, y, 28, 1, 0x8f999d);
+  return c;
+}
+function linkH3() {
+  const c = new Canvas();
+  slab(c, 18, 24, 28, 29, 0xc9ced0, 0x5f6a6f);
+  slab(c, 18, 22, 28, 6, 0xd9674b, 0x9c3f2a, 1.2);
+  for (const y of [37, 46]) c.rect(18, y, 28, 1, 0x9aa3a7);
+  return c;
+}
+function linkV1() {
+  const c = new Canvas();
+  strip(c, 24, 6, 16, 36, 0xd7a263, 0x7a4a22);
+  c.rect(31.2, 6, 1.6, 36, 0xb07a3f); // junta entre tablas
+  return c;
+}
+function linkV2() {
+  const c = new Canvas();
+  strip(c, 24, 6, 16, 36, 0xd0d6d8, 0x6f7a7e);
+  return c;
+}
+function linkV3() {
+  const c = new Canvas();
+  strip(c, 24, 6, 16, 36, 0xd9dfe1, 0x5f6a6f);
+  c.rect(30.2, 6, 3.6, 36, 0xd9674b); // franja roja del remate
+  return c;
+}
+
 mkdirSync('public/assets/art', { recursive: true });
 for (const [name, make] of [
   ['wall_1', palisade], ['wall_2', stoneWall], ['wall_3', castleWall],
   ['gate_1', woodGate], ['gate_2', stoneGate], ['gate_3', castleGate],
+  ['wallh_1', linkH1], ['wallh_2', linkH2], ['wallh_3', linkH3],
+  ['wallv_1', linkV1], ['wallv_2', linkV2], ['wallv_3', linkV3],
 ]) {
   writeFileSync(`public/assets/art/${name}.png`, encodePng(SIZE, SIZE, make().toRgba()));
   console.log(`public/assets/art/${name}.png`);

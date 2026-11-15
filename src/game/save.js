@@ -16,7 +16,7 @@ import {
   supplyUsed,
 } from './logic.js';
 
-export const SAVE_VERSION = 5;
+export const SAVE_VERSION = 6;
 export const MAX_SAVE_BYTES = 200_000;
 
 const KEY = 'basebuilder.save';
@@ -103,6 +103,11 @@ function migrate(data, version) {
     };
   }
 
+  // v5 → v6: aparecieron la campaña y la experiencia del héroe.
+  if (version < 6) {
+    d = { ...d, campaign: { cleared: 0 }, hero: isPlainObject(d.hero) ? { ...d.hero, xp: 0 } : d.hero };
+  }
+
   return d;
 }
 
@@ -182,8 +187,11 @@ export function validateState(d) {
     if (!isInt(d.army[u], 0, 999)) bad('Ejército inválido');
     army[u] = d.army[u];
   }
-  if (d.hero !== null && !(isPlainObject(d.hero) && isInt(d.hero.level, 1, 10))) bad('Héroe inválido');
-  const hero = d.hero === null ? null : { level: d.hero.level };
+  if (d.hero !== null && !(isPlainObject(d.hero) && isInt(d.hero.level, 1, 10) && isInt(d.hero.xp, 0, 99_999))) bad('Héroe inválido');
+  const hero = d.hero === null ? null : { level: d.hero.level, xp: d.hero.xp };
+
+  if (!isPlainObject(d.campaign) || !isInt(d.campaign.cleared, 0, 9999)) bad('Campaña inválida');
+  const campaign = { cleared: d.campaign.cleared };
 
   const ids = new Set();
   const cells = new Set();
@@ -250,6 +258,7 @@ export function validateState(d) {
     claimedQuests,
     army,
     hero,
+    campaign,
     buildings,
   };
   // Un guardado no puede traer más unidades de las que sostiene la población.

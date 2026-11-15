@@ -301,7 +301,7 @@ test('solo hay tantas mejoras simultáneas como obreros (el Ayuntamiento tambié
 });
 
 test('mejorar valida recursos, nivel máximo, mejora repetida y existencia', () => {
-  const s = fresh(1000, 1000, 3);
+  const s = fresh(1000, 1000, 5);
   const { building } = place(s, 'mine', 0, 0, T0);
   assert.equal(startUpgrade(s, 999, T0).reason, 'No existe ese edificio');
 
@@ -312,11 +312,56 @@ test('mejorar valida recursos, nivel máximo, mejora repetida y existencia', () 
   startUpgrade(s, building.id, T0);
   assert.equal(startUpgrade(s, building.id, T0).reason, 'Ya se está mejorando');
 
-  tickAll(s, T0 + 60_000); // nivel 2
-  startUpgrade(s, building.id, T0 + 60_000);
-  tickAll(s, T0 + 60_000 + 10 * 60_000); // nivel 3 = máximo
-  assert.equal(building.level, 3);
-  assert.equal(startUpgrade(s, building.id, T0 + 20 * 60_000).reason, 'Ya está al nivel máximo');
+  // Sube hasta el máximo (nivel 5), pagando cada mejora y esperando a que termine.
+  let now = T0;
+  for (let level = 1; level < 5; level++) {
+    s.gold = 100_000;
+    s.wood = 100_000;
+    now += 3 * 60 * 60 * 1000;
+    tickAll(s, now); // termina la mejora en curso
+    if (building.level === level) assert.equal(startUpgrade(s, building.id, now).ok, true, `mejora al nivel ${level + 1}`);
+  }
+  now += 3 * 60 * 60 * 1000;
+  tickAll(s, now);
+  assert.equal(building.level, 5);
+  assert.equal(startUpgrade(s, building.id, now).reason, 'Ya está al nivel máximo');
+});
+
+test('los niveles 4 y 5 son «élite»: más fuertes, con el dibujo del nivel 3 teñido', () => {
+  for (const [type, def] of Object.entries(BUILDINGS)) {
+    if (type === 'altar') continue; // el altar tiene un solo nivel: el héroe sube por experiencia
+    assert.equal(def.levels.length, 5, `${type} tiene 5 niveles`);
+    assert.ok(def.levels[3].tint && def.levels[4].tint, `${type}: los niveles 4 y 5 llevan tinte`);
+    assert.equal(def.levels[3].sprite, def.levels[2].sprite, `${type}: el nivel 4 reutiliza el dibujo del 3`);
+    assert.equal(def.levels[0].tint, undefined);
+  }
+  // Producción y capacidad crecen en cada nivel.
+  for (const type of ['mine', 'sawmill']) {
+    const lv = BUILDINGS[type].levels;
+    for (let i = 1; i < 5; i++) assert.ok(lv[i].ratePerSec > lv[i - 1].ratePerSec && lv[i].capacity > lv[i - 1].capacity, `${type} nivel ${i + 1}`);
+  }
+  assert.ok(BUILDINGS.storage.levels[4].capBonus > BUILDINGS.storage.levels[3].capBonus);
+  assert.ok(BUILDINGS.farm.levels[4].supply > BUILDINGS.farm.levels[3].supply);
+  // Y el Ayuntamiento nuevo permite más de todo.
+  const th = BUILDINGS.townhall.levels;
+  for (let i = 1; i < 5; i++) {
+    assert.ok(th[i].baseSupply > th[i - 1].baseSupply);
+    for (const [type, n] of Object.entries(th[i - 1].limits)) assert.ok(th[i].limits[type] >= n, `${type} en el nivel ${i + 1}`);
+  }
+});
+
+test('un cuartel de nivel alto entrena más rápido', () => {
+  const s = fresh(5000, 5000, 5);
+  const b = place(s, 'barracks', 0, 0, T0).building;
+  startTraining(s, b.id, 'soldier', T0);
+  const normal = b.training.endsAt - T0;
+  tickAll(s, T0 + 60_000);
+  b.level = 5;
+  startTraining(s, b.id, 'soldier', T0 + 60_000);
+  const fast = b.training.endsAt - (T0 + 60_000);
+  assert.equal(normal, UNITS.soldier.trainSec * 1000);
+  assert.equal(fast, Math.round(UNITS.soldier.trainSec * 1000 * BUILDINGS.barracks.levels[4].trainFactor));
+  assert.ok(fast < normal);
 });
 
 test('un reloj o guardado manipulado no puede dejar una mejora más lejos que su duración', () => {
@@ -468,7 +513,7 @@ test('el altar solo se construye con el Ayuntamiento en nivel 2 y solo invoca un
   assert.equal(startTraining(s, altar.id, 'hero', T0).ok, true);
   assert.equal(supplyUsed(s), UNITS.hero.supply);
   tickAll(s, T0 + UNITS.hero.trainSec * 1000);
-  assert.deepEqual(s.hero, { level: 1 });
+  assert.deepEqual(s.hero, { level: 1, xp: 0 });
   assert.equal(startTraining(s, altar.id, 'hero', T0 + 100_000).reason, 'Ya tienes un héroe');
   assert.equal(armyCount(s), 0, 'el héroe no cuenta como ejército');
 });

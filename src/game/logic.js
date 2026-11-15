@@ -22,7 +22,8 @@ export function createNewState(now = Date.now()) {
     buildings: [createBuilding(1, 'townhall', TOWN_HALL_CELL.x, TOWN_HALL_CELL.y, now)],
     claimedQuests: [], // ids de las misiones ya reclamadas (ver quests.js)
     army: emptyArmy(), // unidades entrenadas, por tipo
-    hero: null, // null o { level }: solo puede haber un héroe
+    hero: null, // null o { level, xp }: solo puede haber un héroe
+    campaign: { cleared: 0 }, // niveles de campaña superados
     savedAt: now,
   };
 }
@@ -233,7 +234,7 @@ function tickTraining(state, b, now, events) {
 
   const key = b.training.unit;
   b.training = null;
-  if (unit.hero) state.hero = { level: 1 };
+  if (unit.hero) state.hero = { level: 1, xp: 0 };
   else state.army[key] = (state.army[key] ?? 0) + 1;
   events?.push({ type: 'trained', id: b.id, unit: key });
 }
@@ -317,7 +318,8 @@ export function startTraining(state, id, unitKey, now) {
   if (missing) return fail(insufficient(missing));
 
   spend(state, unit.cost);
-  b.training = { unit: unitKey, endsAt: now + unit.trainSec * 1000 };
+  const factor = statsOf(b.type, b.level).trainFactor ?? 1; // los cuarteles de nivel alto entrenan más rápido
+  b.training = { unit: unitKey, endsAt: now + Math.round(unit.trainSec * 1000 * factor) };
   return { ok: true, endsAt: b.training.endsAt };
 }
 

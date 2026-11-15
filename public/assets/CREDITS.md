@@ -28,12 +28,14 @@ Las imágenes son las del tamaño «Default size» (64×64 px), renombradas.
 | `bush_a`, `bush_b` | `medievalEnvironment_13`, `_20` |
 | `worker_1` … `worker_4` | `medievalUnit_06`, `_12`, `_18`, `_24` |
 | `unit_soldier`, `unit_mage`, `unit_knight`, `unit_hero` | `medievalUnit_02`, `_01`, `_03`, `_04` |
+| `enemy_guard`, `enemy_brute` | `medievalUnit_08`, `_09` (equipo rojo) |
 | `barracks_1`, `barracks_2`, `barracks_3` | `medievalStructure_22`, `_10`, `_03` |
 | `farm_1`, `farm_2` | `medievalTile_54`, `_56` (con el fondo de césped quitado) |
 | `farm_3` | `medievalStructure_23` |
 | `altar_1` | `medievalStructure_12` |
 | `stump`, `log` | `medievalEnvironment_05`, `_06` |
 | `rock_d`, `rock_e`, `rock_f` | `medievalEnvironment_14`, `_15`, `_16` |
+| `wallh_1`…`wallh_3`, `wallv_1`…`wallv_3` | **Dibujados para este proyecto** con `scripts/make-walls.mjs`: piezas de enlace entre muros contiguos; se ofrecen también como CC0 |
 | `gate_1`, `gate_2`, `gate_3` | **Dibujados para este proyecto** con `scripts/make-walls.mjs`; se ofrecen también como CC0 |
 | `crate` | `medievalTile_55` |
 
@@ -48,6 +50,11 @@ Las imágenes son las del tamaño «Default size» (64×64 px), renombradas.
 | `error` | `error_004` | Interface Sounds |
 | `select` | `click_002` | Interface Sounds |
 | `move` | `drop_001` | Interface Sounds |
+| `hit` | `knifeSlice` | RPG Audio |
+| `shoot` | `metalClick` | RPG Audio |
+| `boom` | `doorClose_1` | RPG Audio |
+| `win` | `confirmation_002` | Interface Sounds |
+| `lose` | `error_007` | Interface Sounds |
 | `close` | `close_002` | Interface Sounds |
 
 El formato de audio es `.ogg`; algunos navegadores antiguos de Apple no lo reproducen (el juego funciona igual, sin sonido).

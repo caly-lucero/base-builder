@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 import { ASSET_BASE, IMAGES, SOUNDS } from '../data/assets.js';
-import { ART_SIZE, ARMY_UNITS, BUILDINGS, CAMERA, ECONOMY, GRID, LAYOUT, TOOL_PAGES, UNITS } from '../data/config.js';
+import { ART_SIZE, ARMY_UNITS, BUILDINGS, CAMERA, ECONOMY, GRID, HERO_MAX_LEVEL, LAYOUT, TOOL_PAGES, UNITS, heroXpToNext } from '../data/config.js';
 import { generateDecor } from '../game/decor.js';
 import * as logic from '../game/logic.js';
 import * as prefs from '../game/prefs.js';
@@ -19,6 +19,10 @@ import {
   view,
   zoomAt,
 } from '../game/projection.js';
+import { wallConnectors } from '../game/walls.js';
+import { renderConnectors } from './connectors.js';
+import { canAttack, nextCampaignLevel } from '../game/campaign.js';
+import { generateMission, missionName } from '../game/missions.js';
 import * as quests from '../game/quests.js';
 import { contentBounds } from '../game/sprites.js';
 import * as store from '../game/store.js';
@@ -69,6 +73,15 @@ const iconKey = (tool) => BUILDINGS[tool].levels[0].sprite;
 export default class BaseScene extends Phaser.Scene {
   constructor() {
     super('BaseScene');
+    this.resetFields();
+  }
+
+  /** Phaser reutiliza esta misma instancia al volver de una batalla: hay que partir siempre de cero. */
+  init() {
+    this.resetFields();
+  }
+
+  resetFields() {
     this.views = new Map(); // id de edificio -> objetos de Phaser
     this.tool = null;
     this.selectedId = null;
@@ -88,6 +101,9 @@ export default class BaseScene extends Phaser.Scene {
     this.heroView = null;
     this.camp = null;
     this.shrine = null;
+    this.modal = null;
+    this.toolPage = 0;
+    this.connectors = new Map(); // enlaces entre muros contiguos (ver renderWorld)
   }
 
   preload() {
@@ -154,6 +170,12 @@ export default class BaseScene extends Phaser.Scene {
     if (g.gold >= 1) parts.push(`${Math.floor(g.gold)} de oro`);
     if (g.wood >= 1) parts.push(`${Math.floor(g.wood)} de madera`);
     if (parts.length) this.welcome.push(`Mientras no estabas, tus edificios produjeron ${parts.join(' y ')}.`);
+    if (data?.report) {
+      const r = data.report;
+      this.welcome.push(
+        `${missionName(r.level)}: ${r.won ? '¡Victoria!' : 'Derrota'} · ${rewardText(r.loot, '+') || 'sin botín'}${r.heroLevelUps ? ' · ¡el héroe sube de nivel!' : ''}`,
+      );
+    }
     this.rebuildViews();
   }
 
@@ -443,6 +465,69 @@ export default class BaseScene extends Phaser.Scene {
       resetView(logic.townHall(store.get()) ?? undefined);
       this.viewDirty = true;
     });
+    make(top + 146, '⚔', '18px', () => this.openAttackModal());
+  }
+
+  /** Ventana para confirmar el ataque: muestra al enemigo y tus tropas. */
+  openAttackModal() {
+    if (this.modal) return;
+    const state = store.get();
+    const level = nextCampaignLevel(state);
+    const mission = generateMission(level);
+    const ready = canAttack(state);
+    const w = LAYOUT.width;
+    const d = DEPTH.panel + 100;
+    const cx = w / 2;
+    const cy = LAYOUT.gridTop + 230;
+    const a = state.army;
+    const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+    const lines = [
+      missionName(level),
+      `Enemigo: ${plural(mission.buildings.filter((b) => b.type !== 'wall').length, 'edificio', 'edificios')} · ${plural(mission.buildings.filter((b) => b.type === 'tower').length, 'torre', 'torres')} · ${plural(mission.defenders.length, 'defensor', 'defensores')}`,
+      ready
+        ? `Tus tropas: ${a.soldier} soldados · ${a.mage} hechiceros · ${a.knight} caballeros${state.hero ? ` · héroe nv. ${state.hero.level}` : ''}`
+        : 'No tienes tropas: entrénalas en el cuartel',
+    ];
+
+    const parts = [];
+    const add = (o) => {
+      parts.push(o);
+      return o;
+    };
+    add(this.add.rectangle(w / 2, LAYOUT.height / 2, w, LAYOUT.height, 0x000000, 0.6).setDepth(d).setInteractive());
+    add(this.add.rectangle(cx, cy, 480, 250, 0x1a2a1a, 0.98).setStrokeStyle(3, 0xd4a017).setDepth(d + 1));
+    add(this.add.text(cx, cy - 92, '⚔  Atacar', { fontFamily: FONT, fontSize: '26px', color: '#ffe9a0', fontStyle: 'bold' }).setOrigin(0.5).setDepth(d + 2));
+    add(
+      this.add
+        .text(cx, cy - 10, lines.join('\n'), { fontFamily: FONT, fontSize: '15px', color: '#e8eee0', align: 'center', lineSpacing: 9, wordWrap: { width: 440 } })
+        .setOrigin(0.5)
+        .setDepth(d + 2),
+    );
+
+    const button = (x, label, fill, onClick) => {
+      const r = add(this.add.rectangle(x, cy + 88, ready ? 200 : 240, 46, fill).setStrokeStyle(2, 0xffffff, 0.5).setInteractive({ useHandCursor: true }).setDepth(d + 2));
+      add(this.add.text(x, cy + 88, label, { fontFamily: FONT, fontSize: '17px', color: '#ffffff', fontStyle: 'bold' }).setOrigin(0.5).setDepth(d + 3));
+      r.on('pointerdown', onClick);
+    };
+    if (ready) {
+      button(cx - 108, 'Atacar', 0x9a3a2a, () => this.startBattle(level));
+      button(cx + 108, 'Cancelar', 0x324a32, () => this.closeModal());
+    } else {
+      button(cx, 'Cerrar', 0x324a32, () => this.closeModal());
+    }
+    this.modal = parts;
+    this.play('select');
+  }
+
+  closeModal() {
+    for (const p of this.modal ?? []) p.destroy();
+    this.modal = null;
+  }
+
+  startBattle(level) {
+    store.persist(); // guarda la base antes de salir
+    this.closeModal();
+    this.scene.start('BattleScene', { level });
   }
 
   /** Cartel de la misión en curso, arriba a la izquierda de la ventana del mapa. */
@@ -559,7 +644,8 @@ export default class BaseScene extends Phaser.Scene {
       this.fitIcon(card.icon, u.sprite, card.ix, card.iy, 38);
       card.name.setText(u.hero && heroTaken ? `${u.name} (invocado)` : u.name);
       card.cost.setText(locked ? `Requiere nivel ${u.minLevel}` : logic.formatCost(u.cost));
-      card.info.setText(`${logic.formatDuration(u.trainSec * 1000)} · Población ${u.supply}`);
+      const seconds = u.trainSec * (logic.statsOf(b.type, b.level).trainFactor ?? 1);
+      card.info.setText(`${logic.formatDuration(seconds * 1000)} · Población ${u.supply}`);
       for (const p of card.parts) p.setAlpha(usable ? 1 : 0.5);
       card.rect.setStrokeStyle(2, usable ? 0x8cc4f5 : 0x4a6a4a);
     });
@@ -782,8 +868,12 @@ export default class BaseScene extends Phaser.Scene {
     }
 
     const own = {
-      barracks: `Entrena: ${logic.trainableUnits(b).map((u) => UNITS[u].name).join(', ')}`,
-      altar: state.hero ? `Héroe invocado · nivel ${state.hero.level}` : 'Invoca a tu héroe (solo puede haber uno)',
+      barracks: `Entrena: ${logic.trainableUnits(b).map((u) => UNITS[u].name).join(', ')}${
+        stats.trainFactor ? ` · ${Math.round((1 - stats.trainFactor) * 100)} % más rápido` : ''
+      }`,
+      altar: state.hero
+        ? `Héroe nivel ${state.hero.level} · ${state.hero.level >= HERO_MAX_LEVEL ? 'nivel máximo' : `experiencia ${state.hero.xp}/${heroXpToNext(state.hero.level)}`}`
+        : 'Invoca a tu héroe (solo puede haber uno)',
       wall: 'Bloquea el paso (en el combate frenará al enemigo)',
       gate: 'Paso para tus unidades (en el combate)',
       tower: 'Defensa: se activa en la fase de combate',
@@ -794,7 +884,8 @@ export default class BaseScene extends Phaser.Scene {
     else if (b.level >= logic.townHallLevel(state)) lines.push(`Para el nivel ${b.level + 1}, sube antes el Ayuntamiento`);
     else if (b.type === 'barracks') {
       const unlocks = (BUILDINGS.barracks.trains ?? []).filter((u) => UNITS[u].minLevel === b.level + 1).map((u) => UNITS[u].name);
-      lines.push(`Nivel ${b.level + 1}: desbloquea ${unlocks.join(', ') || 'más resistencia'}`);
+      const faster = next.trainFactor ? `entrena ${Math.round((1 - next.trainFactor) * 100)} % más rápido` : null;
+      lines.push(`Nivel ${b.level + 1}: ${unlocks.length ? `desbloquea ${unlocks.join(', ')}` : (faster ?? 'más resistencia')}`);
     } else lines.push(`Nivel ${b.level + 1}: ${describe(next) ?? 'más resistencia'}`);
     return lines;
   }
@@ -1260,6 +1351,8 @@ export default class BaseScene extends Phaser.Scene {
         else grow *= 0.55 + 0.45 * (1 - (1 - k) ** 3) + 0.14 * Math.sin(k * Math.PI);
       }
       this.placeOnTile(v.sprite, stats.sprite, b.x, b.y, grow);
+      if (stats.tint) v.sprite.setTint(stats.tint); // los niveles 4 y 5 se ven dorados
+      else v.sprite.clearTint();
       v.sprite.setAlpha(this.movingId === b.id ? 0.35 : upgrading ? 0.35 : 1);
       v.crate.setPosition(c.x, c.y).setScale(scale * 0.7).setVisible(upgrading);
 
@@ -1280,7 +1373,7 @@ export default class BaseScene extends Phaser.Scene {
         v.bar.fillStyle(COLORS.progress, 1).fillRect(bx, by, bw * (1 - remaining / total), bh);
         v.sub.setText(logic.formatDuration(remaining));
       } else if (logic.isTraining(b)) {
-        const total = UNITS[b.training.unit].trainSec * 1000;
+        const total = UNITS[b.training.unit].trainSec * 1000 * (stats.trainFactor ?? 1);
         const remaining = Math.max(0, b.training.endsAt - Date.now());
         v.bar.fillStyle(0xffb86b, 1).fillRect(bx, by, bw * (1 - remaining / total), bh);
         v.sub.setText(logic.formatDuration(remaining));
@@ -1293,6 +1386,12 @@ export default class BaseScene extends Phaser.Scene {
         v.bar.clear(); // sin barra: no produce
       }
     }
+
+    // Los muros y puertas contiguos se dibujan unidos, como una sola pared.
+    renderConnectors(this, this.connectors, wallConnectors(state.buildings), {
+      grow: BUILDING_GROW,
+      tintFor: (c) => BUILDINGS.wall.levels[Math.min(c.level, 5) - 1]?.tint ?? null,
+    });
 
     const selected = this.selectedId !== null && state.buildings.find((b) => b.id === this.selectedId);
     if (selected) {

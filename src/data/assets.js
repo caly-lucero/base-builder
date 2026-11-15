@@ -17,7 +17,9 @@ const ART = [
   'barracks_1', 'barracks_2', 'barracks_3',
   'altar_1',
   'gate_1', 'gate_2', 'gate_3',
+  'wallh_1', 'wallh_2', 'wallh_3', 'wallv_1', 'wallv_2', 'wallv_3',
   'unit_soldier', 'unit_mage', 'unit_knight', 'unit_hero',
+  'enemy_guard', 'enemy_brute',
   'stump', 'log', 'rock_d', 'rock_e', 'rock_f',
   'tree_a', 'tree_b', 'tree_c',
   'rock_a', 'rock_b', 'rock_c',
@@ -29,6 +31,7 @@ const SFX = [
   'place', 'collect', 'collect_all',
   'upgrade_start', 'upgrade_done',
   'demolish', 'error', 'select', 'close', 'move',
+  'hit', 'shoot', 'boom', 'win', 'lose',
 ];
 
 export const IMAGES = Object.fromEntries(ART.map((k) => [k, `art/${k}.png`]));

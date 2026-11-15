@@ -26,6 +26,9 @@ export function questProgress(state, quest) {
   } else if (g.kind === 'unit') {
     current = state.army[g.unit] ?? 0;
     target = g.min;
+  } else if (g.kind === 'campaign') {
+    current = state.campaign.cleared;
+    target = g.min;
   } else if (g.kind === 'hero') {
     current = state.hero ? 1 : 0;
   } else if (g.kind === 'anyLevel') {

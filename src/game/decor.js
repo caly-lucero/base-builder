@@ -12,8 +12,8 @@ export const DECOR_KEYS = {
   misc: ['stump', 'log'],
 };
 
-// Generador pseudoaleatorio determinista (mulberry32).
-function mulberry32(seed) {
+// Generador pseudoaleatorio determinista (mulberry32). Se usa también para generar las bases enemigas.
+export function mulberry32(seed) {
   let a = seed >>> 0;
   return () => {
     a = (a + 0x6d2b79f5) >>> 0;

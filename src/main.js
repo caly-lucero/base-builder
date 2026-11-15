@@ -4,6 +4,7 @@ import * as prefs from './game/prefs.js';
 import { MAX_SAVE_BYTES, parseSave, serialize } from './game/save.js';
 import * as store from './game/store.js';
 import BaseScene from './scenes/BaseScene.js';
+import BattleScene from './scenes/BattleScene.js';
 
 const $ = (id) => document.getElementById(id);
 const statusEl = $('status');
@@ -28,6 +29,8 @@ const game = new Phaser.Game({
   scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH },
   scene: [],
 });
+if (import.meta.env.DEV) window.__game = game; // solo en desarrollo: facilita inspeccionar escenas desde la consola
+game.scene.add('BattleScene', BattleScene, false);
 game.scene.add('BaseScene', BaseScene, true, { gained: boot.gained });
 
 /* ---------- sonido ---------- */

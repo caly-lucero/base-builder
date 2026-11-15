@@ -82,12 +82,12 @@ test('la validación rechaza datos con checksum correcto pero contenido imposibl
     'NaN en producción': (s) => (s.buildings[MINE].stored = NaN),
     'edificios no es lista': (s) => (s.buildings = {}),
     'nivel 0': (s) => (s.buildings[MINE].level = 0),
-    'nivel sobre el máximo': (s) => (s.buildings[MINE].level = 4),
+    'nivel sobre el máximo': (s) => (s.buildings[MINE].level = 6),
     'nivel decimal': (s) => (s.buildings[MINE].level = 1.5),
     'mejora sin fecha (undefined)': (s) => delete s.buildings[MINE].upgradeEndsAt,
     'fecha de mejora como texto': (s) => (s.buildings[MINE].upgradeEndsAt = '123'),
     'fecha de mejora negativa': (s) => (s.buildings[MINE].upgradeEndsAt = -1),
-    'mejora en edificio de nivel máximo': (s) => ((s.buildings[HALL].level = 3), (s.buildings[HALL].upgradeEndsAt = T0 + 1000)),
+    'mejora en edificio de nivel máximo': (s) => ((s.buildings[HALL].level = 5), (s.buildings[HALL].upgradeEndsAt = T0 + 1000)),
     'más mejoras que obreros': (s) => {
       for (const b of s.buildings) b.upgradeEndsAt = T0 + 1000; // 3 a la vez, con 2 obreros
     },
@@ -98,9 +98,16 @@ test('la validación rechaza datos con checksum correcto pero contenido imposibl
     'soldados como texto': (s) => (s.army.soldier = '3'),
     'ejército imposible de sostener': (s) => (s.army.soldier = 999),
     'héroe como texto': (s) => (s.hero = 'rey'),
-    'héroe sin nivel': (s) => (s.hero = {}),
-    'héroe con nivel absurdo': (s) => (s.hero = { level: 99 }),
+    'héroe sin nivel': (s) => (s.hero = { xp: 0 }),
+    'héroe con nivel absurdo': (s) => (s.hero = { level: 99, xp: 0 }),
+    'héroe sin experiencia': (s) => (s.hero = { level: 1 }),
+    'héroe con experiencia negativa': (s) => (s.hero = { level: 1, xp: -5 }),
     'sin héroe (undefined)': (s) => delete s.hero,
+    'campaña no es objeto': (s) => (s.campaign = 3),
+    'campaña sin progreso': (s) => (s.campaign = {}),
+    'campaña con progreso negativo': (s) => (s.campaign = { cleared: -1 }),
+    'campaña con progreso decimal': (s) => (s.campaign = { cleared: 1.5 }),
+    'sin campaña (undefined)': (s) => delete s.campaign,
     'entrenamiento sin campo (undefined)': (s) => delete s.buildings[MINE].training,
     'entrenamiento en un edificio que no entrena': (s) => (s.buildings[MINE].training = { unit: 'soldier', endsAt: T0 + 1000 }),
     'entrenamiento de una unidad que no corresponde': (s) => {
@@ -163,14 +170,16 @@ test('el ejército, el héroe y un entrenamiento en curso se guardan y se recupe
   const barracks = place(s, 'barracks', 9, 9, T0).building;
   place(s, 'farm', 10, 9, T0);
   s.army = { soldier: 3, mage: 1, knight: 0 };
-  s.hero = { level: 2 };
+  s.hero = { level: 2, xp: 35 };
+  s.campaign = { cleared: 4 };
   assert.equal(startTraining(s, barracks.id, 'soldier', T0).ok, true);
 
   const r = parseSave(serialize(s));
   assert.equal(r.ok, true);
   assert.deepEqual(r.state, s);
   assert.deepEqual(r.state.army, { soldier: 3, mage: 1, knight: 0 });
-  assert.deepEqual(r.state.hero, { level: 2 });
+  assert.deepEqual(r.state.hero, { level: 2, xp: 35 });
+  assert.deepEqual(r.state.campaign, { cleared: 4 });
   assert.deepEqual(r.state.buildings.find((b) => b.type === 'barracks').training, { unit: 'soldier', endsAt: T0 + 15_000 });
 });
 
@@ -299,6 +308,30 @@ test('migración v4 → v5: una partida con misiones sigue igual y sin ejército
   assert.ok(r.state.buildings.every((b) => b.training === null));
   assert.deepEqual(r.state.claimedQuests, ['q_sawmill'], 'conserva las misiones');
   assert.equal(r.state.wood, 120);
+});
+
+test('migración v5 → v6: una partida con héroe conserva todo y añade campaña y experiencia', () => {
+  const data = {
+    gold: 300,
+    wood: 120,
+    nextId: 4,
+    savedAt: T0,
+    claimedQuests: ['q_sawmill'],
+    army: { soldier: 2, mage: 0, knight: 0 },
+    hero: { level: 2 },
+    buildings: [{ ...b2(1, 'townhall', 11, 11, 2), training: null }, { ...b2(2, 'altar', 8, 8), training: null }],
+  };
+  const r = parseSave(JSON.stringify({ v: 5, sum: checksum(data), data }));
+  assert.equal(r.ok, true);
+  assert.deepEqual(r.state.hero, { level: 2, xp: 0 });
+  assert.deepEqual(r.state.campaign, { cleared: 0 });
+  assert.deepEqual(r.state.army, { soldier: 2, mage: 0, knight: 0 });
+  assert.deepEqual(r.state.claimedQuests, ['q_sawmill']);
+
+  const noHero = { ...data, hero: null };
+  const r2 = parseSave(JSON.stringify({ v: 5, sum: checksum(noHero), data: noHero }));
+  assert.equal(r2.ok, true);
+  assert.equal(r2.state.hero, null);
 });
 
 test('la migración no abre una partida antigua modificada, ni una con forma rara', () => {
