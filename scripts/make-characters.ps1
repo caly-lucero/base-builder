@@ -82,8 +82,17 @@ function AddOutline($w) {
   foreach ($m in $mark) { $w.SetPixel($m[0], $m[1], (Hex $OUTLINE)) }
 }
 
+# Suaviza el contorno: el negro-violeta del pack se vuelve un marrón oscuro semitransparente (sin «halo» negro alrededor).
+function SoftenOutline($w) {
+  for ($y = 0; $y -lt 20; $y++) { for ($x = 0; $x -lt 20; $x++) {
+    $c = $w.GetPixel($x, $y)
+    if ($c.A -gt 0 -and (Key $c) -eq $OUTLINE) { $w.SetPixel($x, $y, [System.Drawing.Color]::FromArgb(150, 52, 34, 28)) }
+  } }
+}
+
 # Escala x2 al lienzo final de 64x64, apoyado abajo y centrado.
 function Save($w, $name) {
+  SoftenOutline $w
   $bmp = New-Object System.Drawing.Bitmap 64, 64
   $g = [System.Drawing.Graphics]::FromImage($bmp)
   $g.Clear([System.Drawing.Color]::Transparent); $g.InterpolationMode = 'NearestNeighbor'; $g.PixelOffsetMode = 'Half'

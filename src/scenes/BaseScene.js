@@ -51,7 +51,7 @@ const SHADOW = {
   tree: { w: 0.85, h: 0.32, alpha: 0.45 },
   rock: { w: 0.6, h: 0.24, alpha: 0.34 },
   bush: { w: 0.5, h: 0.2, alpha: 0.3 },
-  unit: { w: 0.42, h: 0.17, alpha: 0.4 },
+  unit: { w: 0.34, h: 0.13, alpha: 0.22 },
 };
 const shadowKindOf = (key) => (key.startsWith('tree') ? 'tree' : key.startsWith('rock') ? 'rock' : key.startsWith('bush') ? 'bush' : null);
 const SMOKING = new Set(['townhall', 'barracks', 'sawmill', 'altar', 'forge', 'atelier']); // edificios con chimenea o fogata
@@ -59,7 +59,7 @@ const SMOKING = new Set(['townhall', 'barracks', 'sawmill', 'altar', 'forge', 'a
 // Cuánto se agrandan los dibujos respecto a la casilla (el pack los trae pequeños en su lienzo).
 const BUILDING_GROW = 1.25;
 const DECOR_GROW = 1.15;
-const WORKER_GROW = 1.6;
+const WORKER_GROW = 1.1; // las personas son más bajas que los edificios
 const POP_MS = 320; // duración de la animación al construir
 
 const joinParts = (parts) => parts.filter(Boolean).join(' · ');

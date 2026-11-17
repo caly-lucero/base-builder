@@ -36,7 +36,7 @@ const ENEMY_TINT = 0xffc2b2;
 const DAMAGED_TINT = 0x6a5a55;
 const RAID_CENTER = { x: 12, y: 9 }; // en una defensa se ve tu base con el borde de arriba, por donde llega el enemigo
 const RAID_ZOOM = 0.7;
-const UNIT_GROW = 1.7;
+const UNIT_GROW = 1.15;
 const BUILDING_GROW = 1.25;
 const START_ZOOM = 0.6;
 const START_CENTER = { x: 12, y: 13.5 }; // deja ver la base enemiga arriba y el desembarco abajo
@@ -797,7 +797,7 @@ export default class BattleScene extends Phaser.Scene {
         img.setVisible(visible);
         entry.shadow.setVisible(visible);
         if (!visible) continue;
-        this.shadowAt(entry.shadow, e.x, e.y, e.type === 'hero' ? 0.62 : 0.42, e.type === 'hero' ? 0.25 : 0.17, 0.4);
+        this.shadowAt(entry.shadow, e.x, e.y, e.type === 'hero' ? 0.5 : 0.34, e.type === 'hero' ? 0.19 : 0.13, 0.22);
         const grow = e.type === 'hero' ? UNIT_GROW * 1.3 : UNIT_GROW;
         this.placeOnTile(img, unitSprite(e), e.x, e.y, grow).setDepth(DEPTH.world + e.y + 0.5);
         this.animateUnit(entry, img, e, dt);
