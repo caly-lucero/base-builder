@@ -1,25 +1,36 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
-import { IMAGES, SOUNDS } from '../src/data/assets.js';
-import { BUILDINGS } from '../src/data/config.js';
+import { IMAGES, SHEETS, SHEET_KEYS, SOUNDS } from '../src/data/assets.js';
+import { BUILDINGS, ENEMY_UNITS, UNITS } from '../src/data/config.js';
+import { HEROES } from '../src/data/heroes.js';
 import { DECOR_KEYS, DECOR_SEED, generateDecor } from '../src/game/decor.js';
 import { GRID } from '../src/data/config.js';
+import { SHEET } from '../src/game/unitArt.js';
 
 const ASSETS = new URL('../public/assets/', import.meta.url);
 
+/** Tamaño de un PNG leído de su cabecera. */
+function pngSize(url) {
+  const head = readFileSync(url).subarray(16, 24);
+  return { w: head.readUInt32BE(0), h: head.readUInt32BE(4) };
+}
+
+/** Todos los archivos de una carpeta (sin entrar en subcarpetas que no pasen el filtro). */
+function listPngs(dir) {
+  return readdirSync(new URL(`${dir}/`, ASSETS)).map((n) => `${dir}/${n}`);
+}
+
 test('todos los archivos del manifiesto existen en public/assets', () => {
-  for (const file of [...Object.values(IMAGES), ...Object.values(SOUNDS)]) {
+  for (const file of [...Object.values(IMAGES), ...Object.values(SHEETS), ...Object.values(SOUNDS)]) {
     assert.ok(existsSync(new URL(file, ASSETS)), `falta ${file}`);
   }
 });
 
 test('no sobran imágenes ni sonidos sin declarar en el manifiesto', () => {
-  const declared = new Set([...Object.values(IMAGES), ...Object.values(SOUNDS)]);
-  for (const dir of ['art', 'audio']) {
-    for (const name of readdirSync(new URL(`${dir}/`, ASSETS))) {
-      assert.ok(declared.has(`${dir}/${name}`), `${dir}/${name} no está en assets.js`);
-    }
+  const declared = new Set([...Object.values(IMAGES), ...Object.values(SHEETS), ...Object.values(SOUNDS)]);
+  for (const dir of ['iso/buildings', 'iso/decor', 'iso/units', 'audio']) {
+    for (const file of listPngs(dir)) assert.ok(declared.has(file), `${file} no está en assets.js`);
   }
 });
 
@@ -32,8 +43,31 @@ test('cada nivel de cada edificio usa un sprite que existe', () => {
   }
 });
 
-test('la hierba, la caja de obras y la decoración están en el manifiesto', () => {
-  for (const key of ['grass_a', 'grass_b', 'crate', ...Object.values(DECOR_KEYS).flat()]) {
+test('cada unidad, héroe y enemigo tiene su hoja de animación', () => {
+  const sprites = [...Object.values(UNITS), ...Object.values(HEROES), ...Object.values(ENEMY_UNITS)].map((d) => d.sprite);
+  for (const s of sprites) assert.ok(Object.hasOwn(SHEETS, s), `sin hoja para «${s}»`);
+  for (const w of ['worker_1', 'worker_2']) assert.ok(SHEET_KEYS.includes(w));
+});
+
+test('las hojas de animación tienen el tamaño de la cuadrícula (8×4 cuadros)', () => {
+  for (const file of Object.values(SHEETS)) {
+    const { w, h } = pngSize(new URL(file, ASSETS));
+    assert.equal(w, SHEET.cols * SHEET.frameWidth, `${file}: ancho`);
+    assert.equal(h, 4 * SHEET.frameHeight, `${file}: alto`);
+  }
+});
+
+test('los edificios miden 192×256 y la decoración 160×176 (el arte se ancla por esas medidas)', () => {
+  for (const [key, file] of Object.entries(IMAGES)) {
+    const { w, h } = pngSize(new URL(file, ASSETS));
+    if (file.startsWith('iso/buildings/')) assert.deepEqual([w, h], [192, 256], key);
+    else if (/^(flower_|tuft)/.test(key)) assert.deepEqual([w, h], [32, 24], key);
+    else assert.deepEqual([w, h], [160, 176], key);
+  }
+});
+
+test('la caja de obras y la decoración están en el manifiesto', () => {
+  for (const key of ['crate', ...Object.values(DECOR_KEYS).flat(), 'flower_0', 'flower_1', 'flower_2', 'tuft']) {
     assert.ok(Object.hasOwn(IMAGES, key), `falta la clave ${key}`);
   }
 });

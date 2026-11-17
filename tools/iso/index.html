@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<title>Render isométrico</title>
+<style>
+  body { margin: 0; background: #34502f; color: #f3e6c4; font: 12px system-ui, sans-serif; }
+  h2 { margin: 6px 8px 0; font-size: 13px; }
+  #out { display: flex; flex-wrap: wrap; gap: 6px; padding: 6px; }
+  .cell { background: #4f7a43; text-align: center; border-radius: 6px; padding-bottom: 2px; }
+  canvas { display: block; }
+</style>
+<script type="importmap">{ "imports": { "three": "/three/build/three.module.js", "three/addons/": "/three/examples/jsm/" } }</script>
+</head>
+<body>
+<h2 id="title">Render isométrico (herramienta de desarrollo)</h2>
+<div id="out"></div>
+<script type="module" src="./iso.js"></script>
+</body>
+</html>
