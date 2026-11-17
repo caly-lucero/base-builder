@@ -6,11 +6,13 @@ export const GRID = { cols: 24, rows: 24, tile: 48 };
 /** Lado en píxeles de los sprites originales (pack Kenney Medieval RTS). */
 export const ART_SIZE = 64;
 
+// Medidas de la pantalla del juego (px lógicos). El ancho es fijo (pensado para un celular en vertical:
+// casi 1 px lógico = 1 px real); el alto se adapta a la pantalla con fitLayout() al arrancar.
 export const LAYOUT = {
-  width: 576,
-  hudHeight: 64,
-  viewHeight: 576, // alto de la ventana por la que se ve el mapa
-  barHeight: 96,
+  width: 432,
+  hudHeight: 56,
+  viewHeight: 640, // alto de la ventana por la que se ve el mapa
+  barHeight: 64,
   get gridTop() {
     return this.hudHeight;
   },
@@ -22,8 +24,15 @@ export const LAYOUT = {
   },
 };
 
+/** Adapta el alto del lienzo a la proporción de la pantalla (para que un celular alto se aproveche entero). */
+export function fitLayout(screenW, screenH) {
+  if (!(screenW > 0 && screenH > 0)) return;
+  const total = Math.round((LAYOUT.width * screenH) / screenW);
+  LAYOUT.viewHeight = Math.min(900, Math.max(520, total - LAYOUT.hudHeight - LAYOUT.barHeight));
+}
+
 export const CAMERA = {
-  minZoom: 0.5, // con 0.5 el mapa entero cabe en la ventana
+  minZoom: 0.375, // con 0.375 el mapa entero cabe en la ventana
   maxZoom: 1.6,
   startZoom: 1,
   dragThreshold: 8, // píxeles que hay que mover antes de que un toque sea un arrastre

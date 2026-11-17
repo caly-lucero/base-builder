@@ -41,7 +41,7 @@ Cada vez que se sube algo a la rama `main`, GitHub corre las pruebas, compila y 
   - los héroes ganan XP por cada atacante derrotado y un bono si rechazas la oleada.
   Tus tropas no mueren al defender, las armas de asedio no defienden, y las **Fortificaciones** de la herrería refuerzan edificios y torres. Mientras tú atacas, las oleadas quedan en pausa; si estuviste fuera mucho tiempo, solo se resuelve una.
 - **Muros y puertas**: los muros cuestan solo madera y se pintan arrastrando; **los que quedan uno junto a otro se dibujan unidos, como una sola pared**. Las puertas son un muro con paso.
-- **Barra por páginas**: *Economía* (mina, aserradero, casa, almacén, muro), *Ejército* (cuartel, arquería, atelier, caballeriza, taller de asedio) y *Defensa* (torre, puerta, altar, herrería). El botón de la derecha cambia de página.
+- **Pensado para el celular**: el juego ocupa toda la pantalla en vertical, con la barra de abajo (Construir, Atacar, Héroes, Logros, Menú) y una **hoja de construcción** que se abre sobre el mapa con tres pestañas (*Economía*, *Ejército*, *Defensa*) y el botón *Demoler*. Al elegir un edificio la hoja se cierra y un aviso arriba dice qué estás colocando (con una ✕ para cancelar). Hay vibración corta al tocar los botones. Sonido, exportar, importar y nueva partida están en el **Menú**.
 - **Misiones**: una cadena de 32 objetivos que guía la partida («Construye un Aserradero», «Sube el Ayuntamiento a Fortaleza», «Construye una Herrería»…). El cartel de arriba a la izquierda muestra la actual; al cumplirla se pone verde y la tocas para **reclamar el premio**.
 - **Logros** (botón 🏆, con un punto rojo cuando hay premio): 11 familias con varios niveles (Constructor, Muralla, Gran ciudad, Obra maestra, Gran ejército, Señor del asedio, Conquistador, Colección de héroes, Leyenda, Herrero, Superviviente). Se reclaman de a un nivel y los premios crecen mucho.
 - **Mover edificios** arrastrándolos (gratis). **Demoler** devuelve el 50 % de lo invertido.
@@ -53,14 +53,13 @@ Cada vez que se sube algo a la rama `main`, GitHub corre las pruebas, compila y 
 ## Controles
 | Acción | Ratón / teclado | Pantalla táctil |
 |---|---|---|
-| Construir | elegir edificio abajo y tocar una casilla | igual |
-| Muros | elegir **Muro** y arrastrar | igual |
+| Construir | botón **Construir** → elegir edificio → tocar una casilla | igual |
+| Muros | elegir **Muro** en la hoja y arrastrar | igual |
 | Seleccionar / recolectar | tocar un edificio (abre su panel) | igual |
 | Entrenar | elegir un cuartel o el altar y tocar la tarjeta de la unidad | igual |
-| Cambiar de página de la barra | botón de la derecha (Economía ▶ / Ejército ▶ / Defensa ▶) | igual |
 | Atacar | botón ⚔ y «Atacar» | igual |
-| Logros | botón 🏆 | igual |
-| Héroes | elegir el Altar y tocar la tarjeta «Héroes» | igual |
+| Logros y Héroes | botones de la barra de abajo | igual |
+| Menú (sonido, exportar, importar, nueva partida) | botón **Menú** | igual |
 | En batalla: habilidad de un héroe | botón con su cara, a la derecha | igual |
 | En batalla: elegir tropas | botones de abajo, tocar una unidad, o ▭ y arrastrar un recuadro | igual |
 | En batalla: ordenar | tocar un enemigo (atacar) o el suelo (mover) | igual |
@@ -105,6 +104,8 @@ En Windows PowerShell, si `npm` da error de «ejecución de scripts deshabilitad
 - `src/game/campaign.js` — aplica el resultado de una batalla (bajas, botín, campaña, experiencia del héroe).
 - `src/scenes/BattleScene.js` — escena de la batalla (tuya o la defensa de tu base): dibujo, selección, órdenes, habilidades y resultado.
 - `src/scenes/heroPanel.js`, `src/scenes/achievementsPanel.js` — las ventanas de héroes y de logros.
+- `src/scenes/ui.js` — el kit de interfaz: paleta, iconos dibujados por código, paneles y botones redondeados, ventanas.
+- `src/game/menu.js` — puente entre el menú del juego y los botones de la página.
 - `src/scenes/look.js` — aspecto: texturas generadas por código, sombras, viñeta, nubes, humo y brillo de la interfaz.
 - `src/game/quests.js` — misiones: progreso (calculado, no guardado) y reclamo de premios. Los datos están en `QUESTS` de `config.js`.
 - `src/game/workers.js` — rutas y tiempos de los aldeanos (lógica pura; el dibujo está en la escena).
@@ -134,7 +135,7 @@ Arte y sonido de [Kenney](https://kenney.nl) (packs Medieval RTS, Interface Soun
 - Las mejoras usan la hora del sistema: adelantar el reloj las termina antes. El juego limita el daño (una mejora nunca puede quedar más lejos que su duración total), pero no puede impedirlo del todo; es aceptable sin ranking.
 - Si cambia el formato del guardado, subir `SAVE_VERSION` y añadir el paso en `migrate()` de `save.js`. Ejemplos: v1→v2 (niveles), v2→v3 (mapa 12×12 → 24×24, madera y Ayuntamiento), v3→v4 (misiones), v4→v5 (ejército, héroe y entrenamiento), v5→v6 (campaña y experiencia), v6→v7 (ataques enemigos y edificios dañados) y v7→v8 (casas, nuevas unidades, 5 héroes con escuadra, herrería y logros). Una base avanzada que se migra tendrá varias misiones ya cumplidas y podrá reclamarlas.
 - Los sonidos son `.ogg`: algunos navegadores antiguos de Apple no los reproducen (el juego funciona igual, sin sonido).
-- El lienzo es de 576 px de ancho y se escala a la pantalla; en pantallas grandes los dibujos se ven algo suavizados.
+- El lienzo es de 432 px de ancho (el alto se adapta a la pantalla al arrancar) y se escala; en pantallas grandes los dibujos se ven algo suavizados. Si giras el celular hay que recargar.
 - Los enlaces entre muros usan solo dos piezas por nivel (horizontal y vertical): en esquinas y cruces se ven bien, pero no hay un dibujo especial para cada forma.
 - Los niveles 4 a 10 reutilizan el dibujo del nivel 3 con un tinte; no tienen arte propio. Los edificios militares nuevos, las casas y la herrería son **recolores** de edificios del pack (se distinguen por el color y la forma, pero no tienen un dibujo único); algunos comparten silueta.
 - Los cinco héroes comparten dibujo con los demás soldados del pack, con otro color: se parecen entre sí.

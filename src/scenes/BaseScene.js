@@ -32,7 +32,9 @@ import { grassLook } from '../game/terrain.js';
 import { createWorker, plannedWorkers, stepWorker, workerPosition } from '../game/workers.js';
 import { claimableCount } from '../game/achievements.js';
 import { openAchievementsPanel } from './achievementsPanel.js';
+import { isSoundOn, onNotice, runMenu } from '../game/menu.js';
 import { openHeroPanel } from './heroPanel.js';
+import * as ui from './ui.js';
 import { addGloss, addVignette, createClouds, emberPuff, ensureTextures, placeShadow, smokePuff, sparkBurst, stepClouds } from './look.js';
 
 const FONT = 'system-ui, "Segoe UI", Roboto, sans-serif';
@@ -134,6 +136,8 @@ export default class BaseScene extends Phaser.Scene {
     this.toolPage = 0;
     this.connectors = new Map(); // enlaces entre muros contiguos (ver renderWorld)
     this.leaving = false; // ya se está pasando a otra escena
+    this.sheet = null; // hoja de construcción abierta
+    this.sheetTab = 0;
   }
 
   preload() {
@@ -150,7 +154,9 @@ export default class BaseScene extends Phaser.Scene {
 
     resetView(logic.townHall(store.get()) ?? undefined);
 
+    this.cameras.main.setBackgroundColor(0x1b4a2a); // lo que queda fuera del mapa: verde oscuro
     ensureTextures(this);
+    ui.ensureUi(this);
     this.createTerrain();
     this.createDecor();
     this.clouds = createClouds(this, DEPTH.clouds);
@@ -162,6 +168,7 @@ export default class BaseScene extends Phaser.Scene {
     this.createQuestBanner();
     this.createRaidBanner();
     this.createTrainStrip();
+    this.createToolHint();
     store.holdRaids(false); // de vuelta en la base, los ataques enemigos se reanudan
 
     this.ghost = this.add.image(0, 0, iconKey('mine')).setAlpha(0.7).setVisible(false).setDepth(DEPTH.ghost);
@@ -171,18 +178,22 @@ export default class BaseScene extends Phaser.Scene {
       .setVisible(false)
       .setDepth(DEPTH.selector);
     this.toast = this.add
-      .text(LAYOUT.width / 2, LAYOUT.gridTop + 104, '', {
-        fontFamily: FONT,
-        fontSize: '16px',
-        color: '#ffffff',
-        backgroundColor: '#000000cc',
-        padding: { x: 10, y: 6 },
+      .text(LAYOUT.width / 2, LAYOUT.gridTop + 126, '', {
+        fontFamily: ui.FONT,
+        fontSize: '14px',
+        fontStyle: 'bold',
+        color: ui.TXT.light,
+        backgroundColor: '#2b1d12f2',
+        padding: { x: 14, y: 8 },
         align: 'center',
-        wordWrap: { width: LAYOUT.width - 40 },
+        wordWrap: { width: LAYOUT.width - 48 },
       })
       .setOrigin(0.5, 0)
       .setAlpha(0)
       .setDepth(DEPTH.toast);
+    // Los avisos de la página (exportar, importar…) también salen aquí.
+    const off = onNotice((text) => this.showToast(text, 2400));
+    this.events.once('shutdown', off);
 
     this.input.on('pointerdown', this.onPointerDown, this);
     this.input.on('pointermove', this.onPointerMove, this);
@@ -295,255 +306,298 @@ export default class BaseScene extends Phaser.Scene {
     return g;
   }
 
-  /* ---------- HUD, barra, panel y botones de zoom ---------- */
+  /* ---------- interfaz: HUD, barra de abajo, hoja de construcción, panel y carteles ---------- */
 
-  ui(obj, depth = DEPTH.ui) {
-    return obj.setDepth(depth);
-  }
-
-  goldIcon(x, y, r = 9) {
-    return this.ui(this.add.circle(x, y, r, COLORS.gold).setStrokeStyle(2, 0x8a6a10), DEPTH.ui + 1);
-  }
-
-  woodIcon(x, y, w = 18) {
-    const h = w * 0.62;
-    const parts = [
-      this.ui(this.add.rectangle(x, y, w, h, COLORS.wood).setStrokeStyle(2, 0x5a3a1a), DEPTH.ui + 1),
-      this.ui(this.add.rectangle(x - w * 0.18, y, w * 0.16, h * 0.7, 0xc58b55), DEPTH.ui + 2),
-    ];
-    return parts;
+  /** Números cortos para el HUD: 12 400 → «12,4k». */
+  fmt(n) {
+    if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1).replace('.', ',')}M`;
+    if (n >= 10_000) return `${(n / 1000).toFixed(1).replace('.', ',')}k`;
+    return String(Math.floor(n));
   }
 
   createHud() {
-    const hudBg = this.ui(this.add.rectangle(LAYOUT.width / 2, LAYOUT.hudHeight / 2, LAYOUT.width, LAYOUT.hudHeight, COLORS.hud));
-    this.gloss(hudBg);
-    this.ui(this.add.rectangle(LAYOUT.width / 2, LAYOUT.hudHeight - 1, LAYOUT.width, 2, 0xd4a017, 0.55), DEPTH.ui + 0.5); // filo dorado
+    const W = LAYOUT.width;
+    const H = LAYOUT.hudHeight;
+    const d = DEPTH.ui;
+    ui.panel(this, W / 2, H / 2, W, H, 'bar', d, 'bottom');
 
-    this.goldIcon(26, 21);
-    this.goldText = this.ui(
-      this.add.text(44, 21, '', { fontFamily: FONT, fontSize: '20px', color: TEXT.gold, fontStyle: 'bold' }).setOrigin(0, 0.5),
-      DEPTH.ui + 1,
-    );
-
-    this.woodIcon(184, 21, 20);
-    this.woodText = this.ui(
-      this.add.text(202, 21, '', { fontFamily: FONT, fontSize: '20px', color: TEXT.wood, fontStyle: 'bold' }).setOrigin(0, 0.5),
-      DEPTH.ui + 1,
-    );
-
-    this.buildersText = this.ui(
-      this.add.text(16, 47, '', { fontFamily: FONT, fontSize: '13px', color: '#9fc8ef' }).setOrigin(0, 0.5),
-      DEPTH.ui + 1,
-    );
-
-    const btn = this.ui(
-      this.add
-        .rectangle(LAYOUT.width - 90, LAYOUT.hudHeight / 2, 160, 40, COLORS.button)
-        .setStrokeStyle(2, 0x4a6a4a)
-        .setInteractive({ useHandCursor: true }),
-      DEPTH.ui + 1,
-    );
-    this.gloss(btn);
-    this.ui(
-      this.add.text(btn.x, btn.y, 'Recolectar todo', { fontFamily: FONT, fontSize: '16px', color: TEXT.normal }).setOrigin(0.5),
-      DEPTH.ui + 2,
-    );
-    btn.on('pointerdown', () =>
-      this.doAction(
-        () => logic.collectAll(store.get()),
-        (r) => [r.gold > 0 && `+${r.gold} de oro`, r.wood > 0 && `+${r.wood} de madera`].filter(Boolean).join(' · '),
-        'collect_all',
-      ),
-    );
+    // Tres bloques: oro, madera y población. Cada uno con su icono, su cifra y una barrita de llenado.
+    const block = (x0, iconName) => {
+      ui.icon(this, x0 + 13, 20, iconName, 26, d + 2);
+      const amount = ui.label(this, x0 + 32, 20, '', { size: 17, bold: true, color: ui.TXT.gold, origin: [0, 0.5], depth: d + 2 });
+      const cap = ui.label(this, x0 + 32, 21, '', { size: 11, color: ui.TXT.dim, origin: [0, 0.5], depth: d + 2 });
+      const barBg = this.add.rectangle(x0 + 2, 40, 112, 6, 0x000000, 0.55).setOrigin(0, 0.5).setDepth(d + 2);
+      const bar = this.add.rectangle(x0 + 2, 40, 1, 6, 0xffffff).setOrigin(0, 0.5).setDepth(d + 3);
+      return { amount, cap, bar, barBg };
+    };
+    this.hudGold = block(8, 'coin');
+    this.hudWood = block(152, 'wood');
+    this.hudPop = block(296, 'pop');
+    this.buildersText = ui.label(this, W - 8, 47, '', { size: 10, color: ui.TXT.blue, origin: [1, 0.5], depth: d + 2 });
   }
 
-  /**
-   * Barra de herramientas con 7 casillas: hasta 5 edificios de la página actual, «Demoler» y el
-   * botón que cambia de página (Economía / Militar). Cada herramienta tiene su casilla fija, así que
-   * cambiar de página solo muestra u oculta botones.
-   */
+  /** Actualiza las cifras y barritas del HUD. */
+  updateHudBlocks(state) {
+    const cap = logic.resourceCap(state);
+    const fill = (blk, value, max, color, label) => {
+      blk.amount.setText(label);
+      blk.cap.setX(blk.amount.x + blk.amount.width + 3);
+      blk.bar.setFillStyle(color).setSize(Math.max(1, 112 * Math.min(1, value / max)), 6);
+    };
+    fill(this.hudGold, state.gold, cap, state.gold >= cap ? 0xff8f7d : 0xe6b84f, this.fmt(state.gold));
+    this.hudGold.cap.setText(`/${this.fmt(cap)}`);
+    fill(this.hudWood, state.wood, cap, state.wood >= cap ? 0xff8f7d : 0xb8864a, this.fmt(state.wood));
+    this.hudWood.cap.setText(`/${this.fmt(cap)}`);
+    const used = logic.supplyUsed(state);
+    const supply = logic.supplyCap(state);
+    fill(this.hudPop, used, supply, used >= supply ? 0xff8f7d : 0x9fc8ef, String(used));
+    this.hudPop.cap.setText(`/${supply}`);
+    this.hudGold.amount.setColor(state.gold >= cap ? ui.TXT.bad : ui.TXT.gold);
+    this.hudWood.amount.setColor(state.wood >= cap ? ui.TXT.bad : ui.TXT.wood);
+    this.hudPop.amount.setColor(used >= supply ? ui.TXT.bad : ui.TXT.light);
+    this.buildersText.setText(`Obreros ${logic.busyBuilders(state)}/${ECONOMY.builders} · Ayunt. ${logic.townHallLevel(state)}`);
+  }
+
+  /** Barra de abajo: cinco botones grandes. Construir abre la hoja de edificios. */
   createToolbar() {
-    const slots = 7;
-    const w = LAYOUT.width / slots;
-    const cy = LAYOUT.barTop + LAYOUT.barHeight / 2;
-    const barBg = this.ui(this.add.rectangle(LAYOUT.width / 2, cy, LAYOUT.width, LAYOUT.barHeight, COLORS.hud));
-    this.gloss(barBg);
-    this.ui(this.add.rectangle(LAYOUT.width / 2, LAYOUT.barTop + 1, LAYOUT.width, 2, 0xd4a017, 0.55), DEPTH.ui + 0.5);
-    this.toolPage = 0;
+    const W = LAYOUT.width;
+    const top = LAYOUT.barTop;
+    const H = LAYOUT.barHeight;
+    const d = DEPTH.ui;
+    ui.panel(this, W / 2, top + H / 2, W, H, 'bar', d, 'top');
+    const defs = [
+      { id: 'build', text: 'Construir', icon: 'hammer', kind: 'green', onClick: () => this.toggleBuildSheet() },
+      { id: 'attack', text: 'Atacar', icon: 'swords', kind: 'red', onClick: () => this.openAttackModal() },
+      { id: 'heroes', text: 'Héroes', icon: 'crown', kind: 'violet', onClick: () => this.openHeroes() },
+      { id: 'quests', text: 'Logros', icon: 'trophy', kind: 'gold', onClick: () => openAchievementsPanel(this) },
+      { id: 'menu', text: 'Menú', icon: 'gear', kind: 'dark2', onClick: () => this.openMenu() },
+    ];
+    const bw = (W - 6 * 6) / 5;
+    this.barButtons = {};
+    defs.forEach((def, i) => {
+      const x = 6 + bw / 2 + i * (bw + 6);
+      this.barButtons[def.id] = ui.button(this, { x, y: top + H / 2 + 1, w: bw, h: H - 12, kind: def.kind, icon: def.icon, text: def.text, size: 11, vertical: true, iconSize: 26, depth: d + 1, onClick: def.onClick });
+    });
+    // Puntito rojo cuando hay un premio de logros listo para reclamar.
+    const q = this.barButtons.quests.img;
+    this.achievementDot = this.add.circle(q.x + bw / 2 - 8, q.y - (H - 12) / 2 + 8, 6, 0xdd3333).setStrokeStyle(2, 0xffffff).setDepth(d + 4).setVisible(false);
+  }
 
-    const makeButton = (slot, tool, page) => {
-      const def = BUILDINGS[tool]; // undefined para «demolish»
-      const cx = slot * w + w / 2;
-      const parts = [];
-      const add = (obj) => {
-        parts.push(obj);
-        return obj;
-      };
+  /** Las ventanas de héroes: con el Altar si hay uno (para invocar), o solo para mirar. */
+  openHeroes() {
+    const altar = store.get().buildings.find((b) => b.type === 'altar');
+    openHeroPanel(this, altar?.id ?? null);
+  }
 
-      const rect = add(
-        this.ui(
-          this.add
-            .rectangle(cx, cy, w - 6, LAYOUT.barHeight - 14, COLORS.button)
-            .setStrokeStyle(2, 0x4a6a4a)
-            .setInteractive({ useHandCursor: true }),
-          DEPTH.ui + 1,
-        ),
-      );
-      add(this.gloss(rect));
+  /* ---- hoja de construcción ---- */
 
-      if (def) add(this.ui(this.fitIcon(this.add.image(0, 0, iconKey(tool)), iconKey(tool), cx, cy - 30, 28), DEPTH.ui + 2));
-      else add(this.ui(this.add.text(cx, cy - 30, '✕', { fontFamily: FONT, fontSize: '22px', color: '#ff9a8a' }).setOrigin(0.5), DEPTH.ui + 2));
+  toggleBuildSheet() {
+    if (this.sheet) this.closeBuildSheet();
+    else this.openBuildSheet(this.sheetTab ?? 0);
+  }
 
-      const label = add(
-        this.ui(
-          this.add
-            .text(cx, cy - 6, def ? (def.shortName ?? def.name) : 'Demoler', { fontFamily: FONT, fontSize: '11px', color: TEXT.normal, align: 'center', lineSpacing: 2 })
-            .setOrigin(0.5),
-          DEPTH.ui + 2,
-        ),
-      );
+  closeBuildSheet() {
+    for (const p of this.sheet?.parts ?? []) p.destroy();
+    this.sheet = null;
+  }
 
-      // Costos: un ícono + número por cada recurso que cueste.
-      const costs = [];
-      if (def) {
-        const items = ['gold', 'wood'].filter((r) => (def.cost[r] ?? 0) > 0);
-        items.forEach((res, k) => {
-          const x = items.length === 1 ? cx : cx + (k === 0 ? -20 : 20);
-          const icon = [].concat(res === 'gold' ? this.goldIcon(x - 12, cy + 25, 5) : this.woodIcon(x - 12, cy + 25, 11));
-          const text = add(
-            this.ui(this.add.text(x - 5, cy + 25, String(def.cost[res]), { fontFamily: FONT, fontSize: '11px', color: TEXT[res] }).setOrigin(0, 0.5), DEPTH.ui + 2),
-          );
-          icon.forEach(add);
-          costs.push({ res, text });
-        });
-      } else {
-        add(this.ui(this.add.text(cx, cy + 25, '50 % devuelto', { fontFamily: FONT, fontSize: '9px', color: TEXT.gold }).setOrigin(0.5), DEPTH.ui + 2));
-      }
+  openBuildSheet(tab = 0) {
+    this.closeBuildSheet();
+    this.closeModal();
+    this.selectBuilding(null);
+    this.sheetTab = tab;
+    const W = LAYOUT.width;
+    const d = DEPTH.ui + 30;
+    const rows = 2;
+    const cardH = 108;
+    const H = 20 + 38 + 10 + rows * cardH + (rows - 1) * 8 + 14;
+    const top = LAYOUT.barTop - H;
+    const parts = [];
+    const add = (o) => {
+      parts.push(o);
+      return o;
+    };
+    this.sheet = { parts };
 
-      rect.on('pointerdown', () => {
-        this.play('select');
-        this.selectTool(this.tool === tool ? null : tool);
+    // Tocar el mapa fuera de la hoja la cierra.
+    add(this.add.rectangle(W / 2, (LAYOUT.gridTop + top) / 2, W, top - LAYOUT.gridTop, 0x000000, 0.01).setDepth(d - 1).setInteractive()).on('pointerdown', () => this.closeBuildSheet());
+    const bg = add(ui.panel(this, W / 2, top + H / 2, W, H, 'sheet', d));
+    bg.setInteractive();
+
+    const state = store.get();
+    const names = TOOL_PAGES.map((p) => p.name);
+    const tabW = (W - 24 - 3 * 6) / 4;
+    names.forEach((name, i) => {
+      const b = ui.button(this, { x: 12 + tabW / 2 + i * (tabW + 6), y: top + 38, w: tabW, h: 34, kind: i === tab ? 'gold' : 'dark2', text: name, size: 12, depth: d + 1, onClick: () => this.openBuildSheet(i) });
+      b.objs.forEach(add);
+    });
+    const del = ui.button(this, { x: 12 + tabW / 2 + 3 * (tabW + 6), y: top + 38, w: tabW, h: 34, kind: this.tool === 'demolish' ? 'red' : 'dark2', text: 'Demoler', icon: 'close', iconSize: 14, size: 12, depth: d + 1, onClick: () => {
+      this.closeBuildSheet();
+      this.selectTool('demolish');
+    } });
+    del.objs.forEach(add);
+
+    const tools = TOOL_PAGES[tab].tools;
+    const cw = (W - 24 - 2 * 8) / 3;
+    tools.forEach((tool, i) => {
+      const def = BUILDINGS[tool];
+      const col = i % 3;
+      const row = Math.floor(i / 3);
+      const x = 12 + cw / 2 + col * (cw + 8);
+      const y = top + 62 + cardH / 2 + row * (cardH + 8);
+      const count = logic.countOf(state, tool);
+      const limit = logic.limitFor(state, tool);
+      const locked = limit === 0;
+      const full = !locked && count >= limit;
+      const can = logic.canAfford(state, def.cost);
+      const card = add(ui.panel(this, x, y, cw, cardH, 'dark', d + 1));
+      card.setInteractive({ useHandCursor: true });
+      const icon = add(this.add.image(0, 0, iconKey(tool)).setDepth(d + 2));
+      this.fitIcon(icon, iconKey(tool), x, y - 22, 50);
+      add(ui.label(this, x, y + 14, def.shortName ?? def.name, { size: 13, bold: true, origin: [0.5, 0.5], align: 'center', depth: d + 2, color: locked ? ui.TXT.faint : ui.TXT.light }));
+      // costos
+      const items = ['gold', 'wood'].filter((r) => (def.cost[r] ?? 0) > 0);
+      items.forEach((res, k) => {
+        const cx = items.length === 1 ? x : x + (k === 0 ? -(cw / 4) : cw / 4);
+        add(ui.icon(this, cx - 15, y + 34, res === 'gold' ? 'coin' : 'wood', 14, d + 2));
+        add(ui.label(this, cx - 5, y + 34, this.fmt(def.cost[res]), { size: 12, bold: true, origin: [0, 0.5], depth: d + 2, color: state[res] < def.cost[res] ? ui.TXT.bad : res === 'gold' ? ui.TXT.gold : ui.TXT.wood }));
       });
-      this.toolButtons.set(tool, { rect, label, costs, def, parts, page });
+      add(ui.label(this, x + cw / 2 - 8, y - cardH / 2 + 8, locked ? '' : `${count}/${limit}`, { size: 11, bold: true, origin: [1, 0], depth: d + 2, color: full ? ui.TXT.bad : ui.TXT.dim }));
+      if (locked) {
+        const need = logic.unlockLevel(tool);
+        add(this.add.rectangle(x, y, cw - 4, cardH - 4, 0x000000, 0.55).setDepth(d + 3));
+        add(ui.icon(this, x, y - 14, 'lock', 24, d + 4));
+        add(ui.label(this, x, y + 12, need ? `Ayuntamiento ${need}` : '—', { size: 11, bold: true, origin: [0.5, 0.5], depth: d + 4, color: ui.TXT.gold }));
+      } else if (full || !can) card.setAlpha(0.8);
+      card.on('pointerdown', () => {
+        ui.haptic();
+        if (locked) {
+          const need = logic.unlockLevel(tool);
+          this.showToast(need ? `${def.name}: pide ${logic.displayName('townhall', need)} (nivel ${need})` : `Aún no puedes construir ${def.name}`);
+          this.play('error');
+        } else if (full) {
+          this.showToast(`Límite de ${def.name}: ${limit}. Mejora el Ayuntamiento`);
+          this.play('error');
+        } else {
+          this.play('select');
+          this.closeBuildSheet();
+          this.selectTool(tool);
+        }
+      });
+    });
+    this.play('select');
+  }
+
+  /** Aviso fijo mientras estás colocando algo: qué es y cómo cancelar. */
+  createToolHint() {
+    const W = LAYOUT.width;
+    const y = LAYOUT.gridTop + 76;
+    const d = DEPTH.zoomButtons;
+    const bg = ui.panel(this, W / 2 - 24, y, 288, 34, 'pill', d);
+    const text = ui.label(this, W / 2 - 24, y, '', { size: 12, bold: true, origin: [0.5, 0.5], align: 'center', depth: d + 1 });
+    const cancel = ui.button(this, { x: W / 2 + 142, y, w: 38, h: 34, kind: 'red', icon: 'close', iconSize: 16, depth: d + 1, onClick: () => this.selectTool(null) });
+    this.toolHint = { parts: [bg, text, ...cancel.objs], text, cancel };
+    for (const p of this.toolHint.parts) p.setVisible(false);
+  }
+
+  showToolHint() {
+    const tool = this.tool;
+    const show = Boolean(tool);
+    for (const p of this.toolHint.parts) p.setVisible(show);
+    if (!show) return;
+    this.toolHint.text.setText(tool === 'demolish' ? 'Demoler: toca un edificio' : tool === 'wall' || tool === 'gate' ? `${BUILDINGS[tool].name}: toca o arrastra` : `${BUILDINGS[tool].name}: toca una casilla`);
+  }
+
+  /** Panel del edificio elegido: una hoja sobre la barra, con su detalle y el botón de mejorar. */
+  createPanel() {
+    const W = LAYOUT.width;
+    const H = 136;
+    const top = LAYOUT.barTop - H;
+    const d = DEPTH.panel;
+    const parts = [];
+    const add = (o) => {
+      parts.push(o);
+      return o;
     };
 
-    TOOL_PAGES.forEach((p, pageIndex) => p.tools.forEach((tool, slot) => makeButton(slot, tool, pageIndex)));
-    makeButton(5, 'demolish', null);
+    const bg = add(ui.panel(this, W / 2, top + H / 2, W, H, 'sheet', d));
+    bg.setInteractive(); // para que los toques no atraviesen hacia el mapa
+    const icon = add(this.add.image(0, 0, iconKey('mine')).setDepth(d + 1));
+    const title = add(ui.label(this, 86, top + 14, '', { size: 16, bold: true, depth: d + 1, color: ui.TXT.gold }));
+    const detail = add(ui.label(this, 86, top + 38, '', { size: 12, color: ui.TXT.light, depth: d + 1, wrap: W - 86 - 134, lineSpacing: 4 }));
+    const hint = add(ui.label(this, 86, top + H - 14, 'Arrastra el edificio para moverlo', { size: 10, color: ui.TXT.faint, origin: [0, 0.5], depth: d + 1 }));
 
-    // Botón para cambiar de página.
-    const cx = 6 * w + w / 2;
-    const pageRect = this.ui(
-      this.add.rectangle(cx, cy, w - 6, LAYOUT.barHeight - 14, 0x2a3f5a).setStrokeStyle(2, 0x5a82ad).setInteractive({ useHandCursor: true }),
-      DEPTH.ui + 1,
-    );
-    this.gloss(pageRect);
-    this.pageLabel = this.ui(
-      this.add.text(cx, cy, '', { fontFamily: FONT, fontSize: '12px', color: '#cfe3ff', align: 'center', lineSpacing: 4 }).setOrigin(0.5),
-      DEPTH.ui + 2,
-    );
-    pageRect.on('pointerdown', () => {
-      this.play('select');
-      this.setToolPage((this.toolPage + 1) % TOOL_PAGES.length);
-    });
-    this.setToolPage(0);
-  }
-
-  /** Muestra los botones de una página de la barra (y quita la herramienta si queda oculta). */
-  setToolPage(page) {
-    this.toolPage = page;
-    for (const [tool, b] of this.toolButtons) {
-      const visible = b.page === null || b.page === page;
-      for (const p of b.parts) p.setVisible(visible);
-      if (!visible && this.tool === tool) this.selectTool(null);
-    }
-    const next = TOOL_PAGES[(page + 1) % TOOL_PAGES.length];
-    this.pageLabel.setText(`${next.name}\n▶`);
-  }
-
-  /** Panel de un edificio seleccionado: ocupa el lugar de la barra de herramientas. */
-  createPanel() {
-    const top = LAYOUT.barTop;
-    const h = LAYOUT.barHeight;
-    const cy = top + h / 2;
-    const textX = 76;
-    const d = DEPTH.panel;
-
-    // El fondo es interactivo para que los clics no atraviesen hacia la barra de abajo.
-    const bg = this.add.rectangle(LAYOUT.width / 2, cy, LAYOUT.width, h, COLORS.panel).setStrokeStyle(2, 0xd4a017).setInteractive();
-    const icon = this.add.image(0, 0, iconKey('mine'));
-    this.fitIcon(icon, iconKey('mine'), 40, cy - 4, 52);
-    const title = this.add
-      .text(textX, top + 7, '', { fontFamily: FONT, fontSize: '16px', color: '#ffffff', fontStyle: 'bold' })
-      .setOrigin(0, 0);
-    const detail = this.add
-      .text(textX, top + 29, '', {
-        fontFamily: FONT,
-        fontSize: '12px',
-        color: '#cfe0c8',
-        lineSpacing: 3,
-        wordWrap: { width: LAYOUT.width - textX - 184 },
-      })
-      .setOrigin(0, 0);
-    const hint = this.add
-      .text(textX, top + h - 14, 'Arrastra el edificio para moverlo', { fontFamily: FONT, fontSize: '10px', color: '#86a083' })
-      .setOrigin(0, 0.5);
-
-    const upgradeBtn = this.add
-      .rectangle(LAYOUT.width - 96, cy + 8, 160, 54, COLORS.upgrade)
-      .setStrokeStyle(2, 0x8cc4f5)
-      .setInteractive({ useHandCursor: true });
-    const upgradeLabel = this.add
-      .text(upgradeBtn.x, upgradeBtn.y, '', { fontFamily: FONT, fontSize: '13px', color: '#ffffff', align: 'center', lineSpacing: 3, wordWrap: { width: 150 } })
-      .setOrigin(0.5);
-    const close = this.add
-      .text(LAYOUT.width - 14, top + 5, '✕', { fontFamily: FONT, fontSize: '20px', color: '#ff9a8a' })
-      .setOrigin(1, 0)
-      .setInteractive({ useHandCursor: true });
-
-    const parts = [bg, icon, title, detail, hint, upgradeBtn, upgradeLabel, close];
-    parts.forEach((p) => p.setDepth(d).setVisible(false));
-    // El brillo del panel y del botón: el del botón sigue su visibilidad (ver updatePanel).
-    this.gloss(bg, parts).setVisible(false);
-    this.upgradeGloss = this.gloss(upgradeBtn).setVisible(false);
-
-    upgradeBtn.on('pointerdown', () => this.onUpgradeClick());
-    close.on('pointerdown', () => {
+    const up = ui.button(this, { x: W - 76, y: top + 86, w: 124, h: 66, kind: 'blue', text: '', size: 12, depth: d + 1, onClick: () => this.onUpgradeClick() });
+    up.objs.forEach(add);
+    const close = ui.button(this, { x: W - 26, y: top + 22, w: 34, h: 30, kind: 'red', icon: 'close', iconSize: 14, depth: d + 1, onClick: () => {
       this.play('close');
       this.selectBuilding(null);
-    });
+    } });
+    close.objs.forEach(add);
+    parts.forEach((p) => p.setVisible(false));
 
-    this.panel = { parts, icon, title, detail, hint, upgradeBtn, upgradeLabel, cy };
+    // El botón de mejorar se maneja como un solo objeto (ver updatePanel).
+    const upgradeBtn = {
+      get visible() {
+        return up.img.visible;
+      },
+      setVisible(v) {
+        up.setVisible(v);
+        return upgradeBtn;
+      },
+      setAlpha(a) {
+        up.setEnabled(a >= 1);
+        return upgradeBtn;
+      },
+    };
+    const upgradeLabel = {
+      setText(t) {
+        up.setText(t);
+        return upgradeLabel;
+      },
+      setVisible() {
+        return upgradeLabel;
+      },
+      setAlpha() {
+        return upgradeLabel;
+      },
+    };
+    this.panel = { parts, icon, title, detail, hint, upgradeBtn, upgradeLabel, cy: top + 46, top };
   }
 
+  /** Botones redondos a la derecha del mapa (zoom, centrar) y el de recolectar. */
   createZoomButtons() {
-    const x = LAYOUT.width - 24;
-    const top = LAYOUT.gridTop;
-    const make = (y, label, size, onClick) => {
-      const rect = this.add
-        .rectangle(x, y, 34, 34, 0x1a2a1a, 0.82)
-        .setStrokeStyle(2, 0x86a083)
-        .setInteractive({ useHandCursor: true })
-        .setDepth(DEPTH.zoomButtons);
-      this.gloss(rect);
-      this.add.text(x, y, label, { fontFamily: FONT, fontSize: size, color: '#e8eee0', fontStyle: 'bold' }).setOrigin(0.5).setDepth(DEPTH.zoomButtons + 1);
-      rect.on('pointerdown', onClick);
-    };
-    const center = () => ({ x: LAYOUT.width / 2, y: LAYOUT.gridTop + LAYOUT.viewHeight / 2 });
+    const W = LAYOUT.width;
+    const x = W - 26;
+    const top = LAYOUT.gridTop + 116;
+    const d = DEPTH.zoomButtons;
+    const center = () => ({ x: W / 2, y: LAYOUT.gridTop + LAYOUT.viewHeight / 2 });
     const zoom = (factor) => {
       const c = center();
       zoomAt(c.x, c.y, view.zoom * factor);
       this.viewDirty = true;
     };
-    make(top + 26, '+', '22px', () => zoom(1.25));
-    make(top + 66, '−', '22px', () => zoom(0.8));
-    make(top + 106, '⌂', '18px', () => {
+    const round = (y, name, onClick) => ui.button(this, { x, y, w: 40, h: 40, kind: 'dark2', icon: name, iconSize: 20, depth: d, onClick });
+    round(top, 'plus', () => zoom(1.25));
+    round(top + 46, 'minus', () => zoom(0.8));
+    round(top + 92, 'home', () => {
       resetView(logic.townHall(store.get()) ?? undefined);
       this.viewDirty = true;
     });
-    make(top + 146, '⚔', '18px', () => this.openAttackModal());
-    make(top + 186, '🏆', '16px', () => openAchievementsPanel(this));
-    // Puntito rojo cuando hay un premio de logros listo para reclamar.
-    this.achievementDot = this.add.circle(x + 13, top + 186 - 13, 6, 0xdd3333).setStrokeStyle(2, 0xffffff).setDepth(DEPTH.zoomButtons + 3).setVisible(false);
+
+    // Recolectar todo: abajo a la derecha, a mano del pulgar.
+    this.collectBtn = ui.button(this, { x: W - 66, y: LAYOUT.barTop - 36, w: 116, h: 46, kind: 'gold', icon: 'coin', iconSize: 22, text: 'Recolectar', size: 12, depth: d, onClick: () => this.doAction(
+      () => logic.collectAll(store.get()),
+      (r) => [r.gold > 0 && `+${r.gold} de oro`, r.wood > 0 && `+${r.wood} de madera`].filter(Boolean).join(' · '),
+      'collect_all',
+    ) });
+  }
+
+  /* ---- ventanas ---- */
+
+  /** Ventana con título, texto y botones (ver ui.dialog). */
+  dialog(o) {
+    return ui.dialog(this, o);
   }
 
   /** Ventana para confirmar el ataque: muestra al enemigo y tus tropas. */
@@ -553,48 +607,36 @@ export default class BaseScene extends Phaser.Scene {
     const level = nextCampaignLevel(state);
     const mission = generateMission(level);
     const ready = canAttack(state);
-    const w = LAYOUT.width;
-    const d = DEPTH.panel + 100;
-    const cx = w / 2;
-    const cy = LAYOUT.gridTop + 230;
-    const a = state.army;
     const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
     const lines = [
-      missionName(level),
       `Enemigo: ${plural(mission.buildings.filter((b) => b.type !== 'wall').length, 'edificio', 'edificios')} · ${plural(mission.buildings.filter((b) => b.type === 'tower').length, 'torre', 'torres')} · ${plural(mission.defenders.length, 'defensor', 'defensores')}`,
-      ready
-        ? `Tus tropas: ${armyText(state)}`
-        : 'No tienes tropas: entrénalas en el cuartel',
+      ready ? `Tus tropas: ${armyText(state)}` : 'No tienes tropas: entrénalas en tus edificios militares',
     ];
+    this.dialog({
+      title: missionName(level),
+      icon: 'swords',
+      lines,
+      buttons: ready
+        ? [{ text: 'Atacar', kind: 'red', onClick: () => this.startBattle(level), close: false }, { text: 'Cancelar', kind: 'dark2' }]
+        : [{ text: 'Cerrar', kind: 'dark2' }],
+    });
+  }
 
-    const parts = [];
-    const add = (o) => {
-      parts.push(o);
-      return o;
-    };
-    add(this.add.rectangle(w / 2, LAYOUT.height / 2, w, LAYOUT.height, 0x000000, 0.6).setDepth(d).setInteractive());
-    add(this.add.rectangle(cx, cy, 480, 250, 0x1a2a1a, 0.98).setStrokeStyle(3, 0xd4a017).setDepth(d + 1));
-    add(this.add.text(cx, cy - 92, '⚔  Atacar', { fontFamily: FONT, fontSize: '26px', color: '#ffe9a0', fontStyle: 'bold' }).setOrigin(0.5).setDepth(d + 2));
-    add(
-      this.add
-        .text(cx, cy - 10, lines.join('\n'), { fontFamily: FONT, fontSize: '15px', color: '#e8eee0', align: 'center', lineSpacing: 9, wordWrap: { width: 440 } })
-        .setOrigin(0.5)
-        .setDepth(d + 2),
-    );
-
-    const button = (x, label, fill, onClick) => {
-      const r = add(this.add.rectangle(x, cy + 88, ready ? 200 : 240, 46, fill).setStrokeStyle(2, 0xffffff, 0.5).setInteractive({ useHandCursor: true }).setDepth(d + 2));
-      add(this.add.text(x, cy + 88, label, { fontFamily: FONT, fontSize: '17px', color: '#ffffff', fontStyle: 'bold' }).setOrigin(0.5).setDepth(d + 3));
-      r.on('pointerdown', onClick);
-    };
-    if (ready) {
-      button(cx - 108, 'Atacar', 0x9a3a2a, () => this.startBattle(level));
-      button(cx + 108, 'Cancelar', 0x324a32, () => this.closeModal());
-    } else {
-      button(cx, 'Cerrar', 0x324a32, () => this.closeModal());
-    }
-    this.modal = parts;
-    this.play('select');
+  /** Menú: sonido, exportar, importar y empezar de nuevo (usa los botones de la página, que están ocultos). */
+  openMenu() {
+    this.dialog({
+      title: 'Menú',
+      icon: 'gear',
+      vertical: true,
+      width: 330,
+      buttons: [
+        { text: `Sonido: ${isSoundOn() ? 'sí' : 'no'}`, kind: 'dark2', onClick: () => runMenu('toggleSound') },
+        { text: 'Exportar partida', kind: 'blue', onClick: () => runMenu('export') },
+        { text: 'Importar partida', kind: 'blue', onClick: () => runMenu('import') },
+        { text: 'Nueva partida', kind: 'red', onClick: () => runMenu('reset') },
+        { text: 'Cerrar', kind: 'dark2' },
+      ],
+    });
   }
 
   closeModal() {
@@ -608,38 +650,43 @@ export default class BaseScene extends Phaser.Scene {
     this.leaving = true;
     store.persist();
     this.closeModal();
+    this.closeBuildSheet();
     this.scene.start('BattleScene', { report });
   }
 
   startBattle(level) {
     store.persist(); // guarda la base antes de salir
     this.closeModal();
+    this.closeBuildSheet();
     this.scene.start('BattleScene', { level });
   }
 
-  /** Cartel de la misión en curso, arriba a la izquierda de la ventana del mapa. */
+  /* ---- carteles: misión y ataque enemigo ---- */
+
+  /** Etiqueta de la misión en curso, arriba a la izquierda del mapa. */
   createQuestBanner() {
-    const x = 8;
+    const W = LAYOUT.width;
+    const x = 6;
     const y = LAYOUT.gridTop + 6;
-    const w = 400;
-    const h = 44;
+    const w = W - 12 - 104;
+    const h = 40;
     const d = DEPTH.zoomButtons;
-    const bg = this.add
-      .rectangle(x + w / 2, y + h / 2, w, h, 0x1a2a1a, 0.9)
-      .setStrokeStyle(2, COLORS.gold)
-      .setInteractive({ useHandCursor: true })
-      .setDepth(d);
-    const title = this.add
-      .text(x + 10, y + 6, '', { fontFamily: FONT, fontSize: '12px', color: TEXT.gold, fontStyle: 'bold' })
-      .setDepth(d + 1);
-    const detail = this.add.text(x + 10, y + 24, '', { fontFamily: FONT, fontSize: '11px', color: '#cfe0c8' }).setDepth(d + 1);
-    bg.on('pointerdown', () => this.onQuestClick());
-    this.questBanner = { bg, title, detail, parts: [bg, title, detail, this.gloss(bg)] };
+    const bg = ui.panel(this, x + w / 2, y + h / 2, w, h, 'card', d).setInteractive({ useHandCursor: true });
+    const ic = ui.icon(this, x + 22, y + h / 2, 'scroll', 24, d + 1);
+    const title = ui.label(this, x + 42, y + 6, '', { size: 12, bold: true, color: ui.TXT.gold, depth: d + 1, wrap: w - 50 });
+    const detail = ui.label(this, x + 42, y + 23, '', { size: 11, color: ui.TXT.dim, depth: d + 1, wrap: w - 50 });
+    title.setMaxLines(1);
+    detail.setMaxLines(1);
+    bg.on('pointerdown', () => {
+      ui.haptic();
+      this.onQuestClick();
+    });
+    this.questBanner = { bg, title, detail, ic, parts: [bg, ic, title, detail] };
   }
 
   updateQuestBanner() {
     const state = store.get();
-    const { bg, title, detail, parts } = this.questBanner;
+    const { bg, title, detail, ic, parts } = this.questBanner;
     const quest = quests.currentQuest(state);
     for (const p of parts) p.setVisible(Boolean(quest));
     if (!quest) return;
@@ -647,13 +694,10 @@ export default class BaseScene extends Phaser.Scene {
     const progress = quests.questProgress(state, quest);
     const { claimed, total } = quests.questCounts(state);
     title.setText(`Misión ${claimed + 1}/${total} · ${quest.text}`);
-    detail.setText(
-      progress.done
-        ? `¡Cumplida! Toca aquí para reclamar: ${rewardText(quest.reward, '+')}`
-        : `${progress.current}/${progress.target} · Premio: ${rewardText(quest.reward)}`,
-    );
-    bg.setStrokeStyle(2, progress.done ? COLORS.ok : COLORS.gold);
-    detail.setColor(progress.done ? '#b8f0b8' : '#cfe0c8');
+    detail.setText(progress.done ? `¡Cumplida! Toca para reclamar ${rewardText(quest.reward, '+')}` : `${progress.current}/${progress.target} · Premio: ${rewardText(quest.reward)}`);
+    detail.setColor(progress.done ? ui.TXT.good : ui.TXT.dim);
+    bg.setTint(progress.done ? 0xb8ffb8 : 0xffffff);
+    ic.setTexture(progress.done ? 'ic_check' : 'ic_scroll');
 
     // Avisa una sola vez cuando se cumple; las que ya venían cumplidas al abrir el juego no avisan.
     if (progress.done && this.questInit && this.notifiedQuest !== quest.id) {
@@ -683,23 +727,26 @@ export default class BaseScene extends Phaser.Scene {
 
   /* ---------- ataques enemigos: aviso, reparación e informe ---------- */
 
-  /** Cartel bajo el de la misión: cuenta regresiva del próximo ataque y, si hay, lo dañado (se toca para reparar). */
+  /** A la derecha de la misión: cuenta regresiva del próximo ataque y, si hay, lo dañado (se toca para reparar). */
   createRaidBanner() {
-    const x = 8;
-    const y = LAYOUT.gridTop + 54;
-    const w = 400;
-    const h = 42;
+    const W = LAYOUT.width;
+    const w = 96;
+    const x = W - 6 - w;
+    const y = LAYOUT.gridTop + 6;
     const d = DEPTH.zoomButtons;
-    const bg = this.add
-      .rectangle(x + w / 2, y + h / 2, w, h, 0x2a1a1a, 0.9)
-      .setStrokeStyle(2, 0xdd5555)
-      .setInteractive({ useHandCursor: true })
-      .setDepth(d);
-    const line1 = this.add.text(x + 10, y + 5, '', { fontFamily: FONT, fontSize: '12px', color: '#ffb0a0', fontStyle: 'bold' }).setDepth(d + 1);
-    const line2 = this.add.text(x + 10, y + 22, '', { fontFamily: FONT, fontSize: '11px', color: '#e8c79a' }).setDepth(d + 1);
-    this.gloss(bg);
-    bg.on('pointerdown', () => this.onRaidBannerClick());
-    this.raidBanner = { bg, line1, line2 };
+    const bg = ui.panel(this, x + w / 2, y + 20, w, 40, 'card', d).setInteractive({ useHandCursor: true });
+    const ic = ui.icon(this, x + 18, y + 20, 'warning', 22, d + 1);
+    const line1 = ui.label(this, x + 33, y + 20, '', { size: 14, bold: true, color: ui.TXT.bad, origin: [0, 0.5], depth: d + 1 });
+    const fix = ui.panel(this, x + w / 2, y + 62, w, 30, 'card', d).setInteractive({ useHandCursor: true });
+    const fixIc = ui.icon(this, x + 18, y + 62, 'wrench', 18, d + 1);
+    const fixText = ui.label(this, x + 32, y + 62, '', { size: 12, bold: true, color: '#ffcf8a', origin: [0, 0.5], depth: d + 1 });
+    const click = () => {
+      ui.haptic();
+      this.onRaidBannerClick();
+    };
+    bg.on('pointerdown', click);
+    fix.on('pointerdown', click);
+    this.raidBanner = { bg, line1, ic, fix, fixIc, fixText };
   }
 
   updateRaidBanner() {
@@ -707,17 +754,14 @@ export default class BaseScene extends Phaser.Scene {
     const ms = raidCountdownMs(state, Date.now());
     const imminent = ms <= 60_000;
     const damaged = logic.damagedBuildings(state);
-    const { bg, line1, line2 } = this.raidBanner;
-
-    line1.setText(imminent ? `¡Ataque enemigo inminente! ${logic.formatDuration(ms)}` : `Ataque enemigo en ${logic.formatDuration(ms)} · fuerza ${raidLevel(state)}`);
-    line1.setColor(imminent ? '#ffe08a' : '#ffb0a0');
-    line2.setText(
-      damaged.length
-        ? `Dañados: ${damaged.length} · toca para reparar todo (${logic.formatCost(logic.repairAllCost(state))})`
-        : 'Tus torres, muros y tropas defienden la base',
-    );
-    line2.setColor(damaged.length ? '#ffcf8a' : '#cfe0c8');
-    bg.setStrokeStyle(2, imminent ? 0xffd24d : damaged.length ? 0xe08a3a : 0xdd5555);
+    const { bg, line1, ic, fix, fixIc, fixText } = this.raidBanner;
+    line1.setText(logic.formatDuration(ms));
+    line1.setColor(imminent ? '#ffe08a' : ui.TXT.bad);
+    bg.setTint(imminent ? 0xffe9a0 : 0xffffff);
+    ic.setTint(imminent ? 0xffd24d : 0xffffff);
+    const anyDamage = damaged.length > 0;
+    for (const p of [fix, fixIc, fixText]) p.setVisible(anyDamage);
+    if (anyDamage) fixText.setText(`${damaged.length} · reparar`);
   }
 
   onRaidBannerClick() {
@@ -729,19 +773,14 @@ export default class BaseScene extends Phaser.Scene {
         'upgrade_done',
       );
     } else {
-      this.showToast(`Próximo ataque: fuerza ${raidLevel(state)}. Torres, muros y tropas ayudan a defender.`, 2400);
+      this.showToast(`Próximo ataque enemigo: fuerza ${raidLevel(state)}. Torres, muros y tropas ayudan a defender.`, 2600);
       this.play('select');
     }
   }
 
   /** Informe de un ataque enemigo ya resuelto. */
   openRaidReport(r) {
-    this.closeModal();
     const state = store.get();
-    const w = LAYOUT.width;
-    const d = DEPTH.panel + 100;
-    const cx = w / 2;
-    const cy = LAYOUT.gridTop + 250;
     const good = r.outcome === 'repelled';
     const title = { repelled: '¡Rechazaste el ataque!', retreated: 'El enemigo se retiró', raided: '¡Tumbaron tu Ayuntamiento!' }[r.outcome];
     const stolen = rewardText(r.stolen);
@@ -751,61 +790,42 @@ export default class BaseScene extends Phaser.Scene {
       stolen ? `Robaron: ${stolen}` : 'No robaron nada',
       r.heroes?.length && r.xp ? `Héroes: +${r.xp} XP${r.heroLevelUps ? ' · ¡SUBEN DE NIVEL!' : ''}` : null,
     ].filter(Boolean);
-
-    const parts = [];
-    const add = (o) => {
-      parts.push(o);
-      return o;
-    };
-    add(this.add.rectangle(w / 2, LAYOUT.height / 2, w, LAYOUT.height, 0x000000, 0.62).setDepth(d).setInteractive());
-    add(this.add.rectangle(cx, cy, 480, 270, 0x1a2a1a, 0.98).setStrokeStyle(3, good ? 0x66dd66 : 0xdd5555).setDepth(d + 1));
-    add(this.add.text(cx, cy - 100, `⚠ ${title}`, { fontFamily: FONT, fontSize: '24px', color: good ? '#b8f0b8' : '#ffb0a0', fontStyle: 'bold' }).setOrigin(0.5).setDepth(d + 2));
-    add(this.add.text(cx, cy - 15, lines.join('\n'), { fontFamily: FONT, fontSize: '15px', color: '#e8eee0', align: 'center', lineSpacing: 9 }).setOrigin(0.5).setDepth(d + 2));
-
-    const button = (x, width, label, fill, onClick) => {
-      const rect = add(this.add.rectangle(x, cy + 100, width, 44, fill).setStrokeStyle(2, 0xffffff, 0.5).setInteractive({ useHandCursor: true }).setDepth(d + 2));
-      add(this.add.text(x, cy + 100, label, { fontFamily: FONT, fontSize: '14px', color: '#ffffff', fontStyle: 'bold', align: 'center' }).setOrigin(0.5).setDepth(d + 3));
-      rect.on('pointerdown', onClick);
-    };
-    if (logic.damagedBuildings(state).length) {
-      button(cx - 120, 220, `Reparar todo\n${logic.formatCost(logic.repairAllCost(state))}`, 0x9a6a2a, () => {
-        this.closeModal();
-        this.onRaidBannerClick();
-      });
-      button(cx + 120, 180, 'Cerrar', 0x324a32, () => this.closeModal());
-    } else {
-      button(cx, 220, 'Cerrar', 0x324a32, () => this.closeModal());
-    }
-    this.modal = parts;
-    this.play(good ? 'win' : 'lose');
+    const hurt = logic.damagedBuildings(state).length > 0;
+    this.dialog({
+      title,
+      icon: good ? 'shield' : 'warning',
+      tone: good ? 'good' : 'bad',
+      lines,
+      buttons: hurt
+        ? [{ text: `Reparar todo\n${logic.formatCost(logic.repairAllCost(state))}`, kind: 'gold', onClick: () => this.onRaidBannerClick() }, { text: 'Cerrar', kind: 'dark2' }]
+        : [{ text: 'Cerrar', kind: 'dark2' }],
+    });
   }
 
   /* ---------- entrenar unidades ---------- */
 
-  /** Tarjetas para entrenar: aparecen sobre el mapa al elegir un edificio militar, el altar o la herrería. */
+  /** Tarjetas para entrenar: aparecen sobre el panel al elegir un edificio militar, el altar o la herrería. */
   createTrainStrip() {
-    const cardW = 182;
-    const cardH = 78;
-    const y = LAYOUT.barTop - cardH - 10;
+    const W = LAYOUT.width;
+    const gap = 6;
+    const cardW = (W - 12 - 2 * gap) / 3;
+    const cardH = 88;
+    const y = this.panel.top - cardH / 2 - 6;
     const d = DEPTH.panel - 5;
     this.trainCards = [0, 1, 2].map((i) => {
-      const left = 8 + i * (cardW + 6);
+      const left = 6 + i * (cardW + gap);
       const cx = left + cardW / 2;
-      const cy = y + cardH / 2;
-      const rect = this.add
-        .rectangle(cx, cy, cardW, cardH, 0x1a2a1a, 0.94)
-        .setStrokeStyle(2, 0x8cc4f5)
-        .setInteractive({ useHandCursor: true })
-        .setDepth(d);
+      const rect = ui.panel(this, cx, y, cardW, cardH, 'card', d).setInteractive({ useHandCursor: true });
       const icon = this.add.image(0, 0, 'unit_soldier').setDepth(d + 1);
-      const text = (dy, size, color, bold) =>
-        this.add.text(left + 52, y + dy, '', { fontFamily: FONT, fontSize: size, color, fontStyle: bold ? 'bold' : 'normal' }).setDepth(d + 1);
-      const name = text(6, '13px', '#ffffff', true);
-      const cost = text(24, '11px', TEXT.gold, false);
-      const info = text(40, '11px', '#9fc8ef', false);
-      const stats = text(56, '11px', '#cfe0c8', false);
-      const card = { rect, icon, name, cost, info, stats, unit: null, ix: left + 27, iy: cy, parts: [rect, icon, name, cost, info, stats, this.gloss(rect)] };
-      rect.on('pointerdown', () => this.onTrainClick(card.unit));
+      const name = ui.label(this, left + 40, y - cardH / 2 + 8, '', { size: 12, bold: true, depth: d + 1, wrap: cardW - 46 });
+      const cost = ui.label(this, left + 8, y - cardH / 2 + 42, '', { size: 11, bold: true, color: ui.TXT.gold, depth: d + 1 });
+      const info = ui.label(this, left + 8, y - cardH / 2 + 57, '', { size: 11, color: ui.TXT.blue, depth: d + 1 });
+      const stats = ui.label(this, left + 8, y - cardH / 2 + 71, '', { size: 11, color: ui.TXT.dim, depth: d + 1 });
+      const card = { rect, icon, name, cost, info, stats, unit: null, ix: left + 22, iy: y - cardH / 2 + 24, parts: [rect, icon, name, cost, info, stats] };
+      rect.on('pointerdown', () => {
+        ui.haptic();
+        this.onTrainClick(card.unit);
+      });
       for (const p of card.parts) p.setVisible(false);
       return card;
     });
@@ -828,7 +848,7 @@ export default class BaseScene extends Phaser.Scene {
 
       if (key === '__heroes') {
         // Un solo botón: abre la ventana de héroes (invocar, escuadra y árboles de poder).
-        this.fitIcon(card.icon, 'unit_hero', card.ix, card.iy, 38);
+        this.fitIcon(card.icon, 'unit_hero', card.ix, card.iy, 34);
         card.name.setText('Héroes');
         card.cost.setText(`${logic.heroCount(state)}/${HERO_KEYS.length} invocados`);
         card.info.setText(`Escuadra ${state.squad.length}/2`);
@@ -839,7 +859,7 @@ export default class BaseScene extends Phaser.Scene {
         const affordable = logic.canAfford(state, u.cost) && logic.supplyUsed(state) + u.supply <= logic.supplyCap(state);
         usable = !locked && !busy && affordable;
         const c = logic.unitCombat(state, key);
-        this.fitIcon(card.icon, u.sprite, card.ix, card.iy, 38);
+        this.fitIcon(card.icon, u.sprite, card.ix, card.iy, 34);
         card.name.setText(`${u.name} nv. ${logic.unitLevel(state, key)}`);
         card.cost.setText(locked ? `Pide nivel ${u.minLevel}` : logic.formatCost(u.cost));
         card.info.setText(`${logic.formatDuration(u.trainSec * factor * 1000)} · Población ${u.supply}`);
@@ -850,14 +870,14 @@ export default class BaseScene extends Phaser.Scene {
         const maxed = level >= Math.min(b.level, 10);
         const step = researchStep(key, level);
         usable = !maxed && !busy && logic.canAfford(state, step.cost);
-        this.fitIcon(card.icon, key === 'weapons' ? 'unit_knight' : key === 'armor' ? 'wall_3' : 'tower_2', card.ix, card.iy, 38);
+        this.fitIcon(card.icon, key === 'weapons' ? 'unit_knight' : key === 'armor' ? 'wall_3' : 'tower_2', card.ix, card.iy, 34);
         card.name.setText(`${r.name} ${level}`);
         card.cost.setText(maxed ? (level >= 10 ? 'Al máximo' : 'Mejora la Herrería') : logic.formatCost(step.cost));
         card.info.setText(maxed ? '' : logic.formatDuration(step.sec * factor * 1000));
         card.stats.setText(`Ahora +${pct(level * r.perLevel)}${maxed ? '' : ` → +${pct((level + 1) * r.perLevel)}`}`);
       }
       for (const p of card.parts) p.setAlpha(usable ? 1 : 0.5);
-      card.rect.setStrokeStyle(2, usable ? 0x8cc4f5 : 0x4a6a4a);
+      card.rect.setTint(usable ? 0xffffff : 0x9a8a7a);
     });
   }
 
@@ -1092,12 +1112,8 @@ export default class BaseScene extends Phaser.Scene {
 
   selectTool(tool) {
     this.tool = tool;
-    for (const [name, b] of this.toolButtons) {
-      const selected = name === tool;
-      b.rect.setFillStyle(selected ? COLORS.buttonSelected : COLORS.button);
-      b.rect.setStrokeStyle(selected ? 3 : 2, selected ? 0xd4a017 : 0x4a6a4a);
-    }
     this.ghost.setVisible(false);
+    this.showToolHint();
     if (tool) this.selectBuilding(null);
   }
 
@@ -1107,6 +1123,7 @@ export default class BaseScene extends Phaser.Scene {
     const b = id === null ? null : state.buildings.find((x) => x.id === id);
     if (!b) this.selectedId = null;
 
+    if (this.selectedId !== null) this.closeBuildSheet();
     for (const p of this.panel.parts) p.setVisible(this.selectedId !== null);
     this.selector.setVisible(this.selectedId !== null);
     if (b) {
@@ -1177,7 +1194,7 @@ export default class BaseScene extends Phaser.Scene {
     const next = logic.nextLevelOf(b);
     this.panel.hint.setVisible(true);
 
-    this.fitIcon(icon, spriteOf(b), 40, cy - 4, 52);
+    this.fitIcon(icon, spriteOf(b), 44, cy, 64);
     const arrow = b.type === 'townhall' && next ? ` → ${logic.displayName('townhall', b.level + 1)}` : '';
     title.setText(`${logic.displayName(b.type, b.level)} · Nivel ${b.level}/${logic.maxLevel(b.type)}${arrow}`);
     this.updateTrainStrip(b);
@@ -1590,25 +1607,7 @@ export default class BaseScene extends Phaser.Scene {
   }
 
   updateHud() {
-    const state = store.get();
-    const cap = logic.resourceCap(state);
-    this.goldText.setText(`${state.gold}/${cap}`);
-    this.woodText.setText(`${state.wood}/${cap}`);
-    const used = logic.supplyUsed(state);
-    const supply = logic.supplyCap(state);
-    this.buildersText
-      .setText(`Obreros ${logic.busyBuilders(state)}/${ECONOMY.builders} · Población ${used}/${supply} · Ayuntamiento ${logic.townHallLevel(state)}`)
-      .setColor(used >= supply ? TEXT.bad : '#9fc8ef');
-
-    for (const [tool, b] of this.toolButtons) {
-      if (!b.def) continue;
-      const count = logic.countOf(state, tool);
-      const limit = logic.limitFor(state, tool);
-      const full = count >= limit;
-      b.label.setText(`${b.def.shortName ?? b.def.name}\n${count}/${limit}`).setColor(full ? TEXT.bad : TEXT.normal);
-      for (const c of b.costs) c.text.setColor(state[c.res] < (b.def.cost[c.res] ?? 0) ? TEXT.bad : TEXT[c.res]);
-      b.rect.setAlpha(full ? 0.6 : 1);
-    }
+    this.updateHudBlocks(store.get());
   }
 
   /**
@@ -1771,8 +1770,6 @@ export default class BaseScene extends Phaser.Scene {
     this.animateWorkers(Math.min(delta, 250) / 1000, this.time.now);
     this.animateArmy(this.time.now);
     stepClouds(this.clouds, Math.min(delta, 250) / 1000);
-    const up = this.panel.upgradeBtn;
-    this.upgradeGloss.setVisible(up.visible).setAlpha(up.alpha);
     this.swayTrees(this.time.now);
 
     if (this.pop.size) this.viewDirty = true; // hay animaciones de construcción en curso

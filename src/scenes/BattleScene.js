@@ -12,6 +12,7 @@ import * as store from '../game/store.js';
 import { grassLook } from '../game/terrain.js';
 import { wallConnectors } from '../game/walls.js';
 import { renderConnectors } from './connectors.js';
+import * as ui from './ui.js';
 import { addGloss, addVignette, emberPuff, ensureTextures, placeShadow, smokePuff, sparkBurst } from './look.js';
 
 const FONT = 'system-ui, "Segoe UI", Roboto, sans-serif';
@@ -88,7 +89,9 @@ export default class BattleScene extends Phaser.Scene {
     resetView(this.raid ? RAID_CENTER : START_CENTER);
     zoomAt(LAYOUT.width / 2, LAYOUT.gridTop + LAYOUT.viewHeight / 2, this.raid ? RAID_ZOOM : START_ZOOM);
 
+    this.cameras.main.setBackgroundColor(0x1b4a2a); // lo que queda fuera del mapa: verde oscuro
     ensureTextures(this);
+    ui.ensureUi(this);
     this.createTerrain();
     this.createEntities();
     addVignette(this, DEPTH.vignette);
@@ -99,16 +102,14 @@ export default class BattleScene extends Phaser.Scene {
     this.createSideButtons();
     this.createHeroButtons();
     this.gfx = this.add.graphics().setDepth(DEPTH.fx);
-    this.hint = this.add
-      .text(12, LAYOUT.barTop - 20, '', { fontFamily: FONT, fontSize: '12px', color: '#ffffff', stroke: '#000000', strokeThickness: 3 })
-      .setDepth(DEPTH.buttons);
+    this.hint = ui.label(this, LAYOUT.width / 2, LAYOUT.barTop - 12, '', { size: 12, bold: true, origin: [0.5, 0.5], align: 'center', stroke: 3, depth: DEPTH.buttons, wrap: LAYOUT.width - 30 });
     this.toast = this.add
       .text(LAYOUT.width / 2, LAYOUT.gridTop + 12, '', {
-        fontFamily: FONT, fontSize: '15px', color: '#ffffff', backgroundColor: '#000000cc', padding: { x: 10, y: 6 }, align: 'center',
+        fontFamily: ui.FONT, fontSize: '14px', fontStyle: 'bold', color: ui.TXT.light, backgroundColor: '#2b1d12f2', padding: { x: 14, y: 8 }, align: 'center', wordWrap: { width: LAYOUT.width - 48 },
       })
       .setOrigin(0.5, 0)
       .setAlpha(0)
-      .setDepth(DEPTH.modal - 10);
+      .setDepth(900);
     this.boxRect = null;
 
     this.input.on('pointerdown', this.onPointerDown, this);
@@ -199,93 +200,73 @@ export default class BattleScene extends Phaser.Scene {
   }
 
   createHud() {
+    const W = LAYOUT.width;
+    const H = LAYOUT.hudHeight;
     const d = DEPTH.ui;
-    const hudBg = this.add.rectangle(LAYOUT.width / 2, LAYOUT.hudHeight / 2, LAYOUT.width, LAYOUT.hudHeight, COLORS.hud).setDepth(d);
-    addGloss(this, hudBg);
-    this.add.rectangle(LAYOUT.width / 2, LAYOUT.hudHeight - 1, LAYOUT.width, 2, 0xd4a017, 0.55).setDepth(d + 0.5);
-    this.hudTop = this.add.text(16, 20, '', { fontFamily: FONT, fontSize: '18px', color: TEXT.gold, fontStyle: 'bold' }).setOrigin(0, 0.5).setDepth(d + 1);
-    this.hudBottom = this.add.text(16, 46, '', { fontFamily: FONT, fontSize: '13px', color: '#9fc8ef' }).setOrigin(0, 0.5).setDepth(d + 1);
-
-    const btn = this.add
-      .rectangle(LAYOUT.width - 70, LAYOUT.hudHeight / 2, 116, 40, COLORS.button)
-      .setStrokeStyle(2, 0x4a6a4a)
-      .setInteractive({ useHandCursor: true })
-      .setDepth(d + 1);
-    addGloss(this, btn);
-    this.speedText = this.add.text(btn.x, btn.y, '', { fontFamily: FONT, fontSize: '14px', color: TEXT.normal }).setOrigin(0.5).setDepth(d + 2);
-    btn.on('pointerdown', () => {
+    ui.panel(this, W / 2, H / 2, W, H, 'bar', d, 'bottom');
+    this.hudTop = ui.label(this, 12, 20, '', { size: 16, bold: true, color: ui.TXT.gold, origin: [0, 0.5], depth: d + 2 });
+    this.hudBottom = ui.label(this, 12, 41, '', { size: 11, color: ui.TXT.blue, origin: [0, 0.5], depth: d + 2 });
+    this.speedBtn = ui.button(this, { x: W - 46, y: H / 2, w: 76, h: 36, kind: 'dark2', icon: 'ff', iconSize: 16, text: '×1', size: 14, depth: d + 2, onClick: () => {
       this.speed = this.speed === 1 ? 2 : 1;
       this.play('select');
-    });
+    } });
   }
 
-  /** Barra inferior con 7 botones: grupos de tropas, «Auto» y «Retirada». */
+  /** Barra de abajo: un botón por grupo de tropas (con su cantidad), «Auto» y «Huir». */
   createChips() {
+    const W = LAYOUT.width;
     const slots = 9;
-    const w = LAYOUT.width / slots;
-    const cy = LAYOUT.barTop + LAYOUT.barHeight / 2;
-    const barBg = this.add.rectangle(LAYOUT.width / 2, cy, LAYOUT.width, LAYOUT.barHeight, COLORS.hud).setDepth(DEPTH.ui);
-    addGloss(this, barBg);
-    this.add.rectangle(LAYOUT.width / 2, LAYOUT.barTop + 1, LAYOUT.width, 2, 0xd4a017, 0.55).setDepth(DEPTH.ui + 0.5);
-
+    const w = (W - 8) / slots;
+    const top = LAYOUT.barTop;
+    const H = LAYOUT.barHeight;
+    const cy = top + H / 2 + 1;
+    const d = DEPTH.ui;
+    ui.panel(this, W / 2, top + H / 2, W, H, 'bar', d, 'top');
     const defs = [
-      { id: 'all', label: 'Todos', kinds: null },
-      { id: 'soldier', label: 'Soldados', kinds: ['soldier'], icon: 'unit_soldier' },
-      { id: 'archer', label: 'Arqueros', kinds: ['archer'], icon: 'unit_archer' },
-      { id: 'mage', label: 'Magos', kinds: ['mage'], icon: 'unit_mage' },
-      { id: 'knight', label: 'Caballeros', kinds: ['knight'], icon: 'unit_knight' },
-      { id: 'siege', label: 'Asedio', kinds: ['catapult', 'ram'], icon: 'unit_catapult' },
-      { id: 'hero', label: 'Héroes', kinds: ['hero'], icon: 'unit_hero' },
-      { id: 'auto', label: 'Auto', action: () => this.autoMode() },
-      { id: 'retreat', label: 'Retirada', action: () => this.tryRetreat() },
+      { id: 'all', glyph: 'star', kinds: null, name: 'Todas las tropas' },
+      { id: 'soldier', sprite: 'unit_soldier', kinds: ['soldier'], name: 'Soldados' },
+      { id: 'archer', sprite: 'unit_archer', kinds: ['archer'], name: 'Arqueros' },
+      { id: 'mage', sprite: 'unit_mage', kinds: ['mage'], name: 'Hechiceros' },
+      { id: 'knight', sprite: 'unit_knight', kinds: ['knight'], name: 'Caballeros' },
+      { id: 'siege', sprite: 'unit_catapult', kinds: ['catapult', 'ram'], name: 'Armas de asedio' },
+      { id: 'hero', sprite: 'unit_hero', kinds: ['hero'], name: 'Héroes' },
+      { id: 'auto', glyph: 'auto', label: 'Auto', action: () => this.autoMode() },
+      { id: 'retreat', glyph: 'flag', label: 'Huir', action: () => this.tryRetreat() },
     ];
     this.chips = defs.map((def, i) => {
-      const cx = i * w + w / 2;
-      const rect = this.add
-        .rectangle(cx, cy, w - 6, LAYOUT.barHeight - 14, COLORS.button)
-        .setStrokeStyle(2, 0x4a6a4a)
-        .setInteractive({ useHandCursor: true })
-        .setDepth(DEPTH.ui + 1);
-      addGloss(this, rect);
-      if (def.icon) this.fitIcon(this.add.image(0, 0, def.icon), def.icon, cx, cy - 24, 28).setDepth(DEPTH.ui + 2);
-      else {
-        const glyph = { all: '★', auto: '⟲', retreat: '⚑' }[def.id];
-        this.add.text(cx, cy - 24, glyph, { fontFamily: FONT, fontSize: '22px', color: def.id === 'retreat' ? '#ff9a8a' : '#cfe3ff' }).setOrigin(0.5).setDepth(DEPTH.ui + 2);
-      }
-      const label = this.add
-        .text(cx, cy + 12, '', { fontFamily: FONT, fontSize: '10px', color: TEXT.normal, align: 'center', lineSpacing: 2 })
-        .setOrigin(0.5)
-        .setDepth(DEPTH.ui + 2);
+      const cx = 4 + w / 2 + i * w;
+      const chipW = Math.round(w - 4);
+      const chipH = H - 10;
+      const rect = ui.panel(this, cx, cy, chipW, chipH, 'dark2', d + 1).setInteractive({ useHandCursor: true });
+      if (def.sprite) this.fitIcon(this.add.image(0, 0, def.sprite).setDepth(d + 2), def.sprite, cx, cy - 10, 28);
+      else ui.icon(this, cx, cy - 10, def.glyph, 22, d + 2);
+      const label = ui.label(this, cx, cy + 16, '', { size: 11, bold: true, origin: [0.5, 0.5], align: 'center', depth: d + 3 });
       rect.on('pointerdown', () => {
+        ui.haptic();
         this.play('select');
         if (def.action) def.action();
-        else this.selectKinds(def.id, def.kinds);
+        else {
+          this.selectKinds(def.id, def.kinds);
+          this.showToast(def.name, 700);
+        }
       });
-      return { def, rect, label };
+      return { def, rect, label, chipW, chipH };
     });
   }
 
   /** Barra de una defensa: no hay órdenes que dar, solo mirar o saltar la pelea. */
   createRaidBar() {
-    const cy = LAYOUT.barTop + LAYOUT.barHeight / 2;
-    const bg = this.add.rectangle(LAYOUT.width / 2, cy, LAYOUT.width, LAYOUT.barHeight, COLORS.hud).setDepth(DEPTH.ui);
-    addGloss(this, bg);
-    this.add.rectangle(LAYOUT.width / 2, LAYOUT.barTop + 1, LAYOUT.width, 2, 0xdd5555, 0.7).setDepth(DEPTH.ui + 0.5);
-    this.raidInfo = this.add
-      .text(20, cy, '', { fontFamily: FONT, fontSize: '14px', color: TEXT.normal, lineSpacing: 6 })
-      .setOrigin(0, 0.5)
-      .setDepth(DEPTH.ui + 2);
-    const btn = this.add
-      .rectangle(LAYOUT.width - 120, cy, 200, 52, 0x9a6a2a)
-      .setStrokeStyle(2, 0xffffff, 0.5)
-      .setInteractive({ useHandCursor: true })
-      .setDepth(DEPTH.ui + 1);
-    addGloss(this, btn);
-    this.add.text(btn.x, btn.y, 'Saltar defensa ⏩', { fontFamily: FONT, fontSize: '15px', color: '#ffffff', fontStyle: 'bold' }).setOrigin(0.5).setDepth(DEPTH.ui + 2);
-    btn.on('pointerdown', () => {
+    const W = LAYOUT.width;
+    const top = LAYOUT.barTop;
+    const H = LAYOUT.barHeight;
+    const cy = top + H / 2 + 1;
+    const d = DEPTH.ui;
+    ui.panel(this, W / 2, top + H / 2, W, H, 'bar', d, 'top');
+    this.raidInfo = ui.label(this, 14, cy, '', { size: 11, color: ui.TXT.light, origin: [0, 0.5], depth: d + 2, wrap: W - 190, lineSpacing: 3 });
+    ui.button(this, { x: W - 84, y: cy, w: 150, h: 46, kind: 'gold', icon: 'ff', iconSize: 18, text: 'Saltar', size: 15, depth: d + 1, onClick: () => {
       this.play('select');
       this.skipRaid();
-    });
+    } });
   }
 
   /** Un botón por héroe con su habilidad: se lanza sola, y tocándolo se lanza ya. Muestra la recarga. */
@@ -293,26 +274,22 @@ export default class BattleScene extends Phaser.Scene {
     this.heroButtons = [];
     const mine = this.raid ? 'd' : 'a';
     const heroes = this.battle.units.filter((u) => u.type === 'hero' && u.side === mine);
-    const x = LAYOUT.width - 24;
-    const y0 = LAYOUT.gridTop + (this.raid ? 146 : 186);
+    const x = LAYOUT.width - 28;
+    const y0 = (this.sideEndY ?? LAYOUT.gridTop + 160) + 16;
     heroes.forEach((u, i) => {
-      const y = y0 + i * 44;
-      const rect = this.add.rectangle(x, y, 38, 38, 0x2a3a2a, 0.92).setStrokeStyle(2, 0xd4a017).setInteractive({ useHandCursor: true }).setDepth(DEPTH.buttons);
-      addGloss(this, rect);
-      const icon = this.add.image(0, 0, HEROES[u.heroKey].sprite).setDepth(DEPTH.buttons + 1);
-      this.fitIcon(icon, HEROES[u.heroKey].sprite, x, y - 2, 28);
-      const label = this.add
-        .text(x, y + 9, '', { fontFamily: FONT, fontSize: '11px', color: '#ffffff', fontStyle: 'bold', stroke: '#000000', strokeThickness: 3 })
-        .setOrigin(0.5)
-        .setDepth(DEPTH.buttons + 2);
-      rect.on('pointerdown', () => {
+      const y = y0 + i * 58;
+      const sprite = HEROES[u.heroKey].sprite;
+      const btn = ui.button(this, { x, y, w: 50, h: 50, kind: 'pill', depth: DEPTH.buttons, onClick: () => {
         if (this.finished) return;
         const st = abilityStatus(this.battle, u.id);
         if (!st?.alive) return this.showToast(`${HEROES[u.heroKey].name} ha caído`);
         if (castHeroAbility(this.battle, u.id)) this.play('select');
         else this.showToast(st.cdLeft > 0 ? `${st.name}: recargando (${Math.ceil(st.cdLeft)} s)` : `${st.name}: no hay a quién`);
-      });
-      this.heroButtons.push({ id: u.id, rect, icon, label });
+      } });
+      const icon = this.add.image(0, 0, sprite).setDepth(DEPTH.buttons + 2);
+      this.fitIcon(icon, sprite, x, y - 2, 34);
+      const label = ui.label(this, x, y + 12, '', { size: 13, bold: true, origin: [0.5, 0.5], stroke: 3, depth: DEPTH.buttons + 3 });
+      this.heroButtons.push({ id: u.id, btn, icon, label });
     });
   }
 
@@ -321,8 +298,8 @@ export default class BattleScene extends Phaser.Scene {
       const st = abilityStatus(this.battle, hb.id);
       const ready = st?.alive && st.cdLeft <= 0;
       hb.label.setText(st?.alive ? (ready ? '' : String(Math.ceil(st.cdLeft))) : '✕');
-      hb.icon.setAlpha(st?.alive ? (ready ? 1 : 0.5) : 0.3);
-      hb.rect.setStrokeStyle(2, ready ? 0xffe9a0 : 0x4a6a4a);
+      hb.icon.setAlpha(st?.alive ? (ready ? 1 : 0.45) : 0.25);
+      hb.btn.img.setTint(ready ? 0xffe9a0 : 0xb0a090);
     }
   }
 
@@ -334,37 +311,32 @@ export default class BattleScene extends Phaser.Scene {
   }
 
   createSideButtons() {
-    const x = LAYOUT.width - 24;
-    const top = LAYOUT.gridTop;
-    const make = (y, text, size, onClick) => {
-      const rect = this.add
-        .rectangle(x, y, 34, 34, 0x1a2a1a, 0.82)
-        .setStrokeStyle(2, 0x86a083)
-        .setInteractive({ useHandCursor: true })
-        .setDepth(DEPTH.buttons);
-      addGloss(this, rect);
-      this.add.text(x, y, text, { fontFamily: FONT, fontSize: size, color: '#e8eee0', fontStyle: 'bold' }).setOrigin(0.5).setDepth(DEPTH.buttons + 1);
-      rect.on('pointerdown', onClick);
-      return rect;
-    };
+    const x = LAYOUT.width - 28;
+    let y = LAYOUT.gridTop + 28;
     const mid = () => ({ x: LAYOUT.width / 2, y: LAYOUT.gridTop + LAYOUT.viewHeight / 2 });
     const zoom = (f) => {
       zoomAt(mid().x, mid().y, view.zoom * f);
       this.viewDirty = true;
     };
-    make(top + 26, '+', '22px', () => zoom(1.25));
-    make(top + 66, '−', '22px', () => zoom(0.8));
+    const round = (name, onClick) => {
+      const b = ui.button(this, { x, y, w: 40, h: 40, kind: 'dark2', icon: name, iconSize: 20, depth: DEPTH.buttons, onClick });
+      y += 46;
+      return b;
+    };
+    round('plus', () => zoom(1.25));
+    round('minus', () => zoom(0.8));
     if (!this.raid) {
-      this.boxButton = make(top + 106, '▭', '18px', () => {
+      this.boxButton = round('box', () => {
         this.boxMode = !this.boxMode;
         this.showToast(this.boxMode ? 'Recuadro: arrastra sobre el mapa para elegir tropas' : 'Recuadro desactivado');
       });
     }
-    make(this.raid ? top + 106 : top + 146, '⌂', '18px', () => {
+    round('home', () => {
       resetView(this.raid ? RAID_CENTER : START_CENTER);
       zoomAt(mid().x, mid().y, this.raid ? RAID_ZOOM : START_ZOOM);
       this.viewDirty = true;
     });
+    this.sideEndY = y;
   }
 
   /* ---------- selección y órdenes ---------- */
@@ -634,33 +606,26 @@ export default class BattleScene extends Phaser.Scene {
 
   /* ---------- fin de la batalla ---------- */
 
+  /** Quita la ventana abierta (la usa ui.dialog). */
+  closeModal() {
+    for (const p of this.modal ?? []) p.destroy();
+    this.modal = null;
+  }
+
   /** Fin de una defensa: el resultado ya se aplicó a tu partida; se avisa y se vuelve a la base con el informe. */
   finishRaid() {
     this.finished = true;
     this.gesture = null;
     const out = this.battle.result.outcome;
     const good = out === 'repelled';
+    ui.dialog(this, {
+      title: { repelled: '¡Ataque rechazado!', retreated: 'El enemigo se retira', raided: '¡Tumbaron tu Ayuntamiento!' }[out],
+      icon: good ? 'shield' : 'warning',
+      tone: good ? 'good' : 'bad',
+      lines: [`Atacantes derrotados: ${this.battle.result.kills}`],
+      buttons: [{ text: 'Ver informe', kind: 'blue', close: false, onClick: () => this.scene.start('BaseScene', { raidReport: this.raid }) }],
+    });
     this.play(good ? 'win' : 'lose');
-    const w = LAYOUT.width;
-    const d = DEPTH.modal;
-    const cx = w / 2;
-    const cy = LAYOUT.gridTop + 250;
-    this.add.rectangle(w / 2, LAYOUT.height / 2, w, LAYOUT.height, 0x000000, 0.6).setDepth(d).setInteractive();
-    const box = this.add.rectangle(cx, cy, 440, 210, 0x1a2a1a, 0.98).setStrokeStyle(3, good ? COLORS.ok : COLORS.bad).setDepth(d + 1);
-    addGloss(this, box, d + 1.3, 0.6);
-    const title = { repelled: '¡Ataque rechazado!', retreated: 'El enemigo se retira', raided: '¡Tumbaron tu Ayuntamiento!' }[out];
-    this.add
-      .text(cx, cy - 55, title, { fontFamily: FONT, fontSize: '28px', color: good ? '#b8f0b8' : '#ffb0a0', fontStyle: 'bold' })
-      .setOrigin(0.5)
-      .setDepth(d + 2);
-    this.add
-      .text(cx, cy - 8, `Atacantes derrotados: ${this.battle.result.kills}`, { fontFamily: FONT, fontSize: '16px', color: '#e8eee0' })
-      .setOrigin(0.5)
-      .setDepth(d + 2);
-    const btn = this.add.rectangle(cx, cy + 60, 240, 48, 0x2f5f8f).setStrokeStyle(2, 0x8cc4f5).setInteractive({ useHandCursor: true }).setDepth(d + 2);
-    addGloss(this, btn);
-    this.add.text(cx, cy + 60, 'Ver informe', { fontFamily: FONT, fontSize: '18px', color: '#ffffff', fontStyle: 'bold' }).setOrigin(0.5).setDepth(d + 3);
-    btn.on('pointerdown', () => this.scene.start('BaseScene', { raidReport: this.raid }));
   }
 
   finish() {
@@ -680,47 +645,27 @@ export default class BattleScene extends Phaser.Scene {
   }
 
   showResult(r) {
-    const w = LAYOUT.width;
-    const h = LAYOUT.height;
-    const d = DEPTH.modal;
-    this.add.rectangle(w / 2, h / 2, w, h, 0x000000, 0.68).setDepth(d).setInteractive();
-    const cx = w / 2;
-    const cy = LAYOUT.gridTop + 250;
-    this.add.rectangle(cx, cy, 460, 330, 0x1a2a1a, 0.98).setStrokeStyle(3, r.won ? COLORS.ok : COLORS.bad).setDepth(d + 1);
-    this.add
-      .text(cx, cy - 135, r.won ? '¡Victoria!' : 'Derrota', { fontFamily: FONT, fontSize: '34px', color: r.won ? '#b8f0b8' : '#ffb0a0', fontStyle: 'bold' })
-      .setOrigin(0.5)
-      .setDepth(d + 2);
-
     const casualties = Object.entries(r.casualties)
       .filter(([, n]) => n > 0)
       .map(([k, n]) => `${n} ${{ soldier: 'soldado(s)', archer: 'arquero(s)', mage: 'hechicero(s)', knight: 'caballero(s)', catapult: 'catapulta(s)', ram: 'ariete(s)' }[k]}`)
       .join(', ');
-    const heroLine = r.heroes?.length
-      ? `Héroes: +${r.xp} XP${r.heroLevelUps ? ' · ¡SUBEN DE NIVEL!' : ''}\n${r.heroes
-          .map((h) => `${h.name} nv. ${h.level}${h.capped ? ' (tope)' : ` (${h.xp}/${h.next})`}`)
-          .join(' · ')}`
-      : null;
     const lines = [
       `Edificios destruidos: ${r.percent}%`,
       `Botín: ${rewardText(r.loot, '+') || 'ninguno'}`,
       `Bajas: ${casualties || 'ninguna'}`,
-      heroLine,
-      r.cleared ? `¡${missionName(r.level)} superada!` : r.won ? 'Ya habías superado este nivel' : 'Puedes volver a intentarlo',
-    ].filter(Boolean);
-    this.add
-      .text(cx, cy - 20, lines.join('\n'), { fontFamily: FONT, fontSize: '17px', color: '#e8eee0', align: 'center', lineSpacing: 10 })
-      .setOrigin(0.5)
-      .setDepth(d + 2);
-
-    const btn = this.add
-      .rectangle(cx, cy + 128, 240, 48, 0x2f5f8f)
-      .setStrokeStyle(2, 0x8cc4f5)
-      .setInteractive({ useHandCursor: true })
-      .setDepth(d + 2);
-    addGloss(this, btn);
-    this.add.text(cx, cy + 128, 'Volver a la base', { fontFamily: FONT, fontSize: '18px', color: '#ffffff', fontStyle: 'bold' }).setOrigin(0.5).setDepth(d + 3);
-    btn.on('pointerdown', () => this.scene.start('BaseScene', { report: this.report }));
+    ];
+    if (r.heroes?.length) {
+      lines.push(`Héroes: +${r.xp} XP${r.heroLevelUps ? ' · ¡SUBEN DE NIVEL!' : ''}`);
+      lines.push(r.heroes.map((h) => `${h.name} nv. ${h.level}${h.capped ? ' (tope)' : ` (${h.xp}/${h.next})`}`).join(' · '));
+    }
+    lines.push(r.cleared ? `¡${missionName(r.level)} superada!` : r.won ? 'Ya habías superado este nivel' : 'Puedes volver a intentarlo');
+    ui.dialog(this, {
+      title: r.won ? '¡Victoria!' : 'Derrota',
+      icon: r.won ? 'trophy' : 'shield',
+      tone: r.won ? 'good' : 'bad',
+      lines,
+      buttons: [{ text: 'Volver a la base', kind: 'blue', close: false, onClick: () => this.scene.start('BaseScene', { report: this.report }) }],
+    });
   }
 
   /* ---------- dibujo y bucle ---------- */
@@ -841,28 +786,26 @@ export default class BattleScene extends Phaser.Scene {
   }
 
   updateHud() {
+    this.speedBtn.setText(`×${this.speed}`);
     if (this.raid) {
       const b = this.battle;
-      this.hudTop.setText(`¡Ataque enemigo! · fuerza ${this.level} · ${formatDuration(Math.max(0, RAID.timeLimitSec - b.time) * 1000)}`);
-      this.hudBottom.setText(`Atacantes ${attackers(b).length} · Tus tropas ${defenderUnits(b).length} · Daños ${b.destroyed}/${b.maxDestroyed}`);
-      this.speedText.setText(`Velocidad ×${this.speed}`);
-      this.raidInfo.setText(`Tus torres, muros y tropas\ndefienden solos.\nEl ataque termina si destruyen ${b.maxDestroyed} edificios.`);
+      this.hudTop.setText(`¡Ataque enemigo! · ${formatDuration(Math.max(0, RAID.timeLimitSec - b.time) * 1000)}`);
+      this.hudBottom.setText(`Fuerza ${this.level} · Atacantes ${attackers(b).length} · Tus tropas ${defenderUnits(b).length} · Daños ${b.destroyed}/${b.maxDestroyed}`);
+      this.raidInfo.setText(`Tus torres, muros y tropas defienden solos. Toca la cara de un héroe para lanzar su habilidad.`);
       return;
     }
     const s = battleStatus(this.battle);
     this.hudTop.setText(`${missionName(this.level)} · ${formatDuration(s.timeLeft * 1000)}`);
     this.hudBottom.setText(`Aliados ${s.alliesAlive} · Enemigos ${s.enemiesAlive} · Destruido ${s.percent}%`);
-    this.speedText.setText(`Velocidad ×${this.speed}`);
 
     for (const chip of this.chips) {
       const { def, rect, label } = chip;
-      const kinds = def.kinds;
-      const n = def.action ? null : unitIdsOfKinds(this.battle, kinds).length;
+      const n = def.action ? null : unitIdsOfKinds(this.battle, def.kinds).length;
       const armed = def.id === 'retreat' && this.time.now < this.retreatArmedUntil;
-      label.setText(def.action ? (armed ? '¿Seguro?' : def.label) : `${def.label}\n${n}`);
-      label.setColor(armed ? TEXT.bad : TEXT.normal);
-      const active = this.activeChip === def.id;
-      rect.setFillStyle(active ? COLORS.on : COLORS.button).setStrokeStyle(active ? 3 : 2, active ? COLORS.gold : 0x4a6a4a);
+      label.setText(def.action ? (armed ? '¿Seguro?' : def.label) : String(n));
+      label.setColor(armed ? ui.TXT.bad : ui.TXT.light);
+      const active = this.activeChip === def.id || armed;
+      rect.setTexture(ui.panelTexture(this, armed ? 'red' : active ? 'green' : 'dark2', chip.chipW, chip.chipH));
       rect.setAlpha(n === 0 ? 0.45 : 1);
     }
     const n = [...this.selection].filter((id) => this.battle.byId.get(id)?.alive).length;
@@ -870,10 +813,10 @@ export default class BattleScene extends Phaser.Scene {
       this.finished
         ? ''
         : n
-          ? `${n} seleccionadas · toca un enemigo para atacar o el suelo para moverlas`
+          ? `${n} elegidas · toca un enemigo para atacar o el suelo para moverlas`
           : 'Elige tropas abajo (o toca una unidad) para darles órdenes',
     );
-    this.boxButton?.setStrokeStyle(2, this.boxMode ? COLORS.ok : 0x86a083);
+    this.boxButton?.img.setTexture(ui.panelTexture(this, this.boxMode ? 'green' : 'dark2', 40, 40));
   }
 
   update(_time, delta) {

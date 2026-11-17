@@ -135,3 +135,23 @@ test('lo que está más abajo (o más a la derecha en la misma fila) se dibuja e
 test('los sprites se escalan para encajar exactamente en la casilla a zoom 1', () => {
   assert.equal(ART_SIZE * SPRITE_SCALE, GRID.tile);
 });
+
+test('fitLayout adapta el alto del lienzo a la proporción de la pantalla (con topes)', async () => {
+  const { fitLayout } = await import('../src/data/config.js');
+  const before = LAYOUT.viewHeight;
+  fitLayout(390, 844); // un celular alto
+  const tall = LAYOUT.viewHeight;
+  assert.ok(tall > 700, `un celular alto aprovecha el alto (${tall})`);
+  assert.equal(LAYOUT.height, LAYOUT.hudHeight + tall + LAYOUT.barHeight);
+  fitLayout(1280, 720); // una pantalla ancha: no se achata de más
+  assert.equal(LAYOUT.viewHeight, 520);
+  fitLayout(100, 5000); // algo absurdo: tiene tope
+  assert.equal(LAYOUT.viewHeight, 900);
+  fitLayout(0, 0); // medidas inválidas: no cambia nada
+  assert.equal(LAYOUT.viewHeight, 900);
+  LAYOUT.viewHeight = before;
+});
+
+test('con el zoom mínimo el mapa entero cabe en el ancho del lienzo', () => {
+  assert.ok(GRID.cols * GRID.tile * CAMERA.minZoom <= LAYOUT.width + 1e-9);
+});

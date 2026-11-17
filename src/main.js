@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
-import { LAYOUT } from './data/config.js';
+import { LAYOUT, fitLayout } from './data/config.js';
+import { notice, registerMenu } from './game/menu.js';
 import * as prefs from './game/prefs.js';
 import { MAX_SAVE_BYTES, parseSave, serialize } from './game/save.js';
 import * as store from './game/store.js';
@@ -9,9 +10,10 @@ import BattleScene from './scenes/BattleScene.js';
 const $ = (id) => document.getElementById(id);
 const statusEl = $('status');
 
-// Mensajes siempre como texto (textContent), nunca como HTML.
+// Mensajes siempre como texto (textContent), nunca como HTML. Además se muestran dentro del juego.
 function setStatus(text) {
   statusEl.textContent = text;
+  notice(text);
 }
 store.onStatus(setStatus);
 
@@ -19,12 +21,13 @@ store.onStatus(setStatus);
 
 const boot = store.init();
 
+fitLayout(window.innerWidth, window.innerHeight); // el lienzo toma la proporción de la pantalla
 const game = new Phaser.Game({
   type: Phaser.AUTO,
   parent: 'game',
   width: LAYOUT.width,
   height: LAYOUT.height,
-  backgroundColor: '#1b2a1b',
+  backgroundColor: '#1a120b',
   banner: false,
   scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH },
   scene: [],
@@ -46,6 +49,15 @@ soundBtn.addEventListener('click', () => {
   prefs.setMuted(!prefs.get().muted);
   game.sound.mute = prefs.get().muted;
   paintSoundButton();
+});
+
+// El menú del juego (⚙) usa estos botones de la página, que quedan ocultos.
+registerMenu({
+  export: () => $('btn-export').click(),
+  import: () => $('btn-import').click(),
+  reset: () => $('btn-reset').click(),
+  toggleSound: () => soundBtn.click(),
+  isSoundOn: () => !prefs.get().muted,
 });
 
 /* ---------- guardado en momentos clave ---------- */
