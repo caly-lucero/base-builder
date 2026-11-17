@@ -1,6 +1,6 @@
 # Base Builder
 
-Prototipo de juego de estrategia con construcción de base (un jugador), hecho como PWA con **Phaser 4 + Vite**. Referencias de diseño: **Backyard Monsters** y Clash of Clans (la base y el ataque) y **Warcraft III** (dos recursos, el Ayuntamiento que sube de nivel y manda sobre lo que se puede construir). Nombres propios y arte de terceros con licencia libre (ver *Créditos*).
+Prototipo de juego de estrategia con construcción de base (un jugador), hecho como PWA con **Phaser 4 + Vite**. Referencias de diseño: **Backyard Monsters** y Clash of Clans (la base y el ataque) y **Warcraft III** (dos recursos, el Ayuntamiento que sube de nivel y manda sobre lo que se puede construir). La vista es **isométrica** (rombos 2:1) con arte hecho a partir de modelos 3D libres, personalizados (ver *Arte* y *Créditos*).
 
 ## Jugar online
 **https://caly-lucero.github.io/base-builder/** — funciona en el navegador y se puede **instalar como app** (en Android: menú del navegador → «Instalar app» / «Añadir a la pantalla de inicio») y jugar sin conexión.
@@ -8,7 +8,7 @@ Prototipo de juego de estrategia con construcción de base (un jugador), hecho c
 Cada vez que se sube algo a la rama `main`, GitHub corre las pruebas, compila y publica solo (ver `.github/workflows/deploy.yml`); si una prueba falla, no se publica. La partida se guarda **en el navegador de cada dispositivo**: la versión online y la de `localhost` tienen partidas separadas (se pueden pasar con *Exportar/Importar partida*).
 
 ## Qué hay hoy
-- **Mapa de 24×24** que se ve por una ventana: se desplaza y se hace zoom (ver *Controles*), con terreno de colores variados, **caminos de tierra** que unen tus edificios, estanques con reflejos, flores, sombras, nubes, humo de chimeneas, fuego en lo dañado y efectos al recolectar, mejorar y combatir.
+- **Mapa isométrico de 24×24** (una isla que flota sobre el cielo) que se ve por una ventana: se desplaza y se hace zoom (ver *Controles*), con césped variado, **caminos de tierra** que unen tus edificios, estanques con reflejos, flores, sombras, nubes, humo de chimeneas, fuego en lo dañado y efectos al recolectar, mejorar y combatir.
 - **Dos recursos, como en Warcraft III: oro y madera.** La **Mina de oro** produce oro y el **Aserradero** madera; tócalos para recolectar. Casi todo cuesta oro y madera.
 - **Todos los edificios llegan al nivel 10.** Del nivel 4 en adelante reutilizan el dibujo del 3 con un **tinte propio por nivel** (dorado, verde, celeste, violeta, rosa, naranja), así se ve de un vistazo qué tan avanzado está. Las mejoras **tardan tiempo real** (hasta 12 h las últimas) y mientras se mejora el edificio no produce. Hay 2 «obreros» (2 mejoras a la vez, el Ayuntamiento también usa uno).
 - **Ayuntamiento** (ya viene en la partida; se puede mover, no se construye ni se demuele). Sube del nivel 1 al 10: Ayuntamiento → Fortaleza → Castillo → Ciudadela → Capital → Reino → Imperio → Dominio → Trono → Corona. **Su nivel manda**:
@@ -41,15 +41,15 @@ Cada vez que se sube algo a la rama `main`, GitHub corre las pruebas, compila y 
   - te roban un porcentaje del oro y la madera (más si cae el Ayuntamiento, que nunca queda dañado);
   - los héroes ganan XP por cada atacante derrotado y un bono si rechazas la oleada.
   Tus tropas no mueren al defender, las armas de asedio no defienden, y las **Fortificaciones** de la herrería refuerzan edificios y torres. Mientras tú atacas, las oleadas quedan en pausa; si estuviste fuera mucho tiempo, solo se resuelve una.
-- **Muros y puertas**: los muros cuestan solo madera y se pintan arrastrando; **los que quedan uno junto a otro se dibujan unidos, como una sola pared**. Las puertas son un muro con paso.
+- **Muros y puertas**: los muros cuestan solo madera y se pintan arrastrando (cada uno es un bloque: de madera, de piedra y almenado). Las puertas son un muro con paso.
 - **Pensado para el celular**: el juego ocupa toda la pantalla en vertical, con la barra de abajo (Construir, Atacar, Héroes, Logros, Menú) y una **hoja de construcción** que se abre sobre el mapa con tres pestañas (*Economía*, *Ejército*, *Defensa*) y el botón *Demoler*. Al elegir un edificio la hoja se cierra y un aviso arriba dice qué estás colocando (con una ✕ para cancelar). Hay vibración corta al tocar los botones. Sonido, exportar, importar y nueva partida están en el **Menú**.
 - **Misiones**: una cadena de 32 objetivos que guía la partida («Construye un Aserradero», «Sube el Ayuntamiento a Fortaleza», «Construye una Herrería»…). El cartel de arriba a la izquierda muestra la actual; al cumplirla se pone verde y la tocas para **reclamar el premio**.
 - **Logros** (botón 🏆, con un punto rojo cuando hay premio): 11 familias con varios niveles (Constructor, Muralla, Gran ciudad, Obra maestra, Gran ejército, Señor del asedio, Conquistador, Colección de héroes, Leyenda, Herrero, Superviviente). Se reclaman de a un nivel y los premios crecen mucho.
 - **Mover edificios** arrastrándolos (gratis). **Demoler** devuelve el 50 % de lo invertido.
 - La producción, las mejoras, el entrenamiento y las investigaciones **siguen mientras no juegas** (máximo 8 h de producción); al volver, el juego avisa qué terminó.
-- **Animación**: en la base, tus tropas y héroes **pasean** alrededor de su puesto; en la batalla las unidades **rebotan al caminar, se lanzan al golpear, retroceden al disparar y caen de lado** al morir. Mientras un edificio se mejora, un **martillo** lo golpea y levanta polvo; la fragua echa brasas, el altar brilla, la mina destella y el aserradero suelta astillas.
+- **Animación de verdad**: cada personaje tiene cuadros de **caminar, atacar, quieto y caído**, mirando en las cuatro diagonales. En la base, tus tropas y héroes **pasean** alrededor de su puesto; en la batalla caminan, **golpean con su arma** hacia el objetivo y caen al morir. Mientras un edificio se mejora, un **martillo** lo golpea y levanta polvo; la fragua echa brasas, el altar brilla, la mina destella y el aserradero suelta astillas.
 - **Vida**: un **aldeano** por cada mina y aserradero camina entre el Ayuntamiento y su edificio llevando la carga (es adorno). Al recolectar suben números flotantes y chispas; al construir, el edificio «salta» con una nube de polvo; los árboles se mecen con el viento.
-- **Arte y sonido**: terreno y edificios del pack Medieval RTS de Kenney (CC0; los edificios nuevos son recolores y las armas de asedio y los muros están dibujados para el proyecto) y **personajes del pack Tiny Dungeon (CC0) personalizados**: azul para tus tropas, cada héroe con su color, arma y detalle (corona, aureola, capa) y enemigos en rojo y verde pantano, con un script que los genera (`scripts/make-characters.ps1`). Hay 10 efectos de sonido y un botón de sonido en el Menú.
+- **Arte** (concepto del **Reino**: piedra clara, tejados azul pizarra y detalles dorados; la Horda enemiga va en rojo oscuro): edificios de 3 etapas compuestos con piezas de los kits 3D de Kenney (CC0), personajes de Mini Characters con **armas, escudos, capas, sombreros y aureolas modelados para el proyecto**, todo dibujado con la herramienta `tools/iso`. Hay 15 efectos de sonido y un botón de sonido en el Menú.
 - Guardado automático, exportar/importar partida y funcionamiento sin conexión.
 
 ## Controles
@@ -82,8 +82,6 @@ npm run dev        # desarrollo en http://localhost:5173
 npm test           # pruebas de lógica, guardado, cámara y assets
 npm run build      # genera dist/ (con CSP y service worker)
 npm run preview    # sirve dist/ en http://localhost:4173
-npm run walls      # regenera los sprites de los muros (public/assets/art/wall_*.png)
-npm run siege      # regenera los sprites de la catapulta y el ariete
 npm run icons      # regenera los iconos de la PWA
 ```
 En Windows PowerShell, si `npm` da error de «ejecución de scripts deshabilitada», usa `npm.cmd` (o permite scripts firmados con `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`).
@@ -94,14 +92,16 @@ En Windows PowerShell, si `npm` da error de «ejecución de scripts deshabilitad
 - `src/game/logic.js` — reglas del juego (puras, sin DOM).
 - `src/game/save.js` — guardado: validación estricta, checksum, versión, migraciones, respaldo.
 - `src/game/store.js` — estado único, autoguardado y avisos.
-- `src/game/projection.js` — **único** lugar que convierte casillas ↔ pantalla y que lleva la cámara (desplazamiento y zoom). Hoy cenital 2D; ver *Pasar a isométrico*.
-- `src/game/sprites.js` — mide el área real de cada dibujo para apoyarlo bien sobre su casilla.
+- `src/game/projection.js` — **único** lugar que convierte casillas ↔ pantalla y que lleva la cámara (desplazamiento y zoom). Isométrica 2:1: `centro = vista + ((x − y)·48, (x + y + 1)·24)·zoom`.
+- `src/game/sprites.js` — puntos de apoyo y medidas del arte (edificios, adornos, personajes).
+- `src/game/unitArt.js` — cómo se leen las hojas de animación (qué cuadro toca para caminar, atacar, quieto o caído, y hacia dónde mira).
 - `src/game/battle.js` — simulación de la batalla (pura y determinista): objetivos automáticos, órdenes, torres, botín y fin.
 - `src/game/pathfinding.js` — A* sobre la cuadrícula (los muros cuestan más: se rodean, pero se pueden atravesar rompiéndolos).
 - `src/game/missions.js` — genera la base enemiga de cada nivel de campaña.
 - `src/data/heroes.js` — los 5 héroes, sus dos árboles de poder, estadísticas y nivel máximo.
 - `src/game/achievements.js` — logros: cómo se mide cada uno y cómo se reclaman.
-- `src/game/terrain.js` — color y dibujo del césped de cada casilla (ruido determinista).
+- `src/scenes/terrainArt.js` — terreno isométrico dibujado por código (césped, tierra, arena, agua) y el borde de roca de la isla.
+- `src/scenes/artPlace.js` — cómo se apoya cada dibujo en su casilla.
 - `src/game/raids.js` — ataques enemigos a tu base: fuerza y generación de oleadas, calendario, daño, robo y reparación del informe.
 - `src/game/campaign.js` — aplica el resultado de una batalla (bajas, botín, campaña, experiencia del héroe).
 - `src/scenes/BattleScene.js` — escena de la batalla (tuya o la defensa de tu base): dibujo, selección, órdenes, habilidades y resultado.
@@ -114,14 +114,17 @@ En Windows PowerShell, si `npm` da error de «ejecución de scripts deshabilitad
 - `src/game/decor.js` — adornos del mapa generados con semilla fija (no se guardan).
 - `src/game/prefs.js` — preferencias del dispositivo (sonido), aparte de la partida.
 - `src/scenes/BaseScene.js` — dibujo, gestos (tocar, arrastrar, pellizcar), sonido y HUD con Phaser.
-- `scripts/` — generadores de iconos y de los sprites de muros (sin dependencias).
+- `scripts/` — generador de los iconos de la PWA.
+- `tools/iso/` — herramienta de desarrollo que convierte modelos 3D en el arte isométrico del juego (ver su README).
 - `sw.template.js` — plantilla del service worker; el build genera `dist/sw.js` con la lista de archivos.
 
-## Pasar a isométrico más adelante
-La lógica, el guardado y la economía hablan solo en casillas `(x, y)`. Todo lo que depende de cómo se dibuja está en `projection.js` (casilla → pantalla, pantalla → casilla, cámara, orden de dibujado) y en el arte. Para pasar a isométrico hay que reescribir esas funciones, cambiar el arte (el pack Medieval RTS es cenital) y revisar el orden de dibujado y los gestos; no hay que tocar `logic.js` ni `save.js`.
+## Arte
+El juego se dibuja en **vista isométrica 2:1** (casillas de 96×48 px a zoom 1). El arte sale de modelos 3D CC0 de Kenney que se montan, recolorean y fotografían desde una cámara isométrica con `tools/iso` (ver su README); el resultado son PNG normales en `public/assets/iso/`: edificios de 192×256, adornos de 160×176 y hojas de animación de personajes de 8×4 cuadros de 96×120. Cada tipo se apoya en su casilla por un punto fijo (`sprites.js`). La lógica, el guardado y la economía solo hablan en casillas `(x, y)` y no saben nada de cómo se dibuja.
+
+Más adelante, para **razas**: bastan otra paleta (`reino()` en `tools/iso/buildings.js`) y otras piezas por edificio.
 
 ## Créditos
-Arte y sonido de [Kenney](https://kenney.nl) (packs Medieval RTS, Interface Sounds y RPG Audio), licencia **CC0**. Los sprites de los muros están dibujados para este proyecto con `scripts/make-walls.mjs`. Detalle y correspondencia de archivos en `public/assets/CREDITS.md`; licencias originales en `public/assets/licenses/`.
+Modelos 3D y sonido de [Kenney](https://kenney.nl) (Castle Kit, Fantasy Town Kit, Mini Characters, Interface Sounds y RPG Audio), licencia **CC0**; el arte isométrico se generó con ellos y las piezas propias de `tools/iso`. Detalle y correspondencia de archivos en `public/assets/CREDITS.md`; licencias originales en `public/assets/licenses/`.
 
 ## Seguridad (juego de un jugador)
 - Todo lo que se carga (localStorage o archivo importado) pasa por `parseSave`: tamaño máximo, versión, checksum y validación de cada campo; se descartan campos desconocidos.
@@ -138,10 +141,10 @@ Arte y sonido de [Kenney](https://kenney.nl) (packs Medieval RTS, Interface Soun
 - Si cambia el formato del guardado, subir `SAVE_VERSION` y añadir el paso en `migrate()` de `save.js`. Ejemplos: v1→v2 (niveles), v2→v3 (mapa 12×12 → 24×24, madera y Ayuntamiento), v3→v4 (misiones), v4→v5 (ejército, héroe y entrenamiento), v5→v6 (campaña y experiencia), v6→v7 (ataques enemigos y edificios dañados) y v7→v8 (casas, nuevas unidades, 5 héroes con escuadra, herrería y logros). Una base avanzada que se migra tendrá varias misiones ya cumplidas y podrá reclamarlas.
 - Los sonidos son `.ogg`: algunos navegadores antiguos de Apple no los reproducen (el juego funciona igual, sin sonido).
 - El lienzo es de 432 px de ancho (el alto se adapta a la pantalla al arrancar) y se escala; en pantallas grandes los dibujos se ven algo suavizados. Si giras el celular hay que recargar.
-- Los enlaces entre muros usan solo dos piezas por nivel (horizontal y vertical): en esquinas y cruces se ven bien, pero no hay un dibujo especial para cada forma.
-- Los niveles 4 a 10 reutilizan el dibujo del nivel 3 con un tinte; no tienen arte propio. Los edificios militares nuevos, las casas y la herrería son **recolores** de edificios del pack (se distinguen por el color y la forma, pero no tienen un dibujo único); algunos comparten silueta.
-- Los personajes son de 16 px escalados ×2 (pixel art) sobre edificios más suaves: el estilo no es del todo homogéneo.
-- Las animaciones son por código sobre un solo dibujo por unidad (no hay cuadros de caminar o atacar dibujados): se ven vivas pero no son animación de verdad. Falta arte propio.
+- Los niveles 4 a 10 reutilizan el dibujo de la etapa 3 con un tinte; no tienen arte propio.
+- El arte nuevo se probó en un navegador de escritorio con tamaño de móvil; falta probarlo en un móvil real.
+- Los personajes miran en 4 diagonales (2 dibujadas y 2 volteadas): no giran con suavidad. Las máquinas de asedio solo se balancean al moverse y atacar.
+- Los muros son bloques sueltos que no se unen entre sí con piezas de esquina.
 - Los edificios entrenan de a una unidad por vez; no hay cola de entrenamiento. Solo cuenta el edificio de mayor nivel de cada tipo para el nivel de las unidades; tener varios solo ayuda a entrenar más a la vez.
 - Una batalla en curso no se guarda: si cierras la página, no cuenta (tus tropas siguen intactas).
 - Las unidades no chocan entre sí (se superponen).
@@ -154,5 +157,5 @@ Se decidió que el juego debía sentirse menos básico: *quieto, con poco que ha
 1. **Vida y metas** — hecho: aldeanos, efectos y misiones.
 2. **Más contenido** — hecho: casas, cinco edificios militares con sus unidades, herrería, altar y 5 héroes con árboles de poder, puertas, logros y niveles hasta el 10.
 3. **Combate y campaña** — hecho: ataque **automático con control de grupos**, arqueros, magos, caballeros y asedio, habilidades de héroes, **ataques enemigos a tu base** que se ven en vivo, con daño y reparación. Pendiente: elegir dónde desembarcan las tropas, más tipos de enemigo, más campañas y afinar el equilibrio.
-4. **Gráficos** — hecho: sombras, terreno variado con caminos, estanques y flores, humo y fuego, efectos de habilidades, interfaz nueva y animación por código de tropas y edificios. Pendiente: arte propio (dibujos únicos para los niveles altos y los edificios militares, cuadros de caminar y atacar) y mejorar el terreno de la batalla.
+4. **Gráficos** — hecho: **vista isométrica con arte 3D propio**, personajes con animación de caminar y atacar, sombras, terreno con caminos, estanques y flores, humo y fuego, efectos de habilidades e interfaz nueva. Pendiente: razas, etapas de arte propias para los niveles altos y mejorar el terreno de la batalla.
 5. En cualquier momento: probarlo en el celular, pasar Lighthouse y, si hace falta, alojarlo en otro sitio.

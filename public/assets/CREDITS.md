@@ -1,45 +1,33 @@
 # Créditos de arte y sonido
 
-Todo el arte y el audio de Base Builder viene de **Kenney** (https://kenney.nl) y es **CC0 1.0** (dominio público):
+Todo el arte y el audio de Base Builder parte de **Kenney** (https://kenney.nl) y es **CC0 1.0** (dominio público):
 se puede usar en proyectos personales y comerciales. El crédito no es obligatorio, pero se agradece.
 Las licencias originales están en `licenses/`.
 
 ## Packs usados
 | Pack | Uso | Licencia |
 |---|---|---|
-| [Medieval RTS](https://kenney.nl/assets/medieval-rts) | Terreno, edificios, árboles, rocas, arbustos, caja de obras | CC0 |
+| [Castle Kit](https://kenney.nl/assets/castle-kit) (modelos 3D) | Torres, muros, puertas, armas de asedio, rocas, árboles y troncos | CC0 |
+| [Fantasy Town Kit](https://kenney.nl/assets/fantasy-town-kit) (modelos 3D) | Casas, tejados, chimeneas, carros, fuentes, árboles, rocas y arbustos | CC0 |
+| [Mini Characters](https://kenney.nl/assets/mini-characters) (modelos 3D con esqueleto y animaciones) | Los personajes: aldeanos, tropas, héroes y enemigos | CC0 |
 | [Interface Sounds](https://kenney.nl/assets/interface-sounds) | Clics, cerrar, confirmar, error | CC0 |
 | [RPG Audio](https://kenney.nl/assets/rpg-audio) | Monedas, construir, mejorar, demoler | CC0 |
-| [Tiny Dungeon](https://kenney.nl/assets/tiny-dungeon) | Los personajes: tropas, héroes, enemigos y aldeanos (modificados, ver abajo) | CC0 |
 
-## Correspondencia con los archivos originales
-Las imágenes son las del tamaño «Default size» (64×64 px), renombradas.
+## Cómo se hizo el arte (vista isométrica)
+Las imágenes de `iso/` **no son las de Kenney tal cual**: se generan con la herramienta `tools/iso` del repositorio, que monta los modelos 3D,
+los recolorea y los dibuja desde una cámara isométrica 2:1 con luz y sombra propias. Se ofrecen también como CC0.
 
-| Archivo en `art/` | Original (Medieval RTS) |
-|---|---|
-| `grass_a`, `grass_b` | `medievalTile_57`, `medievalTile_58` |
-| `mine_1`, `mine_2`, `mine_3` | `medievalEnvironment_11`, `_12`, `_19` |
-| `storage_1`, `storage_2`, `storage_3` | `medievalStructure_11`, `_19`, `_09` |
-| `tower_1`, `tower_2`, `tower_3` | `medievalStructure_05`, `_01`, `_02` |
-| `townhall_1`, `townhall_2`, `townhall_3` | `medievalStructure_17`, `_04`, `_06` |
-| `sawmill_1`, `sawmill_2`, `sawmill_3` | `medievalStructure_21`, `_20`, `_16` |
-| `wall_1`, `wall_2`, `wall_3` | **Dibujados para este proyecto** con `scripts/make-walls.mjs` (el pack no trae muros); se ofrecen también como CC0 |
-| `tree_a`, `tree_b`, `tree_c` | `medievalEnvironment_02`, `_03`, `_04` |
-| `rock_a`, `rock_b`, `rock_c` | `medievalEnvironment_08`, `_09`, `_10` |
-| `bush_a`, `bush_b` | `medievalEnvironment_13`, `_20` |
-| `worker_1` … `worker_4` | `medievalUnit_06`, `_12`, `_18`, `_24` |
-| `unit_soldier`, `unit_mage`, `unit_knight`, `unit_hero` | `medievalUnit_02`, `_01`, `_03`, `_04` |
-| `enemy_guard`, `enemy_brute` | `medievalUnit_08`, `_09` (equipo rojo) |
-| `barracks_1`, `barracks_2`, `barracks_3` | `medievalStructure_22`, `_10`, `_03` |
-| `farm_1`, `farm_2` | `medievalTile_54`, `_56` (con el fondo de césped quitado) |
-| `farm_3` | `medievalStructure_23` |
-| `altar_1` | `medievalStructure_12` |
-| `stump`, `log` | `medievalEnvironment_05`, `_06` |
-| `rock_d`, `rock_e`, `rock_f` | `medievalEnvironment_14`, `_15`, `_16` |
-| `wallh_1`…`wallh_3`, `wallv_1`…`wallv_3` | **Dibujados para este proyecto** con `scripts/make-walls.mjs`: piezas de enlace entre muros contiguos; se ofrecen también como CC0 |
-| `gate_1`, `gate_2`, `gate_3` | **Dibujados para este proyecto** con `scripts/make-walls.mjs`; se ofrecen también como CC0 |
-| `crate` | `medievalTile_55` |
+- **`iso/buildings/`** — 15 edificios × 3 etapas. Cada uno es una composición propia de piezas del Castle Kit y del Fantasy Town Kit (pisos, tejados,
+  chimeneas, banderas, carros, ruedas, fuentes…) con la paleta del *Reino*: piedra clara, tejados azul pizarra y detalles dorados. Los niveles 4 a 10
+  reutilizan la etapa 3 con un tinte (ver `config.js`).
+- **`iso/decor/`** — árboles, rocas y troncos de los kits (los árboles recoloreados); los arbustos, las flores y la mata de hierba están hechos a mano.
+- **`iso/units/`** — una hoja por personaje (8×4 cuadros de 96×120 px: caminar, atacar, quieto y caído, mirando a dos direcciones; las otras dos se
+  obtienen volteando). Parten de los modelos de Mini Characters y **llevan armas, escudos, aljabas, bastones, hacha, maza, sombreros, capas y aureolas
+  modelados para este proyecto** (`tools/iso/designs.js`), con colores propios para cada bando. La araña y las máquinas de asedio también (la araña
+  está modelada desde cero; el asedio es del Castle Kit).
+- El terreno (césped, tierra, arena, agua) y el borde de roca de la isla se dibujan por código dentro del juego.
 
+## Sonido
 | Archivo en `audio/` | Original | Pack |
 |---|---|---|
 | `place` | `chop` | RPG Audio |
@@ -59,15 +47,3 @@ Las imágenes son las del tamaño «Default size» (64×64 px), renombradas.
 | `close` | `close_002` | Interface Sounds |
 
 El formato de audio es `.ogg`; algunos navegadores antiguos de Apple no lo reproducen (el juego funciona igual, sin sonido).
-
-## Dibujos nuevos de la etapa de edificios militares
-- `house_1` es `medievalStructure_18`; `house_2` y `house_3` son `_21` y `_20` con el tejado recoloreado (rojo).
-- `archery_*` (`_22`, `_10`, `_03`, tejado ocre), `atelier_*` (`_19`, `_09`, `_04`, violeta), `stable_1` (`_07`), `stable_2` y `stable_3` (`_16`, `_23`, marrón), `siege_1` (`_08`), `siege_2` y `siege_3` (`_21`, `_20`, gris azulado) y `forge_*` (`_22`, `_20`, `_06`, rojo oscuro, gris y piedra) son dibujos del pack recoloreados cambiando el tono de los tejados; el resto del dibujo no se toca.
-- `unit_archer` es `medievalUnit_14`; `hero_ranger`, `hero_priest`, `hero_pyro` y `hero_warlord` son `medievalUnit_11`, `_22`, `_07` y `_10`.
-- `unit_catapult` y `unit_ram` están **dibujados para este proyecto** con `scripts/make-siege.mjs` (el pack no trae armas de asedio); se ofrecen también como CC0.
-
-## Personajes (pack Tiny Dungeon, modificados para este proyecto)
-Los personajes parten de `tile_0084`, `_0085`, `_0086`, `_0087`, `_0088`, `_0096`, `_0097`, `_0098`, `_0099`, `_0100`, `_0109`, `_0111`, `_0112` y `_0122` del pack,
-y **no se usan tal cual**: se les cambió la paleta de colores (azul para tus tropas, verde, rojo y violeta para héroes y enemigos) y se les dibujaron
-a mano armas y detalles (espadas, escudos, arcos, aljabas, bastones, hacha, martillo, maza, coronas, aureola, plumas, capas) con el script
-`scripts/make-characters.ps1`. Se ofrecen también como CC0.

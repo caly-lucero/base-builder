@@ -1,36 +1,57 @@
 // Proyección y cámara: la ÚNICA parte que sabe cómo se pasa de coordenadas de casilla a pantalla.
-// Hoy es ortogonal (vista cenital, cada casilla es un cuadrado) con desplazamiento y zoom.
-// Para pasar a isométrico bastará con reescribir estas funciones y cambiar el arte; la lógica
-// del juego, el guardado y la economía solo hablan en casillas (x, y) y no cambian.
+// La vista es isométrica «2:1»: cada casilla es un rombo de TILE_W × TILE_H píxeles (a zoom 1).
+//   x crece hacia abajo-derecha, y hacia abajo-izquierda.  La casilla (0, 0) es la de más arriba.
+//   centro de la casilla (x, y) = view + ((x − y) · TILE_W/2, (x + y + 1) · TILE_H/2) · zoom
+// La lógica del juego, el guardado y la economía solo hablan en casillas (x, y) y no saben nada de esto.
 //
 // El mapa se ve por una «ventana» rectangular (LAYOUT.viewHeight de alto, entre el HUD y la
-// barra de abajo). `view` dice dónde cae en pantalla la esquina superior izquierda del mapa.
-import { ART_SIZE, CAMERA, GRID, LAYOUT } from '../data/config.js';
+// barra de abajo). `view` dice dónde cae en pantalla el vértice de arriba de la casilla (0, 0).
+import { CAMERA, GRID, LAYOUT } from '../data/config.js';
 import { TOWN_HALL_CELL, inBounds } from './logic.js';
 
-const T = GRID.tile;
+export const TILE_W = 96;
+export const TILE_H = 48;
+const HW = TILE_W / 2;
+const HH = TILE_H / 2;
 
-/** Escala base de los sprites (sin zoom): ART_SIZE px → una casilla. */
-export const SPRITE_SCALE = T / ART_SIZE;
+/** Largo (px, a zoom 1) de «una casilla» recorrida en línea recta: sirve para tamaños de efectos y alcances. */
+export const TILE_LEN = Math.hypot(HW, HH);
 
-/** Margen entre el pie de un dibujo y el borde inferior de su casilla (en px sin zoom). */
-export const GROUND_MARGIN = 4;
+/** El arte ya viene dibujado al tamaño de pantalla a zoom 1. */
+export const SPRITE_SCALE = 1;
+
+/** Alto (a zoom 1) del borde de tierra que se ve bajo la isla. */
+export const CLIFF = 34;
+
+/** Margen (px) que se deja ver fuera del mapa al desplazarse. */
+const MARGIN = 28;
 
 /** Estado de la cámara. Se modifica solo con las funciones de abajo. */
 export const view = { zoom: CAMERA.startZoom, x: 0, y: LAYOUT.gridTop };
 
 const viewport = () => ({ left: 0, top: LAYOUT.gridTop, width: LAYOUT.width, height: LAYOUT.viewHeight });
 
-export const tileSize = () => T * view.zoom;
+export const tileSize = () => TILE_LEN * view.zoom;
 export const spriteScale = () => SPRITE_SCALE * view.zoom;
+
+/** Pantalla ↔ mundo: punto (px) del mapa en píxeles de pantalla, dado su (x, y) en casillas (puede ser fraccionario). */
+function toScreen(x, y) {
+  return { x: view.x + (x - y) * HW * view.zoom, y: view.y + (x + y) * HH * view.zoom };
+}
 
 /** Coloca el mapa dentro de la ventana: si es más chico que ella, lo centra; si no, no deja huecos. */
 export function clampView() {
   const vp = viewport();
-  const ww = GRID.cols * tileSize();
-  const wh = GRID.rows * tileSize();
-  view.x = ww <= vp.width ? vp.left + (vp.width - ww) / 2 : Math.min(vp.left, Math.max(vp.left + vp.width - ww, view.x));
-  view.y = wh <= vp.height ? vp.top + (vp.height - wh) / 2 : Math.min(vp.top, Math.max(vp.top + vp.height - wh, view.y));
+  const z = view.zoom;
+  const leftSpan = GRID.rows * HW * z; // del vértice de arriba al borde izquierdo del rombo
+  const rightSpan = GRID.cols * HW * z;
+  const height = (GRID.cols + GRID.rows) * HH * z + CLIFF * z;
+  const minX = vp.left + vp.width - rightSpan - MARGIN;
+  const maxX = vp.left + leftSpan + MARGIN;
+  view.x = minX > maxX ? (minX + maxX) / 2 : Math.min(maxX, Math.max(minX, view.x));
+  const minY = vp.top + vp.height - height - MARGIN;
+  const maxY = vp.top + MARGIN;
+  view.y = minY > maxY ? (minY + maxY) / 2 : Math.min(maxY, Math.max(minY, view.y));
 }
 
 /** Desplaza el mapa `dx, dy` píxeles de pantalla. */
@@ -40,23 +61,28 @@ export function panBy(dx, dy) {
   clampView();
 }
 
+/** Punto del mapa (casillas, fraccionario) bajo un punto de pantalla. */
+export function screenToWorld(px, py) {
+  const u = (px - view.x) / (HW * view.zoom);
+  const v = (py - view.y) / (HH * view.zoom);
+  return { x: (u + v) / 2, y: (v - u) / 2 };
+}
+
 /** Cambia el zoom manteniendo fijo el punto de pantalla (px, py), como al acercar con el dedo o la rueda. */
 export function zoomAt(px, py, zoom) {
   const next = Math.min(CAMERA.maxZoom, Math.max(CAMERA.minZoom, zoom));
-  const ts = tileSize();
-  const worldX = (px - view.x) / ts; // punto del mapa bajo (px, py), en casillas
-  const worldY = (py - view.y) / ts;
+  const w = screenToWorld(px, py);
   view.zoom = next;
-  view.x = px - worldX * tileSize();
-  view.y = py - worldY * tileSize();
+  view.x = px - (w.x - w.y) * HW * next;
+  view.y = py - (w.x + w.y) * HH * next;
   clampView();
 }
 
 /** Centra la ventana en una casilla. */
 export function centerOnTile(x, y) {
   const vp = viewport();
-  view.x = vp.left + vp.width / 2 - (x + 0.5) * tileSize();
-  view.y = vp.top + vp.height / 2 - (y + 0.5) * tileSize();
+  view.x = vp.left + vp.width / 2 - (x - y) * HW * view.zoom;
+  view.y = vp.top + vp.height / 2 - (x + y + 1) * HH * view.zoom;
   clampView();
 }
 
@@ -66,22 +92,19 @@ export function resetView(cell = TOWN_HALL_CELL) {
   centerOnTile(cell.x, cell.y);
 }
 
-/** Centro de una casilla en pantalla. */
+/** Centro del rombo de una casilla (x, y pueden ser fraccionarios: sirve para unidades que se mueven). */
 export function tileCenter(x, y) {
-  const ts = tileSize();
-  return { x: view.x + (x + 0.5) * ts, y: view.y + (y + 0.5) * ts };
+  return toScreen(x + 0.5, y + 0.5);
 }
 
-/** Esquina superior izquierda de una casilla en pantalla. */
-export function tileTopLeft(x, y) {
-  const ts = tileSize();
-  return { x: view.x + x * ts, y: view.y + y * ts };
-}
-
-/** Punto donde «pisa» un edificio o adorno: centro horizontal, cerca del borde inferior de la casilla. */
+/** Punto donde «pisa» un edificio o una unidad: el centro del rombo. */
 export function tileBase(x, y) {
-  const c = tileCenter(x, y);
-  return { x: c.x, y: c.y + tileSize() / 2 - GROUND_MARGIN * view.zoom };
+  return tileCenter(x, y);
+}
+
+/** Los cuatro vértices del rombo de una casilla, en pantalla: [arriba, derecha, abajo, izquierda]. */
+export function tileCorners(x, y) {
+  return [toScreen(x, y), toScreen(x + 1, y), toScreen(x + 1, y + 1), toScreen(x, y + 1)];
 }
 
 /** ¿El punto de pantalla cae dentro de la ventana del mapa (y no sobre el HUD o la barra)? */
@@ -93,9 +116,9 @@ export function inViewport(px, py) {
 /** Casilla bajo un punto de la pantalla, o null si cae fuera de la ventana o del mapa. */
 export function screenToTile(px, py) {
   if (!inViewport(px, py)) return null;
-  const ts = tileSize();
-  const x = Math.floor((px - view.x) / ts);
-  const y = Math.floor((py - view.y) / ts);
+  const w = screenToWorld(px, py);
+  const x = Math.floor(w.x);
+  const y = Math.floor(w.y);
   return inBounds(x, y) ? { x, y } : null;
 }
 
@@ -105,19 +128,14 @@ export function screenToTile(px, py) {
  */
 export function isTileVisible(x, y, slack = 1) {
   const vp = viewport();
-  const ts = tileSize();
-  const pad = slack * ts;
-  const left = view.x + x * ts;
-  const top = view.y + y * ts;
-  return (
-    left + ts > vp.left - pad &&
-    left < vp.left + vp.width + pad &&
-    top + ts > vp.top - pad &&
-    top < vp.top + vp.height + pad
-  );
+  const c = tileCenter(x, y);
+  const padX = (HW + slack * TILE_W * 0.5) * view.zoom;
+  const padUp = (HH + slack * TILE_H * 2.2) * view.zoom; // los dibujos altos sobresalen hacia arriba
+  const padDown = (HH + slack * TILE_H * 0.6) * view.zoom;
+  return c.x + padX > vp.left && c.x - padX < vp.left + vp.width && c.y + padDown > vp.top && c.y - padUp < vp.top + vp.height;
 }
 
-/** Orden de dibujado: lo que está más abajo se pinta encima. */
+/** Orden de dibujado: lo que está más abajo en pantalla (x + y mayor) se pinta encima. */
 export function depthOf(x, y) {
-  return y + x / 100;
+  return x + y + (x - y) / 1000;
 }

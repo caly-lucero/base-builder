@@ -1,20 +1,18 @@
 import Phaser from 'phaser';
-import { IMAGES } from '../data/assets.js';
-import { ART_SIZE, ARMY_UNITS, BUILDINGS, CAMERA, GRID, LAYOUT, RAID, STARS } from '../data/config.js';
+import { ARMY_UNITS, CAMERA, GRID, LAYOUT, RAID, STARS } from '../data/config.js';
 import { HEROES } from '../data/heroes.js';
 import { abilityStatus, advanceBattle, attackers, battleStatus, castHeroAbility, clearOrders, createBattle, defenderUnits, orderAttack, orderMove, retreat, unitIdsOfKinds } from '../game/battle.js';
 import { applyBattleResult } from '../game/campaign.js';
 import { formatDuration, squadHeroes, statsOf, unitCombat } from '../game/logic.js';
 import { generateMission, missionName } from '../game/missions.js';
 import * as prefs from '../game/prefs.js';
-import { depthOf, inViewport, isTileVisible, panBy, resetView, screenToTile, spriteScale, tileBase, tileCenter, tileSize, view, zoomAt } from '../game/projection.js';
-import { contentBounds } from '../game/sprites.js';
+import { depthOf, inViewport, isTileVisible, panBy, resetView, screenToTile, tileBase, tileCenter, tileSize, view, zoomAt } from '../game/projection.js';
+import { unitFrame } from '../game/unitArt.js';
 import * as store from '../game/store.js';
-import { grassLook } from '../game/terrain.js';
-import { wallConnectors } from '../game/walls.js';
-import { renderConnectors } from './connectors.js';
+import { fitIcon as fitIconArt, placeOnTile as placeOnTileArt } from './artPlace.js';
+import { drawCliff, ensureTerrainTextures, grassKey } from './terrainArt.js';
 import * as ui from './ui.js';
-import { addGloss, addVignette, emberPuff, ensureTextures, crispCharacters, placeShadow, smokePuff, sparkBurst } from './look.js';
+import { addGloss, addVignette, emberPuff, ensureTextures, smokePuff, sparkBurst } from './look.js';
 
 const FONT = 'system-ui, "Segoe UI", Roboto, sans-serif';
 const DEPTH = { terrain: 0, shadow: 8, world: 10, fx: 60, vignette: 90, ui: 150, buttons: 160, modal: 400 };
@@ -32,12 +30,12 @@ const UNIT_SPRITE = {
 };
 /** Dibujo de una unidad de la batalla: cada héroe tiene el suyo. */
 const unitSprite = (e) => (e.type === 'hero' ? HEROES[e.heroKey].sprite : UNIT_SPRITE[e.type]);
-const ENEMY_TINT = 0xffc2b2;
-const DAMAGED_TINT = 0x6a5a55;
+const ENEMY_TINT = 0xffa890; // los edificios de la Horda: los mismos dibujos, teñidos de rojizo
+const DAMAGED_TINT = 0x8a7a72;
 const RAID_CENTER = { x: 12, y: 9 }; // en una defensa se ve tu base con el borde de arriba, por donde llega el enemigo
 const RAID_ZOOM = 0.7;
-const UNIT_GROW = 1.15;
-const BUILDING_GROW = 1.25;
+const UNIT_GROW = 1; // el arte isométrico ya viene al tamaño final
+const BUILDING_GROW = 1;
 const START_ZOOM = 0.6;
 const START_CENTER = { x: 12, y: 13.5 }; // deja ver la base enemiga arriba y el desembarco abajo
 
@@ -68,7 +66,6 @@ export default class BattleScene extends Phaser.Scene {
     this.lunge = new Map(); // id de unidad -> golpe en curso { until, dx, dy } (se lanza hacia el objetivo)
     this.chips = []; // vacío en una defensa (no hay tropas que dirigir)
     this.viewDirty = true;
-    this.connectors = new Map(); // enlaces entre los muros enemigos que siguen en pie
   }
 
   create() {
@@ -91,10 +88,10 @@ export default class BattleScene extends Phaser.Scene {
     resetView(this.raid ? RAID_CENTER : START_CENTER);
     zoomAt(LAYOUT.width / 2, LAYOUT.gridTop + LAYOUT.viewHeight / 2, this.raid ? RAID_ZOOM : START_ZOOM);
 
-    this.cameras.main.setBackgroundColor(0x1b4a2a); // lo que queda fuera del mapa: verde oscuro
+    this.cameras.main.setBackgroundColor(0x8fc0e4); // lo que queda fuera de la isla: cielo
     ensureTextures(this);
+    ensureTerrainTextures(this);
     ui.ensureUi(this);
-    crispCharacters(this, Object.keys(IMAGES));
     this.createTerrain();
     this.createEntities();
     addVignette(this, DEPTH.vignette);
@@ -136,14 +133,11 @@ export default class BattleScene extends Phaser.Scene {
   }
 
   placeOnTile(img, key, x, y, grow) {
-    const b = contentBounds(this.textures, key);
-    const p = tileBase(x, y);
-    return img.setTexture(key).setOrigin(b.cx / ART_SIZE, b.bottom / ART_SIZE).setPosition(p.x, p.y).setScale(spriteScale() * grow);
+    return placeOnTileArt(img, key, x, y, grow);
   }
 
   fitIcon(img, key, cx, cy, size) {
-    const b = contentBounds(this.textures, key);
-    return img.setTexture(key).setOrigin(b.cx / ART_SIZE, b.cy / ART_SIZE).setPosition(cx, cy).setScale(size / Math.max(b.w, b.h));
+    return fitIconArt(this, img, key, cx, cy, size);
   }
 
   showToast(text, hold = 1500) {
@@ -158,11 +152,11 @@ export default class BattleScene extends Phaser.Scene {
     this.terrain = [];
     for (let y = 0; y < GRID.rows; y++) {
       for (let x = 0; x < GRID.cols; x++) {
-        const look = grassLook(x, y);
-        const img = this.add.image(0, 0, look.key).setDepth(DEPTH.terrain).setTint(look.tint).setFlip(look.flipX, look.flipY);
+        const img = this.add.image(0, 0, grassKey(x, y)).setDepth(DEPTH.terrain);
         this.terrain.push({ x, y, img });
       }
     }
+    this.cliff = this.add.graphics().setDepth(DEPTH.terrain - 1); // el borde de roca bajo la isla
   }
 
   createEntities() {
@@ -174,7 +168,7 @@ export default class BattleScene extends Phaser.Scene {
       this.entries.set(e.id, { ent: e, img, shadow: shadow(), rubble: null, baseTint, lastX: e.x });
     }
     for (const u of this.battle.units) {
-      const img = this.add.image(0, 0, unitSprite(u));
+      const img = this.add.image(0, 0, unitSprite(u), 0);
       this.entries.set(u.id, { ent: u, img, shadow: shadow(), rubble: null, baseTint: null, lastX: u.x });
     }
   }
@@ -197,8 +191,8 @@ export default class BattleScene extends Phaser.Scene {
       if (!e.alive || e.hp / e.maxHp > 0.5 || !isTileVisible(e.x, e.y, 0)) continue;
       const c = tileCenter(e.x, e.y);
       const depth = DEPTH.fx;
-      emberPuff(this, c.x + (Math.random() - 0.5) * ts * 0.4, c.y, depth);
-      if (Math.random() < 0.6) smokePuff(this, c.x + (Math.random() - 0.5) * ts * 0.3, c.y - ts * 0.2, depth, { color: 0x3a3430, size: 0.8, rise: ts * 0.9, alpha: 0.55, life: 1700 });
+      emberPuff(this, c.x + (Math.random() - 0.5) * ts * 0.5, c.y - ts * 0.3, depth);
+      if (Math.random() < 0.6) smokePuff(this, c.x + (Math.random() - 0.5) * ts * 0.4, c.y - ts * 0.55, depth, { color: 0x3a3430, size: 0.8, rise: ts * 0.9, alpha: 0.55, life: 1700 });
     }
   }
 
@@ -524,7 +518,7 @@ export default class BattleScene extends Phaser.Scene {
         const len = Math.hypot(dx, dy) || 1;
         // Los cuerpo a cuerpo se lanzan hacia el objetivo; los que disparan retroceden un poco (retroceso).
         const sign = ev.type === 'shot' ? -0.4 : 1;
-        this.lunge.set(ev.from, { start: this.time.now, until: this.time.now + 190, dx: (dx / len) * sign, dy: (dy / len) * sign });
+        this.lunge.set(ev.from, { start: this.time.now, until: this.time.now + 300, dx: (dx / len) * sign, dy: (dy / len) * sign, face: { dx: dx / len, dy: dy / len } });
       }
       if (target) {
         this.flash.set(target.ent.id, this.time.now + 90);
@@ -539,9 +533,10 @@ export default class BattleScene extends Phaser.Scene {
       } else this.play('hit', 80);
     } else if (ev.type === 'die' && target?.ent.kind === 'unit') {
       this.selection.delete(ev.id);
-      const side = target.img.flipX ? -1 : 1;
-      this.tweens.add({ targets: target.img, angle: 82 * side, y: target.img.y + 5 * view.zoom, duration: 260, ease: 'Quad.easeIn' });
-      this.tweens.add({ targets: [target.img, target.shadow], alpha: 0, delay: 260, duration: 520, onComplete: () => { target.img.destroy(); target.shadow.destroy(); } });
+      const dir = target.anim?.dir ?? { dx: 1, dy: 0 };
+      const f = unitFrame('die', dir.dx, dir.dy);
+      target.img.setFrame(f.frame).setFlipX(f.flipX).setRotation(0);
+      this.tweens.add({ targets: [target.img, target.shadow], alpha: 0, delay: 650, duration: 600, onComplete: () => { target.img.destroy(); target.shadow.destroy(); } });
       const p = tileBase(target.ent.x, target.ent.y);
       smokePuff(this, p.x, p.y - tileSize() * 0.15, DEPTH.fx, { color: 0xd8cdb0, size: 0.5, rise: tileSize() * 0.35, alpha: 0.6, life: 700 });
       target.dying = true;
@@ -713,7 +708,8 @@ export default class BattleScene extends Phaser.Scene {
   /* ---------- dibujo y bucle ---------- */
 
   renderTerrain() {
-    const scale = spriteScale() * 1.02;
+    const scale = view.zoom * 1.015; // un poco más grande: evita rendijas entre casillas
+    drawCliff(this.cliff, view.zoom);
     for (const t of this.terrain) {
       const visible = isTileVisible(t.x, t.y, 0);
       t.img.setVisible(visible);
@@ -724,52 +720,47 @@ export default class BattleScene extends Phaser.Scene {
     }
   }
 
-  /** Sombra bajo (x, y) casillas, de `w` × `h` casillas. */
-  shadowAt(shadow, x, y, w, h, alpha) {
-    const ts = tileSize();
-    const p = tileBase(x, y);
-    placeShadow(shadow, p.x + ts * 0.05, p.y - ts * 0.02, ts * w, ts * h, alpha);
+  /** Las sombras ya vienen dibujadas en el arte isométrico. */
+  shadowAt(shadow) {
+    shadow.setVisible(false);
   }
 
   /**
-   * Animación de una unidad (todo por código, sin dibujos extra): al caminar rebota y se inclina; quieta, respira;
-   * al golpear se lanza hacia el objetivo. El pivote es el pie, así que la inclinación no la despega del suelo.
+   * Animación de una unidad con los cuadros de su hoja: camina mientras avanza, golpea (cuadros de ataque) al
+   * pelear y descansa quieta. Mira hacia donde va o hacia su objetivo.
    */
   animateUnit(entry, img, e, dt) {
-    const a = (entry.anim ??= { x: e.x, y: e.y, phase: Math.random() * 6.28, speed: 0 });
+    const defaultDir = e.side === 'a' ? { dx: 0, dy: -1 } : { dx: 0, dy: 1 }; // los atacantes miran hacia arriba (la base enemiga)
+    const a = (entry.anim ??= { x: e.x, y: e.y, phase: Math.random(), speed: 0, dir: defaultDir });
     const zoom = view.zoom;
     const step = Math.hypot(e.x - a.x, e.y - a.y);
+    if (step > 0.0004) a.dir = { dx: e.x - a.x, dy: e.y - a.y };
     a.x = e.x;
     a.y = e.y;
     a.speed += (step / Math.max(dt, 0.001) - a.speed) * 0.35;
     const moving = a.speed > 0.35;
-    a.phase += dt * (moving ? 5 + a.speed * 2.2 : 2.4);
-    const bob = moving ? Math.abs(Math.sin(a.phase)) * 3.2 * zoom : Math.sin(a.phase) * 0.7 * zoom;
-    img.y -= bob;
-    img.setRotation(moving ? Math.sin(a.phase) * 0.09 : 0);
-    img.scaleY *= 1 + (moving ? Math.sin(a.phase * 2) * 0.035 : Math.sin(a.phase) * 0.012);
+    a.phase += dt * (1.1 + a.speed * 0.55);
 
     const l = this.lunge.get(e.id);
+    let f;
     if (l) {
       const k = (this.time.now - l.start) / (l.until - l.start);
       if (k >= 1) this.lunge.delete(e.id);
       else {
-        const push = Math.sin(k * Math.PI) * 8 * zoom; // sale y vuelve
-        img.x += l.dx * push;
-        img.y += l.dy * push * 0.6;
+        a.dir = l.face;
+        f = unitFrame('attack', l.face.dx, l.face.dy, k);
+        const push = Math.sin(k * Math.PI) * 6 * zoom; // sale un poco hacia el objetivo y vuelve
+        img.x += l.dx * push * 0.9;
+        img.y += l.dy * push * 0.5;
       }
     }
+    if (!f) f = moving ? unitFrame('walk', a.dir.dx, a.dir.dy, a.phase) : unitFrame('idle', a.dir.dx, a.dir.dy);
+    img.setFrame(f.frame).setFlipX(f.flipX);
   }
 
   renderEntities(dt = 0.016) {
     const now = this.time.now;
 
-    // Los muros enemigos que siguen en pie se ven unidos; al caer uno, desaparecen sus enlaces.
-    const standing = this.battle.buildings.filter((e) => e.alive).map((e) => ({ type: e.type, x: e.x, y: e.y, level: e.level ?? 2 }));
-    renderConnectors(this, this.connectors, wallConnectors(standing), {
-      grow: BUILDING_GROW,
-      tintFor: this.raid ? (c) => BUILDINGS.wall.levels[Math.min(c.level, 5) - 1]?.tint ?? null : () => ENEMY_TINT,
-    });
     for (const entry of this.entries.values()) {
       const e = entry.ent;
       const { img } = entry;
@@ -789,20 +780,16 @@ export default class BattleScene extends Phaser.Scene {
         entry.shadow.setVisible(visible);
         if (visible) {
           this.placeOnTile(img, this.buildingSprite(e), e.x, e.y, BUILDING_GROW);
-          const wall = e.type === 'wall' || e.type === 'gate' ? 0.8 : 1;
-          this.shadowAt(entry.shadow, e.x, e.y, 1.05 * wall, 0.4 * wall, 0.55);
+          entry.shadow.setVisible(false);
         }
       } else if (e.alive) {
         const visible = isTileVisible(Math.round(e.x), Math.round(e.y));
         img.setVisible(visible);
         entry.shadow.setVisible(visible);
         if (!visible) continue;
-        this.shadowAt(entry.shadow, e.x, e.y, e.type === 'hero' ? 0.5 : 0.34, e.type === 'hero' ? 0.19 : 0.13, 0.22);
-        const grow = e.type === 'hero' ? UNIT_GROW * 1.3 : UNIT_GROW;
-        this.placeOnTile(img, unitSprite(e), e.x, e.y, grow).setDepth(DEPTH.world + e.y + 0.5);
+        entry.shadow.setVisible(false);
+        this.placeOnTile(img, unitSprite(e), e.x, e.y, UNIT_GROW).setDepth(DEPTH.world + depthOf(e.x, e.y) + 0.06);
         this.animateUnit(entry, img, e, dt);
-        const dx = e.x - entry.lastX;
-        if (Math.abs(dx) > 0.001) img.setFlipX(dx < 0);
         entry.lastX = e.x;
       }
       const flashing = (this.flash.get(e.id) ?? 0) > now;
@@ -826,13 +813,14 @@ export default class BattleScene extends Phaser.Scene {
       if (!e.alive || !isTileVisible(e.x, e.y)) continue;
       if (e.hp >= e.maxHp && e.type !== 'hall' && e.type !== 'townhall' && e.type !== 'tower') continue;
       const p = tileBase(e.x, e.y);
-      bar(p.x, p.y - ts * 1.05, ts * 0.9, e.hp / e.maxHp, this.raid ? 0x55cc55 : 0xe05050);
+      const tall = e.type === 'hall' || e.type === 'townhall' ? 2.0 : e.type === 'tower' ? 1.6 : e.type === 'wall' || e.type === 'gate' ? 0.9 : 1.35;
+      bar(p.x, p.y - ts * tall, ts * 0.9, e.hp / e.maxHp, this.raid ? 0x55cc55 : 0xe05050);
     }
     for (const u of this.battle.units) {
       if (!u.alive || u.hp >= u.maxHp || !isTileVisible(Math.round(u.x), Math.round(u.y))) continue;
       const p = tileBase(u.x, u.y);
       const friendly = this.raid ? u.side === 'd' : u.side === 'a'; // en una defensa, tus tropas son las defensoras
-      bar(p.x, p.y - ts * 0.95, ts * 0.6, u.hp / u.maxHp, friendly ? 0x55cc55 : 0xe05050);
+      bar(p.x, p.y - ts * (u.type === 'hero' ? 1.35 : 1.0), ts * 0.6, u.hp / u.maxHp, friendly ? 0x55cc55 : 0xe05050);
     }
 
     g.lineStyle(2, 0x66ff66, 1);
@@ -848,7 +836,7 @@ export default class BattleScene extends Phaser.Scene {
     for (const m of this.markers) {
       const c = tileCenter(m.x, m.y);
       const k = (m.until - now) / 900;
-      g.lineStyle(3, m.color, k).strokeCircle(c.x, c.y, ts * (0.35 + 0.35 * (1 - k)));
+      g.lineStyle(3, m.color, k).strokeEllipse(c.x, c.y, ts * 2 * (0.35 + 0.35 * (1 - k)), ts * (0.35 + 0.35 * (1 - k)));
     }
 
     if (this.boxRect) {

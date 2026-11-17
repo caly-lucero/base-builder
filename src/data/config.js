@@ -32,9 +32,9 @@ export function fitLayout(screenW, screenH) {
 }
 
 export const CAMERA = {
-  minZoom: 0.375, // con 0.375 el mapa entero cabe en la ventana
+  minZoom: 0.25, // con 0.25 casi todo el mapa (un rombo de 24×24 casillas) cabe en la ventana
   maxZoom: 1.6,
-  startZoom: 1,
+  startZoom: 0.72,
   dragThreshold: 8, // píxeles que hay que mover antes de que un toque sea un arrastre
   keyPanSpeed: 420, // píxeles por segundo con las flechas
 };
