@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { COMBAT, GRID, UNITS } from '../src/data/config.js';
+import { COMBAT, GRID } from '../src/data/config.js';
+import { HEROES } from '../src/data/heroes.js';
 import {
   advanceBattle, attackers, battleStatus, clearOrders, createBattle, defenderUnits, heroCombat,
   orderAttack, orderMove, retreat, unitIdsOfKinds,
@@ -38,7 +39,7 @@ test('los atacantes aparecen en formación en el borde inferior, el héroe inclu
 test('el héroe sube de estadísticas con el nivel', () => {
   const l1 = heroCombat(1);
   const l5 = heroCombat(5);
-  assert.equal(l1.hp, UNITS.hero.combat.hp);
+  assert.equal(l1.hp, HEROES.paladin.combat.hp);
   assert.ok(l5.hp > l1.hp && l5.dmg > l1.dmg);
   assert.equal(l5.speed, l1.speed);
 });

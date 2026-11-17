@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { ASSET_BASE, IMAGES, SOUNDS } from '../data/assets.js';
-import { ART_SIZE, ARMY_UNITS, BUILDINGS, CAMERA, ECONOMY, GRID, HERO_MAX_LEVEL, LAYOUT, TOOL_PAGES, UNITS, heroXpToNext } from '../data/config.js';
+import { ART_SIZE, ARMY_UNITS, BUILDINGS, CAMERA, ECONOMY, GRID, LAYOUT, RESEARCH, TOOL_PAGES, UNITS, researchStep } from '../data/config.js';
+import { HEROES, HERO_KEYS, heroXpToNext } from '../data/heroes.js';
 import { generateDecor } from '../game/decor.js';
 import * as logic from '../game/logic.js';
 import * as prefs from '../game/prefs.js';
@@ -27,14 +28,30 @@ import { raidCountdownMs, raidLevel } from '../game/raids.js';
 import * as quests from '../game/quests.js';
 import { contentBounds } from '../game/sprites.js';
 import * as store from '../game/store.js';
+import { grassLook } from '../game/terrain.js';
 import { createWorker, plannedWorkers, stepWorker, workerPosition } from '../game/workers.js';
+import { claimableCount } from '../game/achievements.js';
+import { openAchievementsPanel } from './achievementsPanel.js';
+import { openHeroPanel } from './heroPanel.js';
+import { addGloss, addVignette, createClouds, emberPuff, ensureTextures, placeShadow, smokePuff, sparkBurst, stepClouds } from './look.js';
 
 const FONT = 'system-ui, "Segoe UI", Roboto, sans-serif';
 
 // Capas de dibujado (mayor = más arriba). Lo del HUD va por encima del mundo para tapar
 // lo que sobresalga de la ventana del mapa al desplazarse o hacer zoom.
 const DAMAGED_TINT = 0x6a5a55;
-const DEPTH = { terrain: 0, world: 10, ghost: 100, selector: 101, ui: 150, zoomButtons: 160, panel: 200, toast: 300 };
+const DEPTH = { terrain: 0, shadow: 8, world: 10, clouds: 80, vignette: 90, ghost: 100, selector: 101, ui: 150, zoomButtons: 160, panel: 200, toast: 800 };
+
+// Sombras bajo los dibujos: ancho y alto como fracción de la casilla.
+const SHADOW = {
+  building: { w: 1.05, h: 0.4, alpha: 0.55 },
+  tree: { w: 0.85, h: 0.32, alpha: 0.45 },
+  rock: { w: 0.6, h: 0.24, alpha: 0.34 },
+  bush: { w: 0.5, h: 0.2, alpha: 0.3 },
+  unit: { w: 0.42, h: 0.17, alpha: 0.4 },
+};
+const shadowKindOf = (key) => (key.startsWith('tree') ? 'tree' : key.startsWith('rock') ? 'rock' : key.startsWith('bush') ? 'bush' : null);
+const SMOKING = new Set(['townhall', 'barracks', 'sawmill', 'altar', 'forge', 'atelier']); // edificios con chimenea o fogata
 
 // Cuánto se agrandan los dibujos respecto a la casilla (el pack los trae pequeños en su lienzo).
 const BUILDING_GROW = 1.25;
@@ -43,6 +60,13 @@ const WORKER_GROW = 1.6;
 const POP_MS = 320; // duración de la animación al construir
 
 const joinParts = (parts) => parts.filter(Boolean).join(' · ');
+
+/** «5 soldados · 2 arqueros · Paladín nv. 3, Cazadora nv. 1» */
+function armyText(state) {
+  const units = ARMY_UNITS.filter((k) => (state.army[k] ?? 0) > 0).map((k) => `${state.army[k]} ${UNITS[k].name.toLowerCase()}${state.army[k] === 1 ? '' : 's'}`);
+  const heroes = logic.squadHeroes(state).map((h) => `${HEROES[h.key].name} nv. ${h.level}`);
+  return joinParts([...units, ...heroes]) || 'ninguna';
+}
 const rewardText = (r, sign = '') =>
   joinParts([r.gold > 0 && `${sign}${r.gold} oro`, r.wood > 0 && `${sign}${r.wood} madera`]);
 
@@ -70,6 +94,9 @@ function describe(stats) {
 }
 
 const spriteOf = (b) => logic.statsOf(b.type, b.level).sprite;
+
+/** Nombre a mostrar de lo que se entrena en un edificio: unidad, héroe o investigación. */
+const trainName = (key) => UNITS[key]?.name ?? HEROES[key]?.name ?? RESEARCH[key]?.name ?? key;
 const iconKey = (tool) => BUILDINGS[tool].levels[0].sprite;
 
 export default class BaseScene extends Phaser.Scene {
@@ -100,12 +127,13 @@ export default class BaseScene extends Phaser.Scene {
     this.notifiedQuest = null;
     this.army = []; // unidades dibujadas (ver syncArmy)
     this.armySignature = null;
-    this.heroView = null;
+    this.heroViews = new Map(); // clave de héroe -> dibujo junto al altar
     this.camp = null;
     this.shrine = null;
     this.modal = null;
     this.toolPage = 0;
     this.connectors = new Map(); // enlaces entre muros contiguos (ver renderWorld)
+    this.leaving = false; // ya se está pasando a otra escena
   }
 
   preload() {
@@ -122,8 +150,11 @@ export default class BaseScene extends Phaser.Scene {
 
     resetView(logic.townHall(store.get()) ?? undefined);
 
+    ensureTextures(this);
     this.createTerrain();
     this.createDecor();
+    this.clouds = createClouds(this, DEPTH.clouds);
+    addVignette(this, DEPTH.vignette);
     this.createHud();
     this.createToolbar();
     this.createPanel();
@@ -166,6 +197,7 @@ export default class BaseScene extends Phaser.Scene {
 
     this.time.addEvent({ delay: 250, loop: true, callback: () => this.refresh() });
     this.time.addEvent({ delay: 5000, loop: true, callback: () => store.persist() });
+    this.time.addEvent({ delay: 420, loop: true, callback: () => this.ambientTick() });
 
     // Resumen de lo ocurrido mientras no estabas. Se guarda antes del primer refresh(),
     // que es quien lo muestra junto con las mejoras que terminaron en ese tiempo.
@@ -177,10 +209,12 @@ export default class BaseScene extends Phaser.Scene {
     if (data?.report) {
       const r = data.report;
       this.welcome.push(
-        `${missionName(r.level)}: ${r.won ? '¡Victoria!' : 'Derrota'} · ${rewardText(r.loot, '+') || 'sin botín'}${r.heroLevelUps ? ' · ¡el héroe sube de nivel!' : ''}`,
+        `${missionName(r.level)}: ${r.won ? '¡Victoria!' : 'Derrota'} · ${rewardText(r.loot, '+') || 'sin botín'}${r.heroLevelUps ? ' · ¡un héroe sube de nivel!' : ''}`,
       );
     }
     this.rebuildViews();
+    // De vuelta de ver la defensa: el informe del ataque.
+    if (data?.raidReport) this.time.delayedCall(350, () => this.openRaidReport(data.raidReport));
   }
 
   /** Reproduce un efecto (si el sonido está activado y el archivo cargó). `gap` evita repeticiones seguidas. */
@@ -221,18 +255,44 @@ export default class BaseScene extends Phaser.Scene {
     this.terrain = [];
     for (let y = 0; y < GRID.rows; y++) {
       for (let x = 0; x < GRID.cols; x++) {
-        const key = (x * 7 + y * 13) % 3 === 0 ? 'grass_b' : 'grass_a';
-        this.terrain.push({ x, y, img: this.add.image(0, 0, key).setDepth(DEPTH.terrain) });
+        const look = grassLook(x, y);
+        const img = this.add.image(0, 0, look.key).setDepth(DEPTH.terrain).setTint(look.tint).setFlip(look.flipX, look.flipY);
+        this.terrain.push({ x, y, img });
       }
     }
   }
 
   /** Árboles, rocas y arbustos: solo adorno. Se ocultan bajo los edificios (ver renderWorld). */
   createDecor() {
-    this.decor = generateDecor().map((d) => ({
-      ...d,
-      img: this.add.image(0, 0, d.key).setDepth(DEPTH.world + depthOf(d.x, d.y)),
-    }));
+    this.decor = generateDecor().map((d) => {
+      const kind = shadowKindOf(d.key);
+      return {
+        ...d,
+        kind,
+        img: this.add.image(0, 0, d.key).setDepth(DEPTH.world + depthOf(d.x, d.y)),
+        shadow: kind ? this.add.image(0, 0, 'fx_shadow').setDepth(DEPTH.shadow).setVisible(false) : null,
+      };
+    });
+  }
+
+  /** Crea la sombra de una unidad (aldeano, soldado, héroe). */
+  unitShadow() {
+    return this.add.image(0, 0, 'fx_shadow').setDepth(DEPTH.shadow).setVisible(false);
+  }
+
+  /** Coloca una sombra bajo el punto de apoyo (x, y casillas) de algo. `kind` es una clave de SHADOW. */
+  putShadow(shadow, x, y, kind, scale = 1, alphaMul = 1) {
+    const s = SHADOW[kind];
+    const ts = tileSize();
+    const p = tileBase(x, y);
+    placeShadow(shadow, p.x + ts * 0.05, p.y - ts * 0.02, ts * s.w * scale, ts * s.h * scale, s.alpha * alphaMul).setVisible(true);
+  }
+
+  /** Brillo sobre un rectángulo de la interfaz. Se agrega a `parts` si se pasa, para ocultarlo con el resto. */
+  gloss(rect, parts, strength = 1) {
+    const g = addGloss(this, rect, rect.depth + 0.3, strength);
+    parts?.push(g);
+    return g;
   }
 
   /* ---------- HUD, barra, panel y botones de zoom ---------- */
@@ -255,7 +315,9 @@ export default class BaseScene extends Phaser.Scene {
   }
 
   createHud() {
-    this.ui(this.add.rectangle(LAYOUT.width / 2, LAYOUT.hudHeight / 2, LAYOUT.width, LAYOUT.hudHeight, COLORS.hud));
+    const hudBg = this.ui(this.add.rectangle(LAYOUT.width / 2, LAYOUT.hudHeight / 2, LAYOUT.width, LAYOUT.hudHeight, COLORS.hud));
+    this.gloss(hudBg);
+    this.ui(this.add.rectangle(LAYOUT.width / 2, LAYOUT.hudHeight - 1, LAYOUT.width, 2, 0xd4a017, 0.55), DEPTH.ui + 0.5); // filo dorado
 
     this.goldIcon(26, 21);
     this.goldText = this.ui(
@@ -281,6 +343,7 @@ export default class BaseScene extends Phaser.Scene {
         .setInteractive({ useHandCursor: true }),
       DEPTH.ui + 1,
     );
+    this.gloss(btn);
     this.ui(
       this.add.text(btn.x, btn.y, 'Recolectar todo', { fontFamily: FONT, fontSize: '16px', color: TEXT.normal }).setOrigin(0.5),
       DEPTH.ui + 2,
@@ -303,7 +366,9 @@ export default class BaseScene extends Phaser.Scene {
     const slots = 7;
     const w = LAYOUT.width / slots;
     const cy = LAYOUT.barTop + LAYOUT.barHeight / 2;
-    this.ui(this.add.rectangle(LAYOUT.width / 2, cy, LAYOUT.width, LAYOUT.barHeight, COLORS.hud));
+    const barBg = this.ui(this.add.rectangle(LAYOUT.width / 2, cy, LAYOUT.width, LAYOUT.barHeight, COLORS.hud));
+    this.gloss(barBg);
+    this.ui(this.add.rectangle(LAYOUT.width / 2, LAYOUT.barTop + 1, LAYOUT.width, 2, 0xd4a017, 0.55), DEPTH.ui + 0.5);
     this.toolPage = 0;
 
     const makeButton = (slot, tool, page) => {
@@ -324,6 +389,7 @@ export default class BaseScene extends Phaser.Scene {
           DEPTH.ui + 1,
         ),
       );
+      add(this.gloss(rect));
 
       if (def) add(this.ui(this.fitIcon(this.add.image(0, 0, iconKey(tool)), iconKey(tool), cx, cy - 30, 28), DEPTH.ui + 2));
       else add(this.ui(this.add.text(cx, cy - 30, '✕', { fontFamily: FONT, fontSize: '22px', color: '#ff9a8a' }).setOrigin(0.5), DEPTH.ui + 2));
@@ -370,6 +436,7 @@ export default class BaseScene extends Phaser.Scene {
       this.add.rectangle(cx, cy, w - 6, LAYOUT.barHeight - 14, 0x2a3f5a).setStrokeStyle(2, 0x5a82ad).setInteractive({ useHandCursor: true }),
       DEPTH.ui + 1,
     );
+    this.gloss(pageRect);
     this.pageLabel = this.ui(
       this.add.text(cx, cy, '', { fontFamily: FONT, fontSize: '12px', color: '#cfe3ff', align: 'center', lineSpacing: 4 }).setOrigin(0.5),
       DEPTH.ui + 2,
@@ -435,6 +502,9 @@ export default class BaseScene extends Phaser.Scene {
 
     const parts = [bg, icon, title, detail, hint, upgradeBtn, upgradeLabel, close];
     parts.forEach((p) => p.setDepth(d).setVisible(false));
+    // El brillo del panel y del botón: el del botón sigue su visibilidad (ver updatePanel).
+    this.gloss(bg, parts).setVisible(false);
+    this.upgradeGloss = this.gloss(upgradeBtn).setVisible(false);
 
     upgradeBtn.on('pointerdown', () => this.onUpgradeClick());
     close.on('pointerdown', () => {
@@ -454,6 +524,7 @@ export default class BaseScene extends Phaser.Scene {
         .setStrokeStyle(2, 0x86a083)
         .setInteractive({ useHandCursor: true })
         .setDepth(DEPTH.zoomButtons);
+      this.gloss(rect);
       this.add.text(x, y, label, { fontFamily: FONT, fontSize: size, color: '#e8eee0', fontStyle: 'bold' }).setOrigin(0.5).setDepth(DEPTH.zoomButtons + 1);
       rect.on('pointerdown', onClick);
     };
@@ -470,6 +541,9 @@ export default class BaseScene extends Phaser.Scene {
       this.viewDirty = true;
     });
     make(top + 146, '⚔', '18px', () => this.openAttackModal());
+    make(top + 186, '🏆', '16px', () => openAchievementsPanel(this));
+    // Puntito rojo cuando hay un premio de logros listo para reclamar.
+    this.achievementDot = this.add.circle(x + 13, top + 186 - 13, 6, 0xdd3333).setStrokeStyle(2, 0xffffff).setDepth(DEPTH.zoomButtons + 3).setVisible(false);
   }
 
   /** Ventana para confirmar el ataque: muestra al enemigo y tus tropas. */
@@ -489,7 +563,7 @@ export default class BaseScene extends Phaser.Scene {
       missionName(level),
       `Enemigo: ${plural(mission.buildings.filter((b) => b.type !== 'wall').length, 'edificio', 'edificios')} · ${plural(mission.buildings.filter((b) => b.type === 'tower').length, 'torre', 'torres')} · ${plural(mission.defenders.length, 'defensor', 'defensores')}`,
       ready
-        ? `Tus tropas: ${a.soldier} soldados · ${a.mage} hechiceros · ${a.knight} caballeros${state.hero ? ` · héroe nv. ${state.hero.level}` : ''}`
+        ? `Tus tropas: ${armyText(state)}`
         : 'No tienes tropas: entrénalas en el cuartel',
     ];
 
@@ -528,6 +602,15 @@ export default class BaseScene extends Phaser.Scene {
     this.modal = null;
   }
 
+  /** Un ataque enemigo llegó mientras jugabas: se ve cómo tu base se defiende. */
+  startDefense(report) {
+    if (this.leaving) return;
+    this.leaving = true;
+    store.persist();
+    this.closeModal();
+    this.scene.start('BattleScene', { report });
+  }
+
   startBattle(level) {
     store.persist(); // guarda la base antes de salir
     this.closeModal();
@@ -551,7 +634,7 @@ export default class BaseScene extends Phaser.Scene {
       .setDepth(d + 1);
     const detail = this.add.text(x + 10, y + 24, '', { fontFamily: FONT, fontSize: '11px', color: '#cfe0c8' }).setDepth(d + 1);
     bg.on('pointerdown', () => this.onQuestClick());
-    this.questBanner = { bg, title, detail, parts: [bg, title, detail] };
+    this.questBanner = { bg, title, detail, parts: [bg, title, detail, this.gloss(bg)] };
   }
 
   updateQuestBanner() {
@@ -614,6 +697,7 @@ export default class BaseScene extends Phaser.Scene {
       .setDepth(d);
     const line1 = this.add.text(x + 10, y + 5, '', { fontFamily: FONT, fontSize: '12px', color: '#ffb0a0', fontStyle: 'bold' }).setDepth(d + 1);
     const line2 = this.add.text(x + 10, y + 22, '', { fontFamily: FONT, fontSize: '11px', color: '#e8c79a' }).setDepth(d + 1);
+    this.gloss(bg);
     bg.on('pointerdown', () => this.onRaidBannerClick());
     this.raidBanner = { bg, line1, line2 };
   }
@@ -665,7 +749,7 @@ export default class BaseScene extends Phaser.Scene {
       `Fuerza ${r.level} · atacantes derrotados: ${r.kills}`,
       r.damaged ? `Edificios dañados: ${r.damaged}` : 'Ningún edificio dañado',
       stolen ? `Robaron: ${stolen}` : 'No robaron nada',
-      r.hero && r.xp ? `Héroe: +${r.xp} XP · nivel ${r.hero.level}${r.heroLevelUps ? ' · ¡SUBE DE NIVEL!' : ''}` : null,
+      r.heroes?.length && r.xp ? `Héroes: +${r.xp} XP${r.heroLevelUps ? ' · ¡SUBEN DE NIVEL!' : ''}` : null,
     ].filter(Boolean);
 
     const parts = [];
@@ -698,10 +782,10 @@ export default class BaseScene extends Phaser.Scene {
 
   /* ---------- entrenar unidades ---------- */
 
-  /** Tarjetas para entrenar: aparecen sobre el mapa cuando se elige un cuartel o el altar. */
+  /** Tarjetas para entrenar: aparecen sobre el mapa al elegir un edificio militar, el altar o la herrería. */
   createTrainStrip() {
     const cardW = 182;
-    const cardH = 64;
+    const cardH = 78;
     const y = LAYOUT.barTop - cardH - 10;
     const d = DEPTH.panel - 5;
     this.trainCards = [0, 1, 2].map((i) => {
@@ -715,50 +799,78 @@ export default class BaseScene extends Phaser.Scene {
         .setDepth(d);
       const icon = this.add.image(0, 0, 'unit_soldier').setDepth(d + 1);
       const text = (dy, size, color, bold) =>
-        this.add.text(left + 54, y + dy, '', { fontFamily: FONT, fontSize: size, color, fontStyle: bold ? 'bold' : 'normal' }).setDepth(d + 1);
-      const name = text(8, '13px', '#ffffff', true);
-      const cost = text(27, '11px', TEXT.gold, false);
-      const info = text(44, '11px', '#9fc8ef', false);
-      const card = { rect, icon, name, cost, info, unit: null, ix: left + 28, iy: cy, parts: [rect, icon, name, cost, info] };
+        this.add.text(left + 52, y + dy, '', { fontFamily: FONT, fontSize: size, color, fontStyle: bold ? 'bold' : 'normal' }).setDepth(d + 1);
+      const name = text(6, '13px', '#ffffff', true);
+      const cost = text(24, '11px', TEXT.gold, false);
+      const info = text(40, '11px', '#9fc8ef', false);
+      const stats = text(56, '11px', '#cfe0c8', false);
+      const card = { rect, icon, name, cost, info, stats, unit: null, ix: left + 27, iy: cy, parts: [rect, icon, name, cost, info, stats, this.gloss(rect)] };
       rect.on('pointerdown', () => this.onTrainClick(card.unit));
       for (const p of card.parts) p.setVisible(false);
       return card;
     });
   }
 
-  /** Muestra las unidades que entrena el edificio elegido (o esconde las tarjetas si no entrena). */
+  /** Muestra lo que entrena el edificio elegido (o esconde las tarjetas si no entrena nada). */
   updateTrainStrip(b) {
     const state = store.get();
-    const units = b ? (BUILDINGS[b.type].trains ?? []) : [];
+    const keys = !b ? [] : b.type === 'altar' ? ['__heroes'] : (BUILDINGS[b.type].trains ?? []);
+    const pct = (v) => `${Math.round(v * 100)} %`;
     this.trainCards.forEach((card, i) => {
-      const key = units[i];
+      const key = keys[i];
       card.unit = key ?? null;
       for (const p of card.parts) p.setVisible(Boolean(key));
       if (!key) return;
 
-      const u = UNITS[key];
-      const locked = b.level < u.minLevel;
       const busy = logic.isTraining(b) || logic.isUpgrading(b) || b.damaged;
-      const heroTaken = u.hero && (state.hero || state.buildings.some((x) => x.training?.unit === key));
-      const affordable = logic.canAfford(state, u.cost) && logic.supplyUsed(state) + u.supply <= logic.supplyCap(state);
-      const usable = !locked && !busy && !heroTaken && affordable;
+      const factor = logic.statsOf(b.type, b.level).trainFactor ?? 1;
+      let usable = true;
 
-      this.fitIcon(card.icon, u.sprite, card.ix, card.iy, 38);
-      card.name.setText(u.hero && heroTaken ? `${u.name} (invocado)` : u.name);
-      card.cost.setText(locked ? `Requiere nivel ${u.minLevel}` : logic.formatCost(u.cost));
-      const seconds = u.trainSec * (logic.statsOf(b.type, b.level).trainFactor ?? 1);
-      card.info.setText(`${logic.formatDuration(seconds * 1000)} · Población ${u.supply}`);
+      if (key === '__heroes') {
+        // Un solo botón: abre la ventana de héroes (invocar, escuadra y árboles de poder).
+        this.fitIcon(card.icon, 'unit_hero', card.ix, card.iy, 38);
+        card.name.setText('Héroes');
+        card.cost.setText(`${logic.heroCount(state)}/${HERO_KEYS.length} invocados`);
+        card.info.setText(`Escuadra ${state.squad.length}/2`);
+        card.stats.setText('Toca para elegir');
+      } else if (UNITS[key]) {
+        const u = UNITS[key];
+        const locked = b.level < u.minLevel;
+        const affordable = logic.canAfford(state, u.cost) && logic.supplyUsed(state) + u.supply <= logic.supplyCap(state);
+        usable = !locked && !busy && affordable;
+        const c = logic.unitCombat(state, key);
+        this.fitIcon(card.icon, u.sprite, card.ix, card.iy, 38);
+        card.name.setText(`${u.name} nv. ${logic.unitLevel(state, key)}`);
+        card.cost.setText(locked ? `Pide nivel ${u.minLevel}` : logic.formatCost(u.cost));
+        card.info.setText(`${logic.formatDuration(u.trainSec * factor * 1000)} · Población ${u.supply}`);
+        card.stats.setText(`Vida ${c.hp} · Daño ${c.dmg}`);
+      } else if (RESEARCH[key]) {
+        const r = RESEARCH[key];
+        const level = logic.researchLevel(state, key);
+        const maxed = level >= Math.min(b.level, 10);
+        const step = researchStep(key, level);
+        usable = !maxed && !busy && logic.canAfford(state, step.cost);
+        this.fitIcon(card.icon, key === 'weapons' ? 'unit_knight' : key === 'armor' ? 'wall_3' : 'tower_2', card.ix, card.iy, 38);
+        card.name.setText(`${r.name} ${level}`);
+        card.cost.setText(maxed ? (level >= 10 ? 'Al máximo' : 'Mejora la Herrería') : logic.formatCost(step.cost));
+        card.info.setText(maxed ? '' : logic.formatDuration(step.sec * factor * 1000));
+        card.stats.setText(`Ahora +${pct(level * r.perLevel)}${maxed ? '' : ` → +${pct((level + 1) * r.perLevel)}`}`);
+      }
       for (const p of card.parts) p.setAlpha(usable ? 1 : 0.5);
       card.rect.setStrokeStyle(2, usable ? 0x8cc4f5 : 0x4a6a4a);
     });
   }
 
-  onTrainClick(unit) {
+  onTrainClick(key) {
     const id = this.selectedId;
-    if (id === null || !unit) return;
+    if (id === null || !key) return;
+    if (key === '__heroes') {
+      openHeroPanel(this, id);
+      return;
+    }
     this.doAction(
-      () => logic.startTraining(store.get(), id, unit, Date.now()),
-      (r) => `Entrenando ${UNITS[unit].name}: ${logic.formatDuration(r.endsAt - Date.now())}`,
+      () => logic.startTraining(store.get(), id, key, Date.now()),
+      (r) => `${RESEARCH[key] ? 'Investigando' : 'Entrenando'} ${trainName(key)}: ${logic.formatDuration(r.endsAt - Date.now())}`,
       'upgrade_start',
     );
     this.updatePanel();
@@ -792,6 +904,33 @@ export default class BaseScene extends Phaser.Scene {
     }
   }
 
+  /* ---------- ambiente: viento, humo y fuego ---------- */
+
+  /** Los árboles se mecen con el viento (giran un poco sobre su base). */
+  swayTrees(timeMs) {
+    const t = timeMs / 1000;
+    for (const d of this.decor) {
+      if (d.kind === 'tree' && d.img.visible) d.img.setAngle(Math.sin(t * 1.3 + d.x * 0.9 + d.y * 0.6) * 1.6);
+      else if (d.kind === 'bush' && d.img.visible) d.img.setAngle(Math.sin(t * 1.6 + d.x * 0.7 + d.y) * 1.0);
+    }
+  }
+
+  /** Humo en chimeneas y fogatas, y llamas en los edificios dañados. Se llama cada ~400 ms. */
+  ambientTick() {
+    const ts = tileSize();
+    for (const b of store.get().buildings) {
+      if (!isTileVisible(b.x, b.y, 0)) continue;
+      const c = tileCenter(b.x, b.y);
+      const depth = DEPTH.world + depthOf(b.x, b.y) + 0.5;
+      if (b.damaged) {
+        emberPuff(this, c.x + (Math.random() - 0.5) * ts * 0.4, c.y + ts * 0.1, depth);
+        if (Math.random() < 0.6) smokePuff(this, c.x + (Math.random() - 0.5) * ts * 0.3, c.y - ts * 0.1, depth, { color: 0x3a3430, size: 0.8, rise: ts * 0.9, alpha: 0.6, life: 1900 });
+      } else if (SMOKING.has(b.type) && !logic.isUpgrading(b) && Math.random() < 0.55) {
+        smokePuff(this, c.x + ts * 0.13, c.y - ts * 0.42, depth, { size: 0.55, rise: ts * 0.75 });
+      }
+    }
+  }
+
   /* ---------- aldeanos ---------- */
 
   /** Crea o quita aldeanos para que haya uno por edificio productor, y actualiza su ruta. */
@@ -801,6 +940,7 @@ export default class BaseScene extends Phaser.Scene {
       if (plan.has(id)) continue;
       w.img.destroy();
       w.bundle.destroy();
+      w.shadow.destroy();
       this.workers.delete(id);
     }
     for (const [id, p] of plan) {
@@ -812,7 +952,7 @@ export default class BaseScene extends Phaser.Scene {
           .rectangle(0, 0, 8, 6, p.resource === 'gold' ? COLORS.gold : COLORS.wood)
           .setStrokeStyle(1, 0x000000, 0.7)
           .setVisible(false);
-        w = { id, key, img, bundle, state: createWorker(id), plan: p };
+        w = { id, key, img, bundle, shadow: this.unitShadow(), state: createWorker(id), plan: p };
         this.workers.set(id, w);
       }
       w.plan = p; // el edificio pudo haberse movido
@@ -830,8 +970,10 @@ export default class BaseScene extends Phaser.Scene {
       if (!isTileVisible(Math.round(pos.x), Math.round(pos.y))) {
         w.img.setVisible(false);
         w.bundle.setVisible(false);
+        w.shadow.setVisible(false);
         continue;
       }
+      this.putShadow(w.shadow, pos.x, pos.y, 'unit');
       const bob = pos.moving ? Math.abs(Math.sin(timeMs / 110 + w.id)) * 3 * zoom : 0;
       const dirX = (site.x - home.x) * (w.state.phase === 'back' ? -1 : 1);
 
@@ -851,11 +993,11 @@ export default class BaseScene extends Phaser.Scene {
     }
   }
 
-  /* ---------- ejército y héroe ---------- */
+  /* ---------- ejército y héroes ---------- */
 
   /**
-   * El ejército se ve formado cerca del primer cuartel (o del Ayuntamiento si no hay), y el héroe
-   * junto al altar. Es solo la representación de `state.army` y `state.hero`.
+   * El ejército se ve formado cerca del primer cuartel (o del Ayuntamiento si no hay), y los héroes de la
+   * escuadra junto al altar. Es solo la representación de `state.army` y `state.squad`.
    */
   syncArmy() {
     const state = store.get();
@@ -865,33 +1007,49 @@ export default class BaseScene extends Phaser.Scene {
     this.camp = camp ? { x: camp.x, y: camp.y } : null;
     this.shrine = shrine ? { x: shrine.x, y: shrine.y } : null;
 
-    // Se muestran como mucho 24 unidades para no saturar la pantalla.
+    // Se muestran como mucho 24 unidades para no saturar la pantalla (las armas de asedio, aparte).
     const want = [];
     for (const u of ARMY_UNITS) for (let i = 0; i < (state.army[u] ?? 0) && want.length < 24; i++) want.push(u);
     const signature = want.join(',');
     if (signature !== this.armySignature) {
       this.armySignature = signature;
-      for (const a of this.army ?? []) a.img.destroy();
-      this.army = want.map((type, slot) => ({ type, slot, img: this.add.image(0, 0, UNITS[type].sprite).setVisible(false) }));
+      for (const a of this.army ?? []) {
+        a.img.destroy();
+        a.shadow.destroy();
+      }
+      this.army = want.map((type, slot) => ({ type, slot, img: this.add.image(0, 0, UNITS[type].sprite).setVisible(false), shadow: this.unitShadow() }));
     }
 
-    if (state.hero && !this.heroView) {
-      this.heroView = {
-        img: this.add.image(0, 0, UNITS.hero.sprite).setVisible(false),
-        label: this.add
-          .text(0, 0, '', { fontFamily: FONT, fontSize: '10px', color: '#ffe9a0', fontStyle: 'bold', stroke: '#000000', strokeThickness: 3 })
-          .setOrigin(0.5)
-          .setVisible(false),
-      };
-    } else if (!state.hero && this.heroView) {
-      this.heroView.img.destroy();
-      this.heroView.label.destroy();
-      this.heroView = null;
+    // Héroes de la escuadra (como mucho 2).
+    const squad = logic.squadHeroes(state);
+    for (const [key, v] of this.heroViews) {
+      if (squad.some((h) => h.key === key)) continue;
+      v.img.destroy();
+      v.label.destroy();
+      v.shadow.destroy();
+      this.heroViews.delete(key);
     }
-    if (this.heroView) this.heroView.label.setText(`Héroe nv. ${state.hero.level}`);
+    squad.forEach((h, slot) => {
+      let v = this.heroViews.get(h.key);
+      if (!v) {
+        v = {
+          slot,
+          img: this.add.image(0, 0, HEROES[h.key].sprite).setVisible(false),
+          shadow: this.unitShadow(),
+          label: this.add
+            .text(0, 0, '', { fontFamily: FONT, fontSize: '10px', color: '#ffe9a0', fontStyle: 'bold', stroke: '#000000', strokeThickness: 3 })
+            .setOrigin(0.5)
+            .setVisible(false),
+        };
+        this.heroViews.set(h.key, v);
+      }
+      v.slot = slot;
+      v.key = h.key;
+      v.label.setText(`${HEROES[h.key].name} nv. ${h.level}`);
+    });
   }
 
-  /** Coloca (cada cuadro) al ejército en formación y al héroe, con un leve balanceo. */
+  /** Coloca (cada cuadro) al ejército en formación y a los héroes, con un leve balanceo. */
   animateArmy(timeMs) {
     const zoom = view.zoom;
     if (this.camp) {
@@ -902,24 +1060,29 @@ export default class BaseScene extends Phaser.Scene {
         const y = this.camp.y + 0.55 + row * 0.36;
         if (!isTileVisible(Math.round(x), Math.round(y))) {
           a.img.setVisible(false);
+          a.shadow.setVisible(false);
           continue;
         }
+        this.putShadow(a.shadow, x, y, 'unit');
         const sway = Math.sin(timeMs / 700 + a.slot * 1.7) * 1.2 * zoom;
         this.placeOnTile(a.img, UNITS[a.type].sprite, x, y, WORKER_GROW).setDepth(DEPTH.world + y + 0.55).setVisible(true);
         a.img.x += sway;
       }
     }
-    const h = this.heroView;
-    if (h && this.shrine) {
-      const x = this.shrine.x + 0.55;
+    if (!this.shrine) return;
+    for (const [key, h] of this.heroViews) {
+      const x = this.shrine.x + 0.55 + h.slot * 0.7;
       const y = this.shrine.y + 1.25;
+      const sprite = HEROES[key].sprite;
       const visible = isTileVisible(Math.round(x), Math.round(y));
       h.img.setVisible(visible);
       h.label.setVisible(visible);
+      if (!visible) h.shadow.setVisible(false);
       if (visible) {
-        this.placeOnTile(h.img, UNITS.hero.sprite, x, y, WORKER_GROW * 1.35).setDepth(DEPTH.world + y + 0.6);
-        h.img.y -= Math.abs(Math.sin(timeMs / 600)) * 2 * zoom;
-        const headroom = contentBounds(this.textures, UNITS.hero.sprite).h * spriteScale() * WORKER_GROW * 1.35;
+        this.putShadow(h.shadow, x, y, 'unit', 1.5);
+        this.placeOnTile(h.img, sprite, x, y, WORKER_GROW * 1.35).setDepth(DEPTH.world + y + 0.6);
+        h.img.y -= Math.abs(Math.sin(timeMs / 600 + h.slot)) * 2 * zoom;
+        const headroom = contentBounds(this.textures, sprite).h * spriteScale() * WORKER_GROW * 1.35;
         h.label.setPosition(h.img.x, h.img.y - headroom - 6 * zoom).setScale(zoom).setDepth(h.img.depth + 0.01);
       }
     }
@@ -963,31 +1126,42 @@ export default class BaseScene extends Phaser.Scene {
 
     if (b.type === 'townhall') {
       const lim = (type, label) => `${label} ${logic.countOf(state, type)}/${logic.limitFor(state, type)}`;
-      lines.push(`${lim('mine', 'Minas')} · ${lim('sawmill', 'Aserraderos')} · ${lim('farm', 'Granjas')}`);
-      lines.push(`${lim('storage', 'Almacenes')} · ${lim('barracks', 'Cuarteles')} · ${lim('altar', 'Altar')}`);
-      lines.push(`${lim('tower', 'Torres')} · ${lim('wall', 'Muros')} · ${lim('gate', 'Puertas')}`);
+      lines.push(`${lim('mine', 'Minas')} · ${lim('sawmill', 'Aserraderos')} · ${lim('house', 'Casas')}`);
+      lines.push(`${lim('storage', 'Almacenes')} · ${lim('tower', 'Torres')} · ${lim('wall', 'Muros')}`);
+      const unlocked = ['barracks', 'archery', 'atelier', 'stable', 'siege'].filter((t) => logic.limitFor(state, t) > 0).length;
+      lines.push(`Militar ${unlocked}/5 tipos · Héroes hasta el nivel ${logic.heroLevelCap(state)}`);
       return lines;
     }
 
-    const own = {
-      barracks: `Entrena: ${logic.trainableUnits(b).map((u) => UNITS[u].name).join(', ')}${
-        stats.trainFactor ? ` · ${Math.round((1 - stats.trainFactor) * 100)} % más rápido` : ''
-      }`,
-      altar: state.hero
-        ? `Héroe nivel ${state.hero.level} · ${state.hero.level >= HERO_MAX_LEVEL ? 'nivel máximo' : `experiencia ${state.hero.xp}/${heroXpToNext(state.hero.level)}`}`
-        : 'Invoca a tu héroe (solo puede haber uno)',
-      wall: 'Bloquea el paso (en el combate frenará al enemigo)',
-      gate: 'Paso para tus unidades (en el combate)',
-      tower: 'Defensa: se activa en la fase de combate',
-    }[b.type];
+    const unitKinds = BUILDINGS[b.type].trains?.filter((k) => UNITS[k]) ?? [];
+    let own = null;
+    if (unitKinds.length) {
+      const c = logic.unitCombat(state, unitKinds[0]);
+      const faster = stats.trainFactor ? ` · ${Math.round((1 - stats.trainFactor) * 100)} % más rápido` : '';
+      own = `Unidades nivel ${logic.unitLevel(state, unitKinds[0])}: vida ${c.hp}, daño ${c.dmg}${faster}`;
+    } else if (b.type === 'forge') {
+      const r = (k, label) => `${label} ${logic.researchLevel(state, k)}`;
+      own = `${r('weapons', 'Armas')} · ${r('armor', 'Armaduras')} · ${r('fortify', 'Fortif.')} (máx. nv. ${b.level})`;
+    } else if (b.type === 'altar') {
+      own = `Héroes ${logic.heroCount(state)}/${HERO_KEYS.length} · escuadra ${state.squad.length}/2 · invocas con el Altar nv. ${b.level}`;
+    } else {
+      own = {
+        wall: 'Bloquea el paso y frena al enemigo',
+        gate: 'Paso para tus unidades',
+        tower: 'Dispara a los atacantes de tu base',
+      }[b.type];
+    }
     lines.push(own ?? describe(stats) ?? '');
 
     if (!next) lines.push('Nivel máximo');
     else if (b.level >= logic.townHallLevel(state)) lines.push(`Para el nivel ${b.level + 1}, sube antes el Ayuntamiento`);
-    else if (b.type === 'barracks') {
-      const unlocks = (BUILDINGS.barracks.trains ?? []).filter((u) => UNITS[u].minLevel === b.level + 1).map((u) => UNITS[u].name);
+    else if (unitKinds.length) {
+      const unlocks = unitKinds.filter((u) => UNITS[u].minLevel === b.level + 1).map((u) => UNITS[u].name);
       const faster = next.trainFactor ? `entrena ${Math.round((1 - next.trainFactor) * 100)} % más rápido` : null;
-      lines.push(`Nivel ${b.level + 1}: ${unlocks.length ? `desbloquea ${unlocks.join(', ')}` : (faster ?? 'más resistencia')}`);
+      lines.push(`Nivel ${b.level + 1}: ${unlocks.length ? `desbloquea ${unlocks.join(', ')}` : `unidades más fuertes${faster ? `, ${faster}` : ''}`}`);
+    } else if (b.type === 'altar') {
+      const heroes = HERO_KEYS.filter((k) => HEROES[k].altarLevel === b.level + 1).map((k) => HEROES[k].name);
+      lines.push(`Nivel ${b.level + 1}: ${heroes.length ? `desbloquea a ${heroes.join(', ')}` : 'más resistencia'}`);
     } else lines.push(`Nivel ${b.level + 1}: ${describe(next) ?? 'más resistencia'}`);
     return lines;
   }
@@ -1019,8 +1193,8 @@ export default class BaseScene extends Phaser.Scene {
       return;
     }
     if (logic.isTraining(b)) {
-      const unit = UNITS[b.training.unit];
-      detail.setText(`Entrenando ${unit.name}…\nTermina en ${logic.formatDuration(b.training.endsAt - Date.now())}`);
+      const verb = RESEARCH[b.training.unit] ? 'Investigando' : HEROES[b.training.unit] ? 'Invocando a' : 'Entrenando';
+      detail.setText(`${verb} ${trainName(b.training.unit)}…\nTermina en ${logic.formatDuration(b.training.endsAt - Date.now())}`);
       hideButton();
       return;
     }
@@ -1182,6 +1356,7 @@ export default class BaseScene extends Phaser.Scene {
         store.commit();
         const c = tileCenter(b.x, b.y);
         this.floatText(c.x, c.y - tileSize() / 2, `+${r.amount}`, r.resource === 'gold' ? TEXT.gold : TEXT.wood);
+        sparkBurst(this, c.x, c.y - tileSize() * 0.2, DEPTH.ghost - 5, r.resource === 'gold' ? 0xffe08a : 0xe0b070);
         this.play('collect');
       } else {
         this.play('select');
@@ -1330,10 +1505,22 @@ export default class BaseScene extends Phaser.Scene {
       if (e.type === 'upgraded') {
         out.push(`${logic.displayName(e.building, e.level)}: ¡mejora completada! Nivel ${e.level}`);
         finished = true;
+        const done = store.get().buildings.find((x) => x.id === e.id);
+        if (done && isTileVisible(done.x, done.y, 0)) {
+          const c = tileCenter(done.x, done.y);
+          sparkBurst(this, c.x, c.y - tileSize() * 0.2, DEPTH.ghost - 5, 0x9fd8ff, 14);
+        }
       } else if (e.type === 'raid') {
-        this.openRaidReport(e.report); // se muestra tras recorrer los demás avisos
+        if (e.report.live && e.report.replay) this.startDefense(e.report); // llegó mientras jugabas: se ve la pelea
+        else this.openRaidReport(e.report); // llegó mientras no estabas: solo el informe
       } else if (e.type === 'trained') {
-        out.push(e.unit === 'hero' ? '¡Tu héroe ha llegado!' : `${UNITS[e.unit].name} listo para el combate`);
+        out.push(
+          HEROES[e.unit]
+            ? `¡${HEROES[e.unit].name} ha llegado!`
+            : RESEARCH[e.unit]
+              ? `Investigación completada: ${RESEARCH[e.unit].name}`
+              : `${trainName(e.unit)} listo para el combate`,
+        );
         finished = true;
       }
     }
@@ -1373,7 +1560,8 @@ export default class BaseScene extends Phaser.Scene {
         .setOrigin(0.5)
         .setDepth(depth + 0.4);
       const bar = this.add.graphics().setDepth(depth + 0.4);
-      this.views.set(b.id, { type: b.type, objects: [sprite, crate, badge, level, sub, bar], sprite, crate, badge, level, sub, bar, depth });
+      const shadow = this.add.image(0, 0, 'fx_shadow').setDepth(DEPTH.shadow);
+      this.views.set(b.id, { type: b.type, objects: [sprite, crate, badge, level, sub, bar, shadow], sprite, crate, badge, level, sub, bar, shadow, depth });
 
       if (!this.firstBuild) {
         // Un edificio nuevo «salta» al aparecer y levanta polvo.
@@ -1394,6 +1582,7 @@ export default class BaseScene extends Phaser.Scene {
     this.updateHud();
     this.updateQuestBanner();
     this.updateRaidBanner();
+    this.achievementDot.setVisible(claimableCount(store.get()) > 0);
     this.syncWorkers();
     this.syncArmy();
     if (this.selectedId !== null) this.updatePanel();
@@ -1445,6 +1634,10 @@ export default class BaseScene extends Phaser.Scene {
       const visible = isTileVisible(d.x, d.y) && !occupied.has(`${d.x},${d.y}`);
       d.img.setVisible(visible);
       if (visible) this.placeOnTile(d.img, d.key, d.x, d.y, DECOR_GROW);
+      if (d.shadow) {
+        if (visible) this.putShadow(d.shadow, d.x, d.y, d.kind);
+        else d.shadow.setVisible(false);
+      }
     }
 
     for (const b of state.buildings) {
@@ -1478,6 +1671,7 @@ export default class BaseScene extends Phaser.Scene {
         else grow *= 0.55 + 0.45 * (1 - (1 - k) ** 3) + 0.14 * Math.sin(k * Math.PI);
       }
       this.placeOnTile(v.sprite, stats.sprite, b.x, b.y, grow);
+      this.putShadow(v.shadow, b.x, b.y, 'building', b.type === 'wall' || b.type === 'gate' ? 0.8 : 1, this.movingId === b.id ? 0.4 : 1);
       if (b.damaged) v.sprite.setTint(DAMAGED_TINT); // dañado: oscuro y chamuscado
       else if (stats.tint) v.sprite.setTint(stats.tint); // los niveles 4 y 5 se ven dorados
       else v.sprite.clearTint();
@@ -1504,7 +1698,7 @@ export default class BaseScene extends Phaser.Scene {
         v.bar.fillStyle(COLORS.progress, 1).fillRect(bx, by, bw * (1 - remaining / total), bh);
         v.sub.setText(logic.formatDuration(remaining));
       } else if (logic.isTraining(b)) {
-        const total = UNITS[b.training.unit].trainSec * 1000 * (stats.trainFactor ?? 1);
+        const total = (logic.trainSecOf(state, b.training.unit) ?? 1) * 1000 * (stats.trainFactor ?? 1);
         const remaining = Math.max(0, b.training.endsAt - Date.now());
         v.bar.fillStyle(0xffb86b, 1).fillRect(bx, by, bw * (1 - remaining / total), bh);
         v.sub.setText(logic.formatDuration(remaining));
@@ -1576,6 +1770,10 @@ export default class BaseScene extends Phaser.Scene {
 
     this.animateWorkers(Math.min(delta, 250) / 1000, this.time.now);
     this.animateArmy(this.time.now);
+    stepClouds(this.clouds, Math.min(delta, 250) / 1000);
+    const up = this.panel.upgradeBtn;
+    this.upgradeGloss.setVisible(up.visible).setAlpha(up.alpha);
+    this.swayTrees(this.time.now);
 
     if (this.pop.size) this.viewDirty = true; // hay animaciones de construcción en curso
     if (this.viewDirty) {

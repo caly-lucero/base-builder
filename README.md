@@ -8,36 +8,46 @@ Prototipo de juego de estrategia con construcción de base (un jugador), hecho c
 Cada vez que se sube algo a la rama `main`, GitHub corre las pruebas, compila y publica solo (ver `.github/workflows/deploy.yml`); si una prueba falla, no se publica. La partida se guarda **en el navegador de cada dispositivo**: la versión online y la de `localhost` tienen partidas separadas (se pueden pasar con *Exportar/Importar partida*).
 
 ## Qué hay hoy
-- **Mapa de 24×24** que se ve por una ventana: se desplaza y se hace zoom (ver *Controles*).
+- **Mapa de 24×24** que se ve por una ventana: se desplaza y se hace zoom (ver *Controles*), con terreno de colores variados, sombras, nubes, humo de chimeneas, fuego en lo dañado y efectos al recolectar, mejorar y combatir.
 - **Dos recursos, como en Warcraft III: oro y madera.** La **Mina de oro** produce oro y el **Aserradero** madera; tócalos para recolectar. Casi todo cuesta oro y madera.
-- **Ayuntamiento** (ya viene en la partida, no se construye ni se demuele; se puede mover). Sube hasta el **nivel 5** y cambia de nombre: Ayuntamiento → Fortaleza → Castillo → Ciudadela → Capital. **Su nivel manda**:
-  - cuántos edificios de cada tipo puedes tener (p. ej. 3 minas con el nivel 1, 5 con el 2, 8 con el 3);
-  - hasta qué nivel puedes mejorar el resto (un edificio nunca pasa del nivel del Ayuntamiento).
-- **Almacén**: sube el tope de oro **y** de madera. **Torre**: aún sin función (defensa en la fase de combate).
-- **5 niveles**: todos los edificios (menos el altar) suben hasta el nivel 5. Los niveles 4 y 5 son «élite»: más producción, capacidad, población o velocidad de entrenamiento (los cuarteles de nivel 4 y 5 entrenan un 20 % y un 40 % más rápido), y se ven **dorados**. El nivel máximo de un edificio sigue limitado por el del Ayuntamiento.
-- **Muros**: cuestan solo madera y se pintan arrastrando. **Los muros y puertas que quedan uno junto a otro se dibujan unidos, como una sola pared** (también en el mapa enemigo). Hoy solo ocupan casilla; en el combate frenarán al enemigo.
-- **Mejoras con temporizador**: cada mejora cuesta recursos y **tarda tiempo real**; mientras se mejora, el edificio no produce. Hay 2 «obreros» (2 mejoras a la vez, el Ayuntamiento también usa uno).
-- **Mover edificios** arrastrándolos (gratis).
-- **Demoler**: devuelve el 50 % de lo invertido (construcción + mejoras).
-- La producción y las mejoras **siguen mientras no juegas** (máximo 8 h de producción); al volver, el juego avisa qué terminó.
-- **Población, como en Warcraft III.** El Ayuntamiento da algo de población y cada **Granja** suma más; las unidades la ocupan desde que empiezan a entrenarse. El HUD muestra «Población 3/11»: sin espacio libre no se entrena, y no se demuele una granja que sostiene al ejército.
-- **Cuartel** (3 niveles): entrena **Soldados** (nivel 1), **Hechiceros** (nivel 2) y **Caballeros** (nivel 3). Cada unidad cuesta oro y madera, ocupa población y **tarda tiempo real** en entrenarse, también sin conexión. Se entrena de a una por cuartel: al elegirlo aparecen sobre el mapa las tarjetas de cada unidad.
-- **Altar del héroe** (pide el Ayuntamiento en nivel 2 y solo permite uno): invoca a tu **Héroe**, que ocupa 3 de población y aparece junto al altar con su nivel. Hoy no hace nada más; sus niveles y habilidades llegan con el combate.
-- **El ejército se ve**: las unidades entrenadas se forman junto al primer cuartel (como máximo se dibujan 24).
-- **Combate y campaña (botón ⚔)**: ataca bases enemigas generadas (Campaña 1, 2, 3…, cada una más dura: más torres, defensores, vida y un anillo de muros que al principio tiene huecos y desde el nivel 7 es cerrado).
-  - **Automático con control de grupos**: tus unidades pelean solas (primero los enemigos cercanos, luego el edificio más cercano; los muros se rodean o se rompen). Tú puedes **elegir un grupo** (Todos, Soldados, Hechiceros, Caballeros, Héroe, tocando una unidad o con el recuadro ▭) y **darle un objetivo**: tocar un enemigo o edificio para atacarlo, o el suelo para moverlo. Al cumplir la orden vuelven al modo automático; **Auto** las devuelve de inmediato.
+- **Todos los edificios llegan al nivel 10.** Del nivel 4 en adelante reutilizan el dibujo del 3 con un **tinte propio por nivel** (dorado, verde, celeste, violeta, rosa, naranja), así se ve de un vistazo qué tan avanzado está. Las mejoras **tardan tiempo real** (hasta 12 h las últimas) y mientras se mejora el edificio no produce. Hay 2 «obreros» (2 mejoras a la vez, el Ayuntamiento también usa uno).
+- **Ayuntamiento** (ya viene en la partida; se puede mover, no se construye ni se demuele). Sube del nivel 1 al 10: Ayuntamiento → Fortaleza → Castillo → Ciudadela → Capital → Reino → Imperio → Dominio → Trono → Corona. **Su nivel manda**:
+  - cuántos edificios de cada tipo puedes tener;
+  - hasta qué nivel puedes mejorar el resto (un edificio nunca pasa del nivel del Ayuntamiento);
+  - **qué edificios militares se desbloquean**: Cuartel (nivel 2), Arquería (4), Atelier (6), Caballeriza (8) y Taller de asedio (10);
+  - el **nivel máximo de tus héroes: el doble** (hasta 20).
+- **Casas** (antes «granjas»): dan población. El Ayuntamiento da algo de población propia; cada unidad y cada héroe ocupan la suya desde que empiezan a entrenarse. Sin espacio libre no se entrena, y no se demuele una casa que sostiene al ejército.
+- **Cinco edificios militares, cada uno con su unidad.** Su **nivel es el de sus unidades**: a más nivel, más vida y daño (+15 % por nivel) y, desde el nivel 4, entrena más rápido.
+  | Edificio | Unidad | Papel |
+  |---|---|---|
+  | Cuartel | Soldado | barato y resistente; vence a los caballeros |
+  | Arquería | Arquero | dispara desde lejos; parejo con soldados y magos, pierde con caballeros |
+  | Atelier | Hechicero | daño en área; rompe soldados agrupados |
+  | Caballeriza | Caballero | rápido y duro; arrasa arqueros y magos, pierde con soldados |
+  | Taller de asedio | Catapulta (nivel 1) y Ariete (nivel 5) | van a por los edificios y casi no dañan unidades |
+  Hay una prueba que enfrenta ejércitos de igual costo y vigila que ninguna unidad gane a todas ni pierda contra todas.
+- **Herrería** (Ayuntamiento 3): investiga tres mejoras de hasta el nivel de la herrería (máx. 10): **Armas afiladas** (+6 % de daño por nivel), **Armaduras** (+6 % de vida) y **Fortificaciones** (+8 % de vida de edificios y de daño de torres, en la defensa). Cuestan, tardan y siguen aunque no estés.
+- **Cinco héroes** en el **Altar** (cada uno pide un nivel de altar: Paladín 1, Cazadora 2, Sacerdotisa 4, Piromante 6, Comandante 8). Puedes tener varios, pero **solo 2 salen a pelear**: se elige la escuadra en la ventana *Héroes* (tarjeta del Altar). Cada uno tiene **dos árboles de poder que se desbloquean solos al subir de nivel**:
+  - **Árbol 1 · Habilidad** (rangos en los niveles 1, 7, 13 y 19): Escudo sagrado, Lluvia de flechas, Sanación, Bola de fuego o Grito de guerra. Se lanza sola cuando vale la pena, o a mano tocando el botón del héroe en la batalla.
+  - **Árbol 2 · Pasivas** (niveles 3, 6, 10, 14 y 18): vida, daño, velocidad, armadura y regeneración.
+  - Ganan experiencia siempre que pelean (6 por edificio, 4 por baja, bono por ganar) y **su nivel no pasa del doble del Ayuntamiento**: al llegar al tope guardan la experiencia hasta que lo subas.
+- **Combate y campaña (botón ⚔)**: ataca bases enemigas generadas (Campaña 1, 2, 3…, cada una más dura).
+  - **Automático con control de grupos**: tus unidades pelean solas (primero los enemigos cercanos, luego el edificio más cercano; los muros se rodean o se rompen). Tú puedes **elegir un grupo** (Todos, Soldados, Arqueros, Magos, Caballeros, Asedio, Héroes, tocando una unidad o con el recuadro ▭) y **darle un objetivo**: tocar un enemigo o edificio para atacarlo, o el suelo para moverlo. Al cumplir la orden vuelven al modo automático; **Auto** las devuelve de inmediato.
   - Se gana destruyendo el Ayuntamiento enemigo; se pierde si caen todas tus tropas, se acaba el tiempo (3 min) o tocas **Retirada** (dos toques). Hay botón de velocidad ×2.
-  - **Resultado**: las tropas caídas se pierden (el héroe no), el botín entra sin pasar el tope y el **héroe gana experiencia siempre que pelea**: 6 XP por cada edificio destruido y 4 por cada defensor derrotado, más un bono por ganar. Al juntar la necesaria (100 × su nivel) **sube de nivel** (más vida y daño, hasta el 10). Su progreso se ve en el panel del altar y en la pantalla de resultado. Ganar el nivel que toca avanza la campaña.
-- **Ataques enemigos a tu base**: cada 12 minutos (el primero a los 10) llega una oleada. Un cartel rojo, bajo el de la misión, muestra la **cuenta regresiva** y la fuerza del ataque (crece con el Ayuntamiento y con la campaña superada). Se resuelve sola con la misma simulación del combate, también si no estás: **tus torres, muros, ejército y héroe defienden** (las tropas no mueren al defender). El enemigo se retira tras destruir `2 + nivel del Ayuntamiento` edificios. Un **informe** te cuenta cómo fue:
-  - los edificios destruidos quedan **dañados** (oscuros, con la etiqueta «Dañado»): no producen, no entrenan ni mejoran hasta **repararlos**, por una parte de lo invertido (30 %). Tócalos y pulsa *Reparar*, o toca el cartel rojo para **reparar todo** (en orden, mientras alcancen los recursos);
+  - **Resultado**: las tropas caídas se pierden (los héroes no), el botín entra sin pasar el tope y los héroes de la escuadra ganan experiencia. Ganar el nivel que toca avanza la campaña.
+- **Ataques enemigos a tu base**: cada 12 minutos (el primero a los 10) llega una oleada. Un cartel rojo muestra la **cuenta regresiva** y la fuerza del ataque (crece con el Ayuntamiento y con la campaña superada). **Si estás jugando, ves la defensa en vivo** (tus torres, muros, tropas y héroes pelean solos, puedes lanzar las habilidades o **saltar la defensa**); si estabas fuera, solo ves el informe. El enemigo se retira tras destruir `2 + nivel del Ayuntamiento` edificios, y el informe cuenta cómo fue:
+  - los edificios destruidos quedan **dañados** (oscuros, con la etiqueta «Dañado»): no producen, no entrenan ni mejoran hasta **repararlos**, por una parte de lo invertido (30 %). Tócalos y pulsa *Reparar*, o toca el cartel rojo para **reparar todo**;
   - te roban un porcentaje del oro y la madera (más si cae el Ayuntamiento, que nunca queda dañado);
-  - el héroe gana XP por cada atacante derrotado y un bono si rechazas la oleada.
-  Mientras tú atacas, las oleadas quedan en pausa. Si estuviste fuera mucho tiempo, solo se resuelve una.
-- **Puertas**: como un muro con paso (en el combate dejarán pasar a tus unidades).
-- **Barra por páginas**: *Economía* (mina, aserradero, granja, almacén, muro) y *Militar* (cuartel, altar, torre, puerta). El botón de la derecha cambia de página.
-- **Misiones**: una cadena de 17 objetivos que guía la partida («Construye un Aserradero», «Ten 2 Minas de oro», «Sube el Ayuntamiento a Fortaleza»…). El cartel de arriba a la izquierda muestra la actual y su avance; al cumplirla se pone verde y la tocas para **reclamar el premio**. Se hacen en orden; los premios no pasan del tope de recursos.
-- **Vida**: un **aldeano** por cada mina y aserradero camina entre el Ayuntamiento y su edificio llevando la carga (es adorno: no cambia la economía). Al recolectar suben números flotantes (+120); al construir, el edificio «salta» con una nube de polvo.
-- **Arte y sonido (Kenney, CC0)**: terreno, edificios con un dibujo distinto por nivel, adornos (árboles, rocas, arbustos), aldeanos, 10 efectos de sonido y botón **Sonido: sí/no**.
+  - los héroes ganan XP por cada atacante derrotado y un bono si rechazas la oleada.
+  Tus tropas no mueren al defender, las armas de asedio no defienden, y las **Fortificaciones** de la herrería refuerzan edificios y torres. Mientras tú atacas, las oleadas quedan en pausa; si estuviste fuera mucho tiempo, solo se resuelve una.
+- **Muros y puertas**: los muros cuestan solo madera y se pintan arrastrando; **los que quedan uno junto a otro se dibujan unidos, como una sola pared**. Las puertas son un muro con paso.
+- **Barra por páginas**: *Economía* (mina, aserradero, casa, almacén, muro), *Ejército* (cuartel, arquería, atelier, caballeriza, taller de asedio) y *Defensa* (torre, puerta, altar, herrería). El botón de la derecha cambia de página.
+- **Misiones**: una cadena de 32 objetivos que guía la partida («Construye un Aserradero», «Sube el Ayuntamiento a Fortaleza», «Construye una Herrería»…). El cartel de arriba a la izquierda muestra la actual; al cumplirla se pone verde y la tocas para **reclamar el premio**.
+- **Logros** (botón 🏆, con un punto rojo cuando hay premio): 11 familias con varios niveles (Constructor, Muralla, Gran ciudad, Obra maestra, Gran ejército, Señor del asedio, Conquistador, Colección de héroes, Leyenda, Herrero, Superviviente). Se reclaman de a un nivel y los premios crecen mucho.
+- **Mover edificios** arrastrándolos (gratis). **Demoler** devuelve el 50 % de lo invertido.
+- La producción, las mejoras, el entrenamiento y las investigaciones **siguen mientras no juegas** (máximo 8 h de producción); al volver, el juego avisa qué terminó.
+- **Vida**: un **aldeano** por cada mina y aserradero camina entre el Ayuntamiento y su edificio llevando la carga (es adorno). Al recolectar suben números flotantes y chispas; al construir, el edificio «salta» con una nube de polvo; los árboles se mecen con el viento.
+- **Arte y sonido**: terreno, edificios con un dibujo distinto por nivel, adornos, aldeanos, unidades y héroes (Kenney, CC0; los edificios nuevos son recolores de esos dibujos y las armas de asedio y los muros están dibujados para el proyecto), 10 efectos de sonido y botón **Sonido: sí/no**.
 - Guardado automático, exportar/importar partida y funcionamiento sin conexión.
 
 ## Controles
@@ -47,8 +57,11 @@ Cada vez que se sube algo a la rama `main`, GitHub corre las pruebas, compila y 
 | Muros | elegir **Muro** y arrastrar | igual |
 | Seleccionar / recolectar | tocar un edificio (abre su panel) | igual |
 | Entrenar | elegir un cuartel o el altar y tocar la tarjeta de la unidad | igual |
-| Cambiar de página de la barra | botón de la derecha (Economía ▶ / Militar ▶) | igual |
+| Cambiar de página de la barra | botón de la derecha (Economía ▶ / Ejército ▶ / Defensa ▶) | igual |
 | Atacar | botón ⚔ y «Atacar» | igual |
+| Logros | botón 🏆 | igual |
+| Héroes | elegir el Altar y tocar la tarjeta «Héroes» | igual |
+| En batalla: habilidad de un héroe | botón con su cara, a la derecha | igual |
 | En batalla: elegir tropas | botones de abajo, tocar una unidad, o ▭ y arrastrar un recuadro | igual |
 | En batalla: ordenar | tocar un enemigo (atacar) o el suelo (mover) | igual |
 | Mover un edificio | arrastrarlo a otra casilla (verde = se puede, rojo = no) | igual |
@@ -69,6 +82,7 @@ npm test           # pruebas de lógica, guardado, cámara y assets
 npm run build      # genera dist/ (con CSP y service worker)
 npm run preview    # sirve dist/ en http://localhost:4173
 npm run walls      # regenera los sprites de los muros (public/assets/art/wall_*.png)
+npm run siege      # regenera los sprites de la catapulta y el ariete
 npm run icons      # regenera los iconos de la PWA
 ```
 En Windows PowerShell, si `npm` da error de «ejecución de scripts deshabilitada», usa `npm.cmd` (o permite scripts firmados con `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`).
@@ -84,9 +98,14 @@ En Windows PowerShell, si `npm` da error de «ejecución de scripts deshabilitad
 - `src/game/battle.js` — simulación de la batalla (pura y determinista): objetivos automáticos, órdenes, torres, botín y fin.
 - `src/game/pathfinding.js` — A* sobre la cuadrícula (los muros cuestan más: se rodean, pero se pueden atravesar rompiéndolos).
 - `src/game/missions.js` — genera la base enemiga de cada nivel de campaña.
+- `src/data/heroes.js` — los 5 héroes, sus dos árboles de poder, estadísticas y nivel máximo.
+- `src/game/achievements.js` — logros: cómo se mide cada uno y cómo se reclaman.
+- `src/game/terrain.js` — color y dibujo del césped de cada casilla (ruido determinista).
 - `src/game/raids.js` — ataques enemigos a tu base: fuerza y generación de oleadas, calendario, daño, robo y reparación del informe.
 - `src/game/campaign.js` — aplica el resultado de una batalla (bajas, botín, campaña, experiencia del héroe).
-- `src/scenes/BattleScene.js` — escena de la batalla: dibujo, selección, órdenes y pantalla de resultado.
+- `src/scenes/BattleScene.js` — escena de la batalla (tuya o la defensa de tu base): dibujo, selección, órdenes, habilidades y resultado.
+- `src/scenes/heroPanel.js`, `src/scenes/achievementsPanel.js` — las ventanas de héroes y de logros.
+- `src/scenes/look.js` — aspecto: texturas generadas por código, sombras, viñeta, nubes, humo y brillo de la interfaz.
 - `src/game/quests.js` — misiones: progreso (calculado, no guardado) y reclamo de premios. Los datos están en `QUESTS` de `config.js`.
 - `src/game/workers.js` — rutas y tiempos de los aldeanos (lógica pura; el dibujo está en la escena).
 - `src/game/decor.js` — adornos del mapa generados con semilla fija (no se guardan).
@@ -111,25 +130,26 @@ Arte y sonido de [Kenney](https://kenney.nl) (packs Medieval RTS, Interface Soun
 ## Limitaciones conocidas
 - Abrir el juego en dos pestañas a la vez: la última en guardar gana.
 - Las pruebas de PWA se hicieron a mano (instalación, sin conexión); falta pasar **Lighthouse**.
-- El pellizco con dos dedos está implementado pero **no se ha probado en un móvil real** (solo con ratón y teclado).
+- El pellizco con dos dedos, el recuadro de selección y los botones de habilidad **no se han probado en un móvil real** (solo con ratón y teclado).
 - Las mejoras usan la hora del sistema: adelantar el reloj las termina antes. El juego limita el daño (una mejora nunca puede quedar más lejos que su duración total), pero no puede impedirlo del todo; es aceptable sin ranking.
-- Si cambia el formato del guardado, subir `SAVE_VERSION` y añadir el paso en `migrate()` de `save.js`. Ejemplos: v1→v2 (niveles), v2→v3 (mapa 12×12 → 24×24, madera y Ayuntamiento), v3→v4 (misiones), v4→v5 (ejército, héroe y entrenamiento) v5→v6 (campaña y experiencia del héroe) y v6→v7 (ataques enemigos y edificios dañados). Una base avanzada que se migra tendrá varias misiones ya cumplidas y podrá reclamarlas.
+- Si cambia el formato del guardado, subir `SAVE_VERSION` y añadir el paso en `migrate()` de `save.js`. Ejemplos: v1→v2 (niveles), v2→v3 (mapa 12×12 → 24×24, madera y Ayuntamiento), v3→v4 (misiones), v4→v5 (ejército, héroe y entrenamiento), v5→v6 (campaña y experiencia), v6→v7 (ataques enemigos y edificios dañados) y v7→v8 (casas, nuevas unidades, 5 héroes con escuadra, herrería y logros). Una base avanzada que se migra tendrá varias misiones ya cumplidas y podrá reclamarlas.
 - Los sonidos son `.ogg`: algunos navegadores antiguos de Apple no los reproducen (el juego funciona igual, sin sonido).
 - El lienzo es de 576 px de ancho y se escala a la pantalla; en pantallas grandes los dibujos se ven algo suavizados.
 - Los enlaces entre muros usan solo dos piezas por nivel (horizontal y vertical): en esquinas y cruces se ven bien, pero no hay un dibujo especial para cada forma.
-- Los niveles 4 y 5 reutilizan el dibujo del nivel 3 con un tinte dorado; no tienen arte propio.
-- Las unidades del ejército y el héroe están quietos (se balancean un poco); solo los aldeanos caminan. No tienen estadísticas de combate todavía.
-- Los cuarteles entrenan de a una unidad por vez; no hay cola de entrenamiento.
+- Los niveles 4 a 10 reutilizan el dibujo del nivel 3 con un tinte; no tienen arte propio. Los edificios militares nuevos, las casas y la herrería son **recolores** de edificios del pack (se distinguen por el color y la forma, pero no tienen un dibujo único); algunos comparten silueta.
+- Los cinco héroes comparten dibujo con los demás soldados del pack, con otro color: se parecen entre sí.
+- Las unidades del ejército y los héroes están quietos en la base (se balancean un poco); solo los aldeanos caminan.
+- Los edificios entrenan de a una unidad por vez; no hay cola de entrenamiento. Solo cuenta el edificio de mayor nivel de cada tipo para el nivel de las unidades; tener varios solo ayuda a entrenar más a la vez.
 - Una batalla en curso no se guarda: si cierras la página, no cuenta (tus tropas siguen intactas).
-- Las unidades no chocan entre sí (se superponen). La defensa de tu base no se ve en pantalla: la oleada se simula al instante y solo ves el informe.
-- Las oleadas usan la hora del sistema y no se pueden saltar ni aplazar; el equilibrio (fuerza, robo, costo de reparar) es una primera aproximación.
-- El equilibrio es una primera aproximación: con 8 soldados, 3 hechiceros y el héroe las primeras campañas se ganan sin bajas. Hay una prueba que exige que la 1 se gane con un ejército razonable y la 12 no, pero falta jugarla mucho.
-- Probado con ratón; el recuadro de selección y el pellizco en la batalla no se han probado en un móvil real.
+- Las unidades no chocan entre sí (se superponen).
+- Las oleadas usan la hora del sistema y no se pueden aplazar; el equilibrio (fuerza, robo, costo de reparar y de las mejoras de nivel alto) es una primera aproximación. Un ejército de nivel alto aplasta las primeras campañas.
+- Los costos de los niveles 6 a 10 salen de una fórmula (más caros y lentos cada vez, hasta 12 h por mejora): falta jugarlos para afinarlos.
 
 ## Hoja de ruta
 Se decidió que el juego debía sentirse menos básico: *quieto, con poco que hacer, sin objetivos y sin combate*. Por etapas:
 
 1. **Vida y metas** — hecho: aldeanos, efectos y misiones.
-2. **Más contenido** — hecho: granjas y población, cuartel con unidades, altar y héroe, puertas, más decoración y misiones. Pendiente de esta etapa: **logros** (metas sueltas, fuera de la cadena de misiones).
-3. **Combate y campaña** — decidido: ataque **automático con control de grupos** (ver arriba). Primera versión hecha, y también los **ataques enemigos a tu base** (oleadas periódicas con aviso, daño y reparación). Pendiente: ver la defensa en pantalla, elegir dónde desembarcan las tropas, habilidades del héroe, más tipos de enemigo y afinar el equilibrio.
-4. En cualquier momento: publicarlo gratis (GitHub Pages) para instalarlo y probarlo en el celular, y pasar Lighthouse.
+2. **Más contenido** — hecho: casas, cinco edificios militares con sus unidades, herrería, altar y 5 héroes con árboles de poder, puertas, logros y niveles hasta el 10.
+3. **Combate y campaña** — hecho: ataque **automático con control de grupos**, arqueros, magos, caballeros y asedio, habilidades de héroes, **ataques enemigos a tu base** que se ven en vivo, con daño y reparación. Pendiente: elegir dónde desembarcan las tropas, más tipos de enemigo, más campañas y afinar el equilibrio.
+4. **Gráficos** — hecho: sombras, terreno variado, humo y fuego, efectos de habilidades y interfaz con brillo. Pendiente: arte propio para los niveles altos y los edificios militares, y animar a las unidades.
+5. En cualquier momento: probarlo en el celular, pasar Lighthouse y, si hace falta, alojarlo en otro sitio.

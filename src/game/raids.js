@@ -70,7 +70,7 @@ export function applyRaidResult(state, result) {
   }
 
   const earned = result.kills * RAID.heroXpPerKill + (result.outcome === 'repelled' ? RAID.heroXpRepel : 0);
-  const { xp, heroLevelUps, hero } = grantHeroXp(state, earned);
+  const { xp, heroLevelUps, hero, heroes } = grantHeroXp(state, earned);
 
   return {
     outcome: result.outcome, // 'repelled' | 'retreated' | 'raided'
@@ -84,6 +84,7 @@ export function applyRaidResult(state, result) {
     xp,
     heroLevelUps,
     hero,
+    heroes,
   };
 }
 
@@ -93,7 +94,10 @@ export function applyRaidResult(state, result) {
  */
 export function resolveRaid(state, now) {
   const raid = generateRaid(raidLevel(state), state.raid.count + 1);
+  // Una copia sin avanzar de la defensa, para poder VERLA después (es determinista: sale igual que el resultado).
+  const replay = createRaidBattle(state, raid);
   const report = applyRaidResult(state, simulateRaid(state, raid));
+  Object.defineProperty(report, 'replay', { value: replay, enumerable: false });
   state.raid.count += 1;
   state.raid.nextAt = now + RAID.intervalSec * 1000;
   return report;

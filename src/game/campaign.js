@@ -1,29 +1,38 @@
 // Campaña: qué se ataca y cómo se aplica el resultado de una batalla a la partida. Lógica pura.
-import { ARMY_UNITS, COMBAT, HERO_MAX_LEVEL, RESOURCES, heroXpToNext } from '../data/config.js';
-import { armyCount, resourceCap } from './logic.js';
+import { ARMY_UNITS, COMBAT, RESOURCES } from '../data/config.js';
+import { HEROES, heroXpToNext } from '../data/heroes.js';
+import { armyCount, heroLevelCap, resourceCap, squadHeroes } from './logic.js';
 
 /** Nivel de campaña que se ataca ahora: el siguiente al último superado. */
 export const nextCampaignLevel = (state) => state.campaign.cleared + 1;
 
-/** ¿Hay con qué atacar? (alguna unidad de ejército o el héroe). */
-export const canAttack = (state) => armyCount(state) > 0 || Boolean(state.hero);
+/** ¿Hay con qué atacar? (alguna unidad de ejército o algún héroe en la escuadra). */
+export const canAttack = (state) => armyCount(state) > 0 || squadHeroes(state).length > 0;
 
 /**
- * Da experiencia al héroe (si existe) y lo sube de nivel mientras le alcance.
- * Devuelve { xp (lo dado), heroLevelUps, hero: { level, xp, next } | null }.
+ * Da experiencia a cada héroe de la escuadra y lo sube de nivel mientras le alcance. Su nivel no pasa
+ * del tope que da el Ayuntamiento (el doble de su nivel, máx. 20): al llegar, la experiencia se guarda
+ * (hasta lo que pide el siguiente nivel) y sigue cuando subes el Ayuntamiento.
+ * Devuelve { xp (lo dado a cada uno), heroLevelUps (en total), hero (el primero: { key, level, xp, next, capped } o null),
+ * heroes (todos los de la escuadra, igual) }.
  */
 export function grantHeroXp(state, amount) {
-  if (!state.hero) return { xp: 0, heroLevelUps: 0, hero: null };
+  const cap = heroLevelCap(state);
+  const heroes = [];
   let heroLevelUps = 0;
-  state.hero.xp += amount;
-  while (state.hero.level < HERO_MAX_LEVEL && state.hero.xp >= heroXpToNext(state.hero.level)) {
-    state.hero.xp -= heroXpToNext(state.hero.level);
-    state.hero.level += 1;
-    heroLevelUps += 1;
+  for (const key of state.squad) {
+    const h = state.heroes[key];
+    if (!h) continue;
+    h.xp += amount;
+    while (h.level < cap && h.xp >= heroXpToNext(h.level)) {
+      h.xp -= heroXpToNext(h.level);
+      h.level += 1;
+      heroLevelUps += 1;
+    }
+    if (h.level >= cap) h.xp = Math.min(h.xp, heroXpToNext(h.level)); // en el tope: guarda a lo sumo lo que pide el siguiente nivel
+    heroes.push({ key, name: HEROES[key].name, level: h.level, xp: h.xp, next: heroXpToNext(h.level), capped: h.level >= cap });
   }
-  if (state.hero.level >= HERO_MAX_LEVEL) state.hero.xp = 0;
-  const next = state.hero.level >= HERO_MAX_LEVEL ? null : heroXpToNext(state.hero.level);
-  return { xp: amount, heroLevelUps, hero: { level: state.hero.level, xp: state.hero.xp, next } };
+  return { xp: heroes.length ? amount : 0, heroLevelUps, hero: heroes[0] ?? null, heroes };
 }
 
 /**
@@ -57,7 +66,7 @@ export function applyBattleResult(state, result) {
     (result.destroyed ?? 0) * COMBAT.heroXpPerBuilding +
     (result.kills ?? 0) * COMBAT.heroXpPerKill +
     (result.won ? COMBAT.heroXpWin + COMBAT.heroXpPerLevel * result.level : 0);
-  const { xp, heroLevelUps, hero } = grantHeroXp(state, earned);
+  const { xp, heroLevelUps, hero, heroes } = grantHeroXp(state, earned);
 
-  return { won: result.won, level: result.level, percent: result.percent, loot, casualties: { ...result.casualties }, xp, heroLevelUps, hero, cleared };
+  return { won: result.won, level: result.level, percent: result.percent, loot, casualties: { ...result.casualties }, xp, heroLevelUps, hero, heroes, cleared };
 }

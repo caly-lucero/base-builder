@@ -58,3 +58,9 @@ Las imágenes son las del tamaño «Default size» (64×64 px), renombradas.
 | `close` | `close_002` | Interface Sounds |
 
 El formato de audio es `.ogg`; algunos navegadores antiguos de Apple no lo reproducen (el juego funciona igual, sin sonido).
+
+## Dibujos nuevos de la etapa de edificios militares
+- `house_1` es `medievalStructure_18`; `house_2` y `house_3` son `_21` y `_20` con el tejado recoloreado (rojo).
+- `archery_*` (`_22`, `_10`, `_03`, tejado ocre), `atelier_*` (`_19`, `_09`, `_04`, violeta), `stable_1` (`_07`), `stable_2` y `stable_3` (`_16`, `_23`, marrón), `siege_1` (`_08`), `siege_2` y `siege_3` (`_21`, `_20`, gris azulado) y `forge_*` (`_22`, `_20`, `_06`, rojo oscuro, gris y piedra) son dibujos del pack recoloreados cambiando el tono de los tejados; el resto del dibujo no se toca.
+- `unit_archer` es `medievalUnit_14`; `hero_ranger`, `hero_priest`, `hero_pyro` y `hero_warlord` son `medievalUnit_11`, `_22`, `_07` y `_10`.
+- `unit_catapult` y `unit_ram` están **dibujados para este proyecto** con `scripts/make-siege.mjs` (el pack no trae armas de asedio); se ofrecen también como CC0.

@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { COMBAT, HERO_MAX_LEVEL, heroXpToNext } from '../src/data/config.js';
+import { COMBAT } from '../src/data/config.js';
+import { HERO_MAX_LEVEL, heroXpToNext } from '../src/data/heroes.js';
 import { applyBattleResult, canAttack, nextCampaignLevel } from '../src/game/campaign.js';
 import { createNewState, resourceCap, townHall } from '../src/game/logic.js';
 
@@ -8,7 +9,8 @@ const T0 = 1_700_000_000_000;
 
 function fresh() {
   const s = createNewState(T0);
-  s.army = { soldier: 5, mage: 2, knight: 1 };
+  s.army = { ...s.army, soldier: 5, mage: 2, knight: 1 };
+  townHall(s).level = 10; // sin tope de nivel de héroe, salvo en la prueba que lo comprueba
   s.gold = 100;
   s.wood = 100;
   return s;
@@ -36,7 +38,7 @@ test('perder no avanza la campaña, pero se queda con el botín de lo destruido 
   assert.equal(r.cleared, false);
   assert.equal(s.campaign.cleared, 0);
   assert.equal(s.gold, 125);
-  assert.deepEqual(s.army, { soldier: 3, mage: 2, knight: 0 });
+  assert.deepEqual(s.army, { soldier: 3, archer: 0, mage: 2, knight: 0, catapult: 0, ram: 0 });
 });
 
 test('volver a ganar un nivel ya superado no hace avanzar de más', () => {
@@ -64,74 +66,118 @@ test('las bajas no dejan el ejército en negativo', () => {
   assert.equal(s.army.soldier, 0);
 });
 
-test('el héroe gana experiencia SIEMPRE que pelea: por lo que destruye y derrota, con bono si ganas', () => {
+/** Un héroe de la escuadra con el nivel y la experiencia dados. */
+function withHero(s, key, level = 1, xp = 0) {
+  s.heroes[key] = { level, xp };
+  if (!s.squad.includes(key)) s.squad.push(key);
+  return s.heroes[key];
+}
+
+test('los héroes ganan experiencia SIEMPRE que pelean: por lo que destruyen y derrotan, con bono si ganas', () => {
   const s = fresh();
-  s.hero = { level: 1, xp: 0 };
+  const hero = withHero(s, 'paladin');
   const perFight = 4 * COMBAT.heroXpPerBuilding + 3 * COMBAT.heroXpPerKill;
 
   let r = applyBattleResult(s, result({ won: false }));
   assert.equal(r.xp, perFight, 'perder también da experiencia');
-  assert.equal(s.hero.xp, perFight);
+  assert.equal(hero.xp, perFight);
 
-  s.hero = { level: 1, xp: 0 };
+  hero.level = 1;
+  hero.xp = 0;
   r = applyBattleResult(s, result({ level: 1 }));
   const win = perFight + COMBAT.heroXpWin + COMBAT.heroXpPerLevel;
   assert.equal(r.xp, win, 'ganar suma el bono');
   assert.ok(win >= heroXpToNext(1), 'una victoria ya alcanza para el nivel 2');
   assert.equal(r.heroLevelUps, 1);
-  assert.equal(s.hero.level, 2);
-  assert.equal(s.hero.xp, win - heroXpToNext(1), 'lo que sobra queda guardado');
+  assert.equal(hero.level, 2);
+  assert.equal(hero.xp, win - heroXpToNext(1), 'lo que sobra queda guardado');
 
   const nothing = applyBattleResult(s, result({ won: false, destroyed: 0, kills: 0 }));
   assert.equal(nothing.xp, 0, 'si no hizo nada, no gana');
 });
 
+test('cada héroe de la escuadra gana lo mismo; el que no salió no gana nada', () => {
+  const s = fresh();
+  withHero(s, 'paladin');
+  withHero(s, 'ranger', 3, 5);
+  s.heroes.priestess = { level: 1, xp: 0 }; // la tiene, pero no sale
+  const r = applyBattleResult(s, result({ won: false }));
+  assert.equal(r.heroes.length, 2);
+  assert.deepEqual(r.heroes.map((h) => h.key), ['paladin', 'ranger']);
+  assert.equal(s.heroes.priestess.xp, 0);
+  assert.equal(s.heroes.ranger.xp, 5 + r.xp);
+});
+
 test('el héroe sube de nivel al juntar la experiencia, y lo que sobra queda para el siguiente', () => {
   const s = fresh();
-  s.hero = { level: 1, xp: heroXpToNext(1) - 1 };
+  const hero = withHero(s, 'paladin', 1, heroXpToNext(1) - 1);
   const r = applyBattleResult(s, result({ level: 1 }));
   assert.equal(r.heroLevelUps >= 1, true);
-  assert.equal(s.hero.level >= 2, true);
-  assert.ok(s.hero.xp < heroXpToNext(s.hero.level), 'el sobrante queda para el siguiente nivel');
-  assert.deepEqual(r.hero, { level: s.hero.level, xp: s.hero.xp, next: heroXpToNext(s.hero.level) }, 'el informe trae el progreso');
+  assert.equal(hero.level >= 2, true);
+  assert.ok(hero.xp < heroXpToNext(hero.level), 'el sobrante queda para el siguiente nivel');
+  assert.deepEqual(
+    { level: r.hero.level, xp: r.hero.xp, next: r.hero.next },
+    { level: hero.level, xp: hero.xp, next: heroXpToNext(hero.level) },
+    'el informe trae el progreso',
+  );
 });
 
 test('con la experiencia que da una campaña normal, el héroe sube varios niveles en pocas batallas', () => {
   const s = fresh();
-  s.hero = { level: 1, xp: 0 };
+  const hero = withHero(s, 'paladin');
   let fights = 0;
-  while (s.hero.level < 4 && fights < 20) {
+  while (hero.level < 4 && fights < 20) {
     applyBattleResult(s, result({ level: 1 + Math.floor(fights / 2) }));
     fights++;
   }
-  assert.equal(s.hero.level, 4);
+  assert.equal(hero.level, 4);
   assert.ok(fights <= 8, `llegó al nivel 4 en ${fights} batallas`);
 });
 
-test('el héroe no pasa del nivel máximo', () => {
+test('el nivel de un héroe no pasa del doble del Ayuntamiento: guarda la experiencia hasta que lo subas', () => {
   const s = fresh();
-  s.hero = { level: HERO_MAX_LEVEL - 1, xp: heroXpToNext(HERO_MAX_LEVEL - 1) - 1 };
-  applyBattleResult(s, result({ level: 20 }));
-  assert.equal(s.hero.level, HERO_MAX_LEVEL);
-  assert.equal(s.hero.xp, 0);
-  applyBattleResult(s, result({ level: 21 }));
-  assert.equal(s.hero.level, HERO_MAX_LEVEL);
+  townHall(s).level = 2; // tope 4
+  const hero = withHero(s, 'paladin', 3, 0);
+  for (let i = 0; i < 40; i++) applyBattleResult(s, result({ level: 5 }));
+  assert.equal(hero.level, 4, 'se queda en el tope');
+  assert.ok(hero.xp <= heroXpToNext(4), 'la experiencia guardada tiene límite');
+  const capped = applyBattleResult(s, result({ level: 5 }));
+  assert.equal(capped.hero.capped, true);
+  assert.equal(capped.heroLevelUps, 0);
+
+  townHall(s).level = 3; // tope 6: ahora sí sube
+  const r = applyBattleResult(s, result({ level: 5 }));
+  assert.ok(hero.level > 4 && r.heroLevelUps >= 1);
 });
 
-test('sin héroe, ganar no da experiencia a nadie', () => {
+test('el nivel máximo absoluto es 20 (Ayuntamiento en 10)', () => {
+  const s = fresh();
+  const hero = withHero(s, 'paladin', HERO_MAX_LEVEL - 1, heroXpToNext(HERO_MAX_LEVEL - 1) - 1);
+  applyBattleResult(s, result({ level: 20 }));
+  assert.equal(hero.level, HERO_MAX_LEVEL);
+  assert.equal(HERO_MAX_LEVEL, 20);
+  applyBattleResult(s, result({ level: 21 }));
+  assert.equal(hero.level, HERO_MAX_LEVEL);
+  assert.ok(hero.xp <= heroXpToNext(HERO_MAX_LEVEL));
+});
+
+test('sin héroes, ganar no da experiencia a nadie', () => {
   const s = fresh();
   const r = applyBattleResult(s, result());
   assert.equal(r.xp, 0);
-  assert.equal(s.hero, null);
+  assert.equal(r.hero, null);
+  assert.deepEqual(s.heroes, {});
 });
 
-test('canAttack pide al menos una unidad o el héroe', () => {
+test('canAttack pide al menos una unidad o un héroe en la escuadra', () => {
   const s = createNewState(T0);
   assert.equal(canAttack(s), false);
   s.army.soldier = 1;
   assert.equal(canAttack(s), true);
   s.army.soldier = 0;
-  s.hero = { level: 1, xp: 0 };
+  s.heroes.paladin = { level: 1, xp: 0 };
+  assert.equal(canAttack(s), false, 'lo tiene, pero no está en la escuadra');
+  s.squad = ['paladin'];
   assert.equal(canAttack(s), true);
   assert.ok(townHall(s));
 });

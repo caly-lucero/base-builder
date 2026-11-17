@@ -33,7 +33,12 @@ function emit() {
 export function tick(now = Date.now()) {
   const gained = tickAll(state, now, pendingEvents);
   // Si llegó la hora de un ataque enemigo, se resuelve (uno solo, aunque hayas estado fuera mucho tiempo).
-  if (!raidsHeld && raidDue(state, now)) pendingEvents.push({ type: 'raid', report: resolveRaid(state, now) });
+  if (!raidsHeld && raidDue(state, now)) {
+    const late = now - state.raid.nextAt;
+    const report = resolveRaid(state, now);
+    report.live = late < 20_000; // llegó mientras jugabas (no durante una ausencia): se puede ver la defensa en vivo
+    pendingEvents.push({ type: 'raid', report });
+  }
   return gained;
 }
 

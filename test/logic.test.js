@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { BUILDINGS, ECONOMY, UNITS } from '../src/data/config.js';
+import { BUILDINGS, ECONOMY, MAX_LEVEL, RESEARCH, UNITS, researchStep } from '../src/data/config.js';
+import { HEROES } from '../src/data/heroes.js';
 import {
   TOWN_HALL_CELL,
   armyCount,
@@ -30,6 +31,14 @@ import {
   startUpgrade,
   supplyCap,
   supplyUsed,
+  heroLevelCap,
+  researchBonus,
+  setSquad,
+  squadHeroes,
+  toggleSquad,
+  unitCombat,
+  unitLevel,
+  unlockLevel,
   tickAll,
   townHall,
   trainableUnits,
@@ -306,7 +315,7 @@ test('solo hay tantas mejoras simultáneas como obreros (el Ayuntamiento tambié
 });
 
 test('mejorar valida recursos, nivel máximo, mejora repetida y existencia', () => {
-  const s = fresh(1000, 1000, 5);
+  const s = fresh(1000, 1000, 10);
   const { building } = place(s, 'mine', 0, 0, T0);
   assert.equal(startUpgrade(s, 999, T0).reason, 'No existe ese edificio');
 
@@ -317,42 +326,64 @@ test('mejorar valida recursos, nivel máximo, mejora repetida y existencia', () 
   startUpgrade(s, building.id, T0);
   assert.equal(startUpgrade(s, building.id, T0).reason, 'Ya se está mejorando');
 
-  // Sube hasta el máximo (nivel 5), pagando cada mejora y esperando a que termine.
+  // Sube hasta el máximo (nivel 10), pagando cada mejora y esperando a que termine.
   let now = T0;
-  for (let level = 1; level < 5; level++) {
-    s.gold = 100_000;
-    s.wood = 100_000;
-    now += 3 * 60 * 60 * 1000;
+  for (let level = 1; level < MAX_LEVEL; level++) {
+    s.gold = 900_000;
+    s.wood = 900_000;
+    now += 13 * 60 * 60 * 1000;
     tickAll(s, now); // termina la mejora en curso
     if (building.level === level) assert.equal(startUpgrade(s, building.id, now).ok, true, `mejora al nivel ${level + 1}`);
   }
-  now += 3 * 60 * 60 * 1000;
+  now += 13 * 60 * 60 * 1000;
   tickAll(s, now);
-  assert.equal(building.level, 5);
+  assert.equal(building.level, MAX_LEVEL);
   assert.equal(startUpgrade(s, building.id, now).reason, 'Ya está al nivel máximo');
 });
 
-test('los niveles 4 y 5 son «élite»: más fuertes, con el dibujo del nivel 3 teñido', () => {
+test('todos los edificios llegan al nivel 10; del 4 en adelante son «élite» (dibujo del 3 con tinte)', () => {
   for (const [type, def] of Object.entries(BUILDINGS)) {
-    if (type === 'altar') continue; // el altar tiene un solo nivel: el héroe sube por experiencia
-    assert.equal(def.levels.length, 5, `${type} tiene 5 niveles`);
-    assert.ok(def.levels[3].tint && def.levels[4].tint, `${type}: los niveles 4 y 5 llevan tinte`);
-    assert.equal(def.levels[3].sprite, def.levels[2].sprite, `${type}: el nivel 4 reutiliza el dibujo del 3`);
+    assert.equal(def.levels.length, MAX_LEVEL, `${type} tiene 10 niveles`);
     assert.equal(def.levels[0].tint, undefined);
+    for (let i = 3; i < MAX_LEVEL; i++) {
+      assert.ok(def.levels[i].tint, `${type}: el nivel ${i + 1} lleva tinte`);
+      assert.equal(def.levels[i].sprite, def.levels[2].sprite, `${type}: el nivel ${i + 1} reutiliza el dibujo del 3`);
+    }
+    // Cada mejora cuesta más y tarda más que la anterior (hasta el tope de 12 h).
+    for (let i = 2; i < MAX_LEVEL; i++) {
+      const [prev, next] = [def.levels[i - 1], def.levels[i]];
+      const total = (c) => Object.values(c).reduce((x, y) => x + y, 0);
+      assert.ok(total(next.upgradeCost) > total(prev.upgradeCost), `${type}: costo del nivel ${i + 1}`);
+      assert.ok(next.upgradeSec >= prev.upgradeSec && next.upgradeSec <= 12 * 3600, `${type}: tiempo del nivel ${i + 1}`);
+    }
   }
   // Producción y capacidad crecen en cada nivel.
   for (const type of ['mine', 'sawmill']) {
     const lv = BUILDINGS[type].levels;
-    for (let i = 1; i < 5; i++) assert.ok(lv[i].ratePerSec > lv[i - 1].ratePerSec && lv[i].capacity > lv[i - 1].capacity, `${type} nivel ${i + 1}`);
+    for (let i = 1; i < MAX_LEVEL; i++) assert.ok(lv[i].ratePerSec > lv[i - 1].ratePerSec && lv[i].capacity > lv[i - 1].capacity, `${type} nivel ${i + 1}`);
   }
-  assert.ok(BUILDINGS.storage.levels[4].capBonus > BUILDINGS.storage.levels[3].capBonus);
-  assert.ok(BUILDINGS.farm.levels[4].supply > BUILDINGS.farm.levels[3].supply);
+  for (let i = 1; i < MAX_LEVEL; i++) {
+    assert.ok(BUILDINGS.storage.levels[i].capBonus > BUILDINGS.storage.levels[i - 1].capBonus);
+    assert.ok(BUILDINGS.house.levels[i].supply > BUILDINGS.house.levels[i - 1].supply);
+  }
   // Y el Ayuntamiento nuevo permite más de todo.
   const th = BUILDINGS.townhall.levels;
-  for (let i = 1; i < 5; i++) {
+  for (let i = 1; i < MAX_LEVEL; i++) {
     assert.ok(th[i].baseSupply > th[i - 1].baseSupply);
     for (const [type, n] of Object.entries(th[i - 1].limits)) assert.ok(th[i].limits[type] >= n, `${type} en el nivel ${i + 1}`);
   }
+});
+
+test('el Ayuntamiento desbloquea los edificios militares: cuartel 2, arquería 4, atelier 6, caballeriza 8, asedio 10', () => {
+  const need = { barracks: 2, archery: 4, atelier: 6, stable: 8, siege: 10 };
+  for (const [type, level] of Object.entries(need)) {
+    assert.equal(unlockLevel(type), level, type);
+    const low = fresh(99999, 99999, level - 1);
+    assert.match(place(low, type, 0, 0, T0).reason, /pide/, `${type} no se construye antes`);
+    const ok = fresh(99999, 99999, level);
+    assert.equal(place(ok, type, 0, 0, T0).ok, true, `${type} sí con el nivel ${level}`);
+  }
+  assert.equal(unlockLevel('house'), 1);
 });
 
 test('un cuartel de nivel alto entrena más rápido', () => {
@@ -425,22 +456,23 @@ test('el Ayuntamiento se puede mover', () => {
 
 /* ---------- población y entrenamiento ---------- */
 
-const FARM = BUILDINGS.farm.levels;
+const HOUSE = BUILDINGS.house.levels;
 const TH1_SUPPLY = TH[0].baseSupply;
+const TH2_SUPPLY = TH[1].baseSupply;
 
-test('la población máxima suma la del Ayuntamiento y la de cada granja', () => {
+test('la población máxima suma la del Ayuntamiento y la de cada casa', () => {
   const s = fresh(5000, 5000, 1);
   assert.equal(supplyCap(s), TH1_SUPPLY);
-  const farm = place(s, 'farm', 0, 0, T0).building;
-  assert.equal(supplyCap(s), TH1_SUPPLY + FARM[0].supply);
-  farm.level = 2;
-  assert.equal(supplyCap(s), TH1_SUPPLY + FARM[1].supply);
+  const house = place(s, 'house', 0, 0, T0).building;
+  assert.equal(supplyCap(s), TH1_SUPPLY + HOUSE[0].supply);
+  house.level = 2;
+  assert.equal(supplyCap(s), TH1_SUPPLY + HOUSE[1].supply);
   townHall(s).level = 2;
-  assert.equal(supplyCap(s), TH[1].baseSupply + FARM[1].supply);
+  assert.equal(supplyCap(s), TH[1].baseSupply + HOUSE[1].supply);
 });
 
 test('entrenar cobra, reserva población y la unidad llega al terminar', () => {
-  const s = fresh(1000, 1000, 1);
+  const s = fresh(1000, 1000, 2);
   const barracks = place(s, 'barracks', 0, 0, T0).building;
   const gold = s.gold;
   const wood = s.wood;
@@ -464,7 +496,7 @@ test('entrenar cobra, reserva población y la unidad llega al terminar', () => {
 });
 
 test('un cuartel entrena de a uno: no acepta otra orden hasta terminar', () => {
-  const s = fresh(1000, 1000, 1);
+  const s = fresh(1000, 1000, 2);
   const b = place(s, 'barracks', 0, 0, T0).building;
   assert.equal(startTraining(s, b.id, 'soldier', T0).ok, true);
   assert.equal(startTraining(s, b.id, 'soldier', T0).reason, 'Ya está entrenando');
@@ -473,35 +505,106 @@ test('un cuartel entrena de a uno: no acepta otra orden hasta terminar', () => {
 });
 
 test('el entrenamiento sigue mientras no juegas', () => {
-  const s = fresh(1000, 1000, 1);
+  const s = fresh(1000, 1000, 2);
   const b = place(s, 'barracks', 0, 0, T0).building;
   startTraining(s, b.id, 'soldier', T0);
   tickAll(s, T0 + 3 * 60 * 60 * 1000); // 3 horas después
   assert.equal(s.army.soldier, 1);
 });
 
-test('las unidades avanzadas piden nivel de cuartel', () => {
-  const s = fresh(5000, 5000, 3);
-  const b = place(s, 'barracks', 0, 0, T0).building;
-  assert.deepEqual(trainableUnits(b), ['soldier']);
-  assert.match(startTraining(s, b.id, 'mage', T0).reason, /Cuartel nivel 2/);
-  assert.match(startTraining(s, b.id, 'knight', T0).reason, /Cuartel nivel 3/);
-  b.level = 3;
-  assert.deepEqual(trainableUnits(b), ['soldier', 'mage', 'knight']);
-  assert.equal(startTraining(s, b.id, 'knight', T0).ok, true);
+test('cada edificio militar entrena su unidad y no la de otros', () => {
+  const s = fresh(99999, 99999, 10);
+  const spec = { barracks: 'soldier', archery: 'archer', atelier: 'mage', stable: 'knight' };
+  const buildings = {};
+  let x = 0;
+  for (const type of Object.keys(spec)) buildings[type] = place(s, type, x++, 0, T0).building;
+  for (let i = 0; i < 8; i++) place(s, 'house', i, 1, T0);
+  for (const [type, unit] of Object.entries(spec)) {
+    assert.deepEqual(trainableUnits(buildings[type]), [unit], type);
+    for (const other of Object.values(spec)) {
+      if (other !== unit) assert.equal(startTraining(s, buildings[type].id, other, T0).reason, 'Este edificio no entrena eso');
+    }
+    assert.equal(startTraining(s, buildings[type].id, unit, T0).ok, true, `${type} entrena ${unit}`);
+  }
 });
 
-test('sin población libre no se entrena, y una granja la libera', () => {
-  const s = fresh(5000, 5000, 1);
+test('el taller de asedio entrena catapultas desde el nivel 1 y arietes desde el 5', () => {
+  const s = fresh(99999, 99999, 10);
+  for (let i = 0; i < 6; i++) place(s, 'house', i, 1, T0);
+  const siege = place(s, 'siege', 0, 0, T0).building;
+  assert.deepEqual(trainableUnits(siege), ['catapult']);
+  assert.match(startTraining(s, siege.id, 'ram', T0).reason, /nivel 5/);
+  siege.level = 5;
+  assert.deepEqual(trainableUnits(siege), ['catapult', 'ram']);
+  assert.equal(startTraining(s, siege.id, 'ram', T0).ok, true);
+});
+
+test('el nivel de las unidades es el de su edificio, y sube su vida y su daño', () => {
+  const s = fresh(99999, 99999, 10);
+  assert.equal(unitLevel(s, 'archer'), 1, 'sin edificio: nivel 1');
+  const archery = place(s, 'archery', 0, 0, T0).building;
+  const base = unitCombat(s, 'archer');
+  assert.equal(base.hp, UNITS.archer.combat.hp);
+  assert.equal(base.dmg, UNITS.archer.combat.dmg);
+  archery.level = 5;
+  assert.equal(unitLevel(s, 'archer'), 5);
+  const l5 = unitCombat(s, 'archer');
+  assert.ok(l5.hp > base.hp && l5.dmg > base.dmg);
+  assert.equal(l5.hp, Math.round(UNITS.archer.combat.hp * (1 + UNITS.archer.perLevel * 4)));
+  archery.level = 10;
+  assert.ok(unitCombat(s, 'archer').hp > l5.hp);
+  archery.damaged = true; // un edificio dañado no cuenta
+  assert.equal(unitLevel(s, 'archer'), 1);
+});
+
+test('la Herrería investiga mejoras: cuestan, tardan, suben un nivel y no pasan del nivel de la herrería', () => {
+  const s = fresh(99999, 99999, 10);
+  const forge = place(s, 'forge', 0, 0, T0).building;
+  assert.deepEqual(trainableUnits(forge), ['weapons', 'armor', 'fortify']);
+  const step = researchStep('weapons', 0);
+  const gold = s.gold;
+  const r = startTraining(s, forge.id, 'weapons', T0);
+  assert.equal(r.ok, true);
+  assert.equal(s.gold, gold - step.cost.gold);
+  assert.equal(supplyUsed(s), 0, 'una investigación no ocupa población');
+  assert.equal(startTraining(s, forge.id, 'armor', T0).reason, 'Ya está investigando');
+
+  const events = [];
+  tickAll(s, T0 + step.sec * 1000, events);
+  assert.equal(s.research.weapons, 1);
+  assert.deepEqual(events, [{ type: 'trained', id: forge.id, unit: 'weapons' }]);
+  assert.equal(researchBonus(s, 'weapons'), RESEARCH.weapons.perLevel);
+
+  // Con la herrería en nivel 1 no se pasa del nivel 1; al mejorarla, sí.
+  assert.equal(startTraining(s, forge.id, 'weapons', T0 + 1e7).reason, 'Mejora la Herrería para seguir');
+  forge.level = 2;
+  assert.equal(startTraining(s, forge.id, 'weapons', T0 + 1e7).ok, true);
+  // Los costos y tiempos crecen con el nivel.
+  assert.ok(researchStep('weapons', 5).cost.gold > researchStep('weapons', 1).cost.gold);
+  assert.ok(researchStep('weapons', 5).sec > researchStep('weapons', 1).sec);
+});
+
+test('las investigaciones mejoran a las unidades', () => {
+  const s = fresh();
+  const plain = unitCombat(s, 'soldier');
+  s.research.weapons = 5;
+  s.research.armor = 5;
+  const better = unitCombat(s, 'soldier');
+  assert.ok(better.dmg > plain.dmg && better.hp > plain.hp);
+  assert.equal(better.hp, Math.round(UNITS.soldier.combat.hp * (1 + RESEARCH.armor.perLevel * 5)));
+});
+
+test('sin población libre no se entrena, y una casa la libera', () => {
+  const s = fresh(5000, 5000, 2);
   const b = place(s, 'barracks', 0, 0, T0).building;
-  s.army.soldier = TH1_SUPPLY; // población llena
-  assert.equal(startTraining(s, b.id, 'soldier', T0).reason, 'Población al máximo: construye granjas');
-  place(s, 'farm', 1, 0, T0);
+  s.army.soldier = TH2_SUPPLY; // población llena
+  assert.equal(startTraining(s, b.id, 'soldier', T0).reason, 'Población al máximo: construye casas');
+  place(s, 'house', 1, 0, T0);
   assert.equal(startTraining(s, b.id, 'soldier', T0).ok, true);
 });
 
 test('faltan recursos: el mensaje dice cuál', () => {
-  const s = fresh(1000, 1000, 1);
+  const s = fresh(1000, 1000, 2);
   const b = place(s, 'barracks', 0, 0, T0).building;
   s.gold = 5;
   assert.equal(startTraining(s, b.id, 'soldier', T0).reason, 'Oro insuficiente');
@@ -510,24 +613,53 @@ test('faltan recursos: el mensaje dice cuál', () => {
   assert.equal(startTraining(s, b.id, 'soldier', T0).reason, 'Madera insuficiente');
 });
 
-test('el altar solo se construye con el Ayuntamiento en nivel 2 y solo invoca un héroe', () => {
-  const s = fresh(5000, 5000, 1);
-  assert.match(place(s, 'altar', 0, 0, T0).reason, /Aún no puedes construir Altar/);
+test('el altar se construye con el Ayuntamiento en nivel 2 y invoca héroes distintos, cada uno una vez', () => {
+  const s = fresh(9999, 9999, 1);
+  assert.match(place(s, 'altar', 0, 0, T0).reason, /Altar del héroe: pide Fortaleza/);
   townHall(s).level = 2;
+  for (let i = 0; i < 3; i++) place(s, 'house', i, 1, T0);
   const altar = place(s, 'altar', 0, 0, T0).building;
-  assert.equal(startTraining(s, altar.id, 'hero', T0).ok, true);
-  assert.equal(supplyUsed(s), UNITS.hero.supply);
-  tickAll(s, T0 + UNITS.hero.trainSec * 1000);
-  assert.deepEqual(s.hero, { level: 1, xp: 0 });
-  assert.equal(startTraining(s, altar.id, 'hero', T0 + 100_000).reason, 'Ya tienes un héroe');
-  assert.equal(armyCount(s), 0, 'el héroe no cuenta como ejército');
+  assert.equal(startTraining(s, altar.id, 'paladin', T0).ok, true);
+  assert.equal(supplyUsed(s), HEROES.paladin.supply);
+  tickAll(s, T0 + HEROES.paladin.trainSec * 1000);
+  assert.deepEqual(s.heroes.paladin, { level: 1, xp: 0 });
+  assert.deepEqual(s.squad, ['paladin'], 'el primero sale a pelear solo');
+  assert.equal(startTraining(s, altar.id, 'paladin', T0 + 100_000).reason, 'Ya tienes a ese héroe');
+  assert.equal(armyCount(s), 0, 'los héroes no cuentan como ejército');
+  // La Cazadora pide el altar en nivel 2.
+  assert.match(startTraining(s, altar.id, 'ranger', T0 + 100_000).reason, /Altar del héroe nivel 2/);
+  altar.level = 2;
+  assert.equal(startTraining(s, altar.id, 'ranger', T0 + 100_000).ok, true);
+});
+
+test('solo 2 héroes salen a pelear: se elige la escuadra', () => {
+  const s = fresh();
+  s.heroes = { paladin: { level: 1, xp: 0 }, ranger: { level: 3, xp: 10 }, priestess: { level: 1, xp: 0 } };
+  assert.equal(setSquad(s, ['paladin', 'ranger']).ok, true);
+  assert.deepEqual(s.squad, ['paladin', 'ranger']);
+  assert.match(setSquad(s, ['paladin', 'ranger', 'priestess']).reason, /Solo pueden salir 2/);
+  assert.equal(toggleSquad(s, 'priestess').ok, false, 'está llena');
+  assert.equal(toggleSquad(s, 'ranger').ok, true, 'sale de la escuadra');
+  assert.equal(toggleSquad(s, 'priestess').ok, true, 'ahora entra');
+  assert.deepEqual(s.squad, ['paladin', 'priestess']);
+  assert.match(setSquad(s, ['warlord']).reason, /aún no lo tienes/);
+  assert.deepEqual(squadHeroes(s).map((h) => h.key), ['paladin', 'priestess']);
+});
+
+test('el nivel máximo de un héroe es el doble del nivel del Ayuntamiento, hasta 20', () => {
+  const s = fresh(1000, 1000, 1);
+  assert.equal(heroLevelCap(s), 2);
+  townHall(s).level = 5;
+  assert.equal(heroLevelCap(s), 10);
+  townHall(s).level = 10;
+  assert.equal(heroLevelCap(s), 20);
 });
 
 test('el cuartel no entrena héroes y el altar no entrena soldados', () => {
   const s = fresh(5000, 5000, 2);
   const barracks = place(s, 'barracks', 0, 0, T0).building;
   const altar = place(s, 'altar', 1, 0, T0).building;
-  assert.equal(startTraining(s, barracks.id, 'hero', T0).reason, 'Este edificio no entrena eso');
+  assert.equal(startTraining(s, barracks.id, 'paladin', T0).reason, 'Este edificio no entrena eso');
   assert.equal(startTraining(s, altar.id, 'soldier', T0).reason, 'Este edificio no entrena eso');
   assert.equal(startTraining(s, townHall(s).id, 'soldier', T0).reason, 'Este edificio no entrena eso');
   assert.equal(startTraining(s, 999, 'soldier', T0).reason, 'No existe ese edificio');
@@ -545,17 +677,17 @@ test('mientras entrena no se mejora ni se demuele; mientras mejora no se entrena
   assert.equal(startTraining(s, b.id, 'soldier', T0 + 60_000).reason, 'El edificio está en obras');
 });
 
-test('no se demuele una granja que sostiene al ejército, y sí cuando sobra población', () => {
+test('no se demuele una casa que sostiene al ejército, y sí cuando sobra población', () => {
   const s = fresh(5000, 5000, 1);
-  const farm = place(s, 'farm', 0, 0, T0).building;
-  s.army.soldier = TH1_SUPPLY + 1; // solo cabe gracias a la granja
-  assert.equal(demolish(s, farm.id).reason, 'Hay demasiadas unidades para demoler esta granja');
+  const house = place(s, 'house', 0, 0, T0).building;
+  s.army.soldier = TH1_SUPPLY + 1; // solo cabe gracias a la casa
+  assert.equal(demolish(s, house.id).reason, 'Hay demasiadas unidades para demoler esta casa');
   s.army.soldier = 2;
-  assert.equal(demolish(s, farm.id).ok, true);
+  assert.equal(demolish(s, house.id).ok, true);
 });
 
 test('un guardado manipulado no puede dejar un entrenamiento más lejos que su duración', () => {
-  const s = fresh(1000, 1000, 1);
+  const s = fresh(1000, 1000, 2);
   const b = place(s, 'barracks', 0, 0, T0).building;
   startTraining(s, b.id, 'soldier', T0);
   b.training.endsAt = T0 + 1e12;

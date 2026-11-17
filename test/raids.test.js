@@ -14,8 +14,10 @@ function base(spec = [], { thLevel = 1, army = {}, hero = null } = {}) {
   s.wood = 300;
   townHall(s).level = thLevel;
   for (const [type, x, y, level = 1] of spec) s.buildings.push(createBuilding(s.nextId++, type, x, y, T0, level));
-  s.army = { soldier: 0, mage: 0, knight: 0, ...army };
-  s.hero = hero;
+  s.army = { ...s.army, ...army };
+  // `hero` ({ level, xp }) es el paladín, que sale a pelear.
+  s.heroes = hero ? { paladin: { ...hero } } : {};
+  s.squad = hero ? ['paladin'] : [];
   return s;
 }
 
@@ -91,7 +93,7 @@ test('simular una defensa no modifica la partida', () => {
 });
 
 test('sin defensa el enemigo destruye edificios y se retira (o tumba el Ayuntamiento)', () => {
-  const spec = [['mine', 9, 9], ['sawmill', 14, 9], ['storage', 9, 13], ['farm', 14, 13]];
+  const spec = [['mine', 9, 9], ['sawmill', 14, 9], ['storage', 9, 13], ['house', 14, 13]];
   const res = simulateRaid(base(spec), generateRaid(1));
   assert.ok(['retreated', 'raided'].includes(res.outcome), `resultado: ${res.outcome}`);
   assert.ok(res.destroyed >= 1);
@@ -177,10 +179,10 @@ test('el héroe gana experiencia por cada atacante derrotado, con bono si el ata
   const s = base([], { hero: { level: 1, xp: 0 } });
   let r = applyRaidResult(s, result({ kills: 3 }));
   assert.equal(r.xp, 3 * RAID.heroXpPerKill);
-  s.hero = { level: 1, xp: 0 };
+  s.heroes.paladin = { level: 1, xp: 0 };
   r = applyRaidResult(s, result({ kills: 3, outcome: 'repelled', destroyed: 0 }));
   assert.equal(r.xp, 3 * RAID.heroXpPerKill + RAID.heroXpRepel);
-  assert.equal(base().hero, null);
+  assert.deepEqual(base().heroes, {});
   assert.equal(applyRaidResult(base(), result()).xp, 0, 'sin héroe no hay experiencia');
 });
 
@@ -228,4 +230,59 @@ test('las tropas no mueren al defender', () => {
   resolveRaid(s, T0);
   assert.deepEqual(s.army, before);
   assert.ok(UNITS.soldier);
+});
+
+/* ---------- ver la defensa en pantalla ---------- */
+
+test('el informe trae una repetición (sin avanzar) que termina igual que el resultado', () => {
+  const s = base([['tower', 11, 8], ['mine', 9, 9], ['sawmill', 14, 9], ['barracks', 13, 13]], { army: { soldier: 3 }, hero: { level: 1, xp: 0 } });
+  s.raid.nextAt = T0;
+  const report = resolveRaid(s, T0);
+  const replay = report.replay;
+  assert.ok(replay, 'hay repetición');
+  assert.equal(Object.keys(report).includes('replay'), false, 'no se guarda ni se compara con el informe');
+  assert.equal(replay.time, 0, 'llega sin avanzar');
+  assert.equal(replay.over, false);
+
+  // La repetición se avanza en pasos distintos a los de la simulación y debe dar lo mismo.
+  for (let i = 0; i < 6000 && !replay.over; i++) advanceBattle(replay, 0.037);
+  assert.equal(replay.over, true);
+  assert.equal(replay.result.outcome, report.outcome);
+  assert.equal(replay.result.kills, report.kills);
+  assert.equal(replay.result.destroyed, report.destroyed);
+});
+
+test('los edificios de la defensa llevan nivel y si estaban dañados (para dibujarlos igual que en la base)', () => {
+  const s = base([['mine', 9, 9, 3], ['farm', 14, 9]]);
+  s.buildings.find((b) => b.type === 'farm').damaged = true;
+  const b = createRaidBattle(s, generateRaid(1, 1));
+  const mine = b.buildings.find((e) => e.type === 'mine');
+  const farm = b.buildings.find((e) => e.type === 'farm');
+  assert.equal(mine.level, 3);
+  assert.equal(mine.damaged, false);
+  assert.equal(farm.damaged, true);
+});
+
+test('la defensa usa el nivel de tus edificios militares, tus investigaciones y a los 2 héroes de la escuadra', () => {
+  const spec = [['archery', 13, 9, 6], ['tower', 9, 9, 1]];
+  const s = base(spec, { thLevel: 6, army: { archer: 4 } });
+  s.heroes = { paladin: { level: 3, xp: 0 }, priestess: { level: 1, xp: 0 }, ranger: { level: 1, xp: 0 } };
+  s.squad = ['paladin', 'ranger'];
+  s.research.armor = 4;
+  s.research.fortify = 5;
+  const plain = createRaidBattle(base(spec, { thLevel: 6, army: { archer: 4 } }), generateRaid(2));
+  const b = createRaidBattle(s, generateRaid(2));
+  const archer = defenderUnits(b).find((u) => u.type === 'archer');
+  const archer1 = defenderUnits(plain).find((u) => u.type === 'archer');
+  assert.ok(archer.hp > archer1.hp, 'el arquero de nivel 6 con armaduras pega y aguanta más');
+  assert.deepEqual(defenderUnits(b).filter((u) => u.type === 'hero').map((u) => u.heroKey), ['paladin', 'ranger']);
+  const tower = b.buildings.find((e) => e.type === 'tower');
+  const tower1 = plain.buildings.find((e) => e.type === 'tower');
+  assert.ok(tower.dmg > tower1.dmg && tower.hp > tower1.hp, 'las fortificaciones mejoran las torres y los edificios');
+});
+
+test('las armas de asedio no defienden la base', () => {
+  const s = base([['siege', 13, 9]], { thLevel: 10, army: { catapult: 2, soldier: 1 } });
+  const b = createRaidBattle(s, generateRaid(1));
+  assert.deepEqual(defenderUnits(b).map((u) => u.type), ['soldier']);
 });

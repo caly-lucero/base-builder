@@ -55,7 +55,7 @@ export function generateMission(level) {
 
   // Edificios fuera del anillo: minas, aserraderos y granjas.
   const outside = 3 + Math.min(lvl, 6);
-  const kinds = ['mine', 'sawmill', 'farm'];
+  const kinds = ['mine', 'sawmill', 'house'];
   for (let placed = 0, tries = 0; placed < outside && tries < 400; tries++) {
     const x = 2 + Math.floor(rand() * 20);
     const y = 1 + Math.floor(rand() * 13); // deja libre el sur: ahí desembarcan las tropas

@@ -7,28 +7,37 @@
 //  - ÓRDENES: el jugador puede darle a un grupo un objetivo concreto (atacar un edificio o enemigo)
 //    o un punto al que ir. Al cumplirlo, el grupo vuelve al modo automático.
 //  - Los muros se rodean si se puede; si el camino pasa por un muro, la unidad lo ataca para abrirse paso.
-import { ARMY_UNITS, COMBAT, DEFENSE, ENEMY_BUILDINGS, ENEMY_UNITS, GRID, HERO_PER_LEVEL, RAID, UNITS } from '../data/config.js';
-import { townHallLevel } from './logic.js';
+import { ARMY_UNITS, COMBAT, DEFENSE, ENEMY_BUILDINGS, ENEMY_UNITS, GRID, RAID, UNITS } from '../data/config.js';
+import { HEROES, abilityAt, heroStats } from '../data/heroes.js';
+import { researchBonus, squadHeroes, townHallLevel, unitCombat } from './logic.js';
 import { findPath } from './pathfinding.js';
 
 const BUILDING_RADIUS = 0.5;
 const UNIT_RADIUS = 0.25;
 const RANGED_FROM = 2; // desde este alcance un golpe se muestra como disparo
+const ABILITY_FIRST_CD = 3; // los héroes pueden lanzar su habilidad a los 3 s de empezar
 
-/** Estadísticas de combate del héroe según su nivel. */
-export function heroCombat(level) {
-  const base = UNITS.hero.combat;
-  const extra = Math.max(0, level - 1);
-  return { ...base, hp: base.hp + extra * HERO_PER_LEVEL.hp, dmg: base.dmg + extra * HERO_PER_LEVEL.dmg };
+/** Estadísticas de combate del héroe «paladín» a un nivel (el héroe de las partidas antiguas). */
+export function heroCombat(level, key = 'paladin') {
+  return heroStats(key, level);
+}
+
+/** Acepta la forma antigua (un solo héroe `{ level }`) y la nueva (lista de `{ key, level }`). */
+function normalizeHeroes(h) {
+  if (!h) return [];
+  if (Array.isArray(h)) return h;
+  return [{ key: 'paladin', level: h.level ?? 1 }];
 }
 
 /* ---------- creación ---------- */
 
 /**
- * Prepara una batalla. `mission` viene de missions.js; `army` es { soldier, mage, knight };
- * `hero` es null o { level }. Los atacantes aparecen en formación en el borde inferior del mapa.
+ * Prepara una batalla. `mission` viene de missions.js; `army` es { soldier, archer, mage, … } (cantidades);
+ * `heroes` es la lista de héroes que salen ([{ key, level }]); `stats` (opcional) dice las estadísticas de
+ * cada tipo de unidad (por defecto las del nivel 1; ver logic.unitCombat). Los atacantes aparecen en
+ * formación en el borde inferior del mapa.
  */
-export function createBattle(mission, army, hero) {
+export function createBattle(mission, army, heroes = [], stats = null) {
   const b = {
     mode: 'attack',
     level: mission.level,
@@ -72,28 +81,79 @@ export function createBattle(mission, army, hero) {
   }
 
   const roster = [];
-  for (const kind of ARMY_UNITS) for (let i = 0; i < (army[kind] ?? 0); i++) roster.push(kind);
-  if (hero) roster.push('hero');
+  for (const kind of ARMY_UNITS) for (let i = 0; i < (army[kind] ?? 0); i++) roster.push({ kind });
+  for (const h of normalizeHeroes(heroes)) roster.push({ kind: 'hero', hero: h });
   const perRow = 8;
-  roster.forEach((kind, i) => {
+  roster.forEach((r, i) => {
     const row = Math.floor(i / perRow);
     const inRow = Math.min(perRow, roster.length - row * perRow);
     const col = i - row * perRow;
-    const stats = kind === 'hero' ? heroCombat(hero.level) : UNITS[kind].combat;
-    addUnit(b, 'a', kind, GRID.cols / 2 - (inRow - 1) / 2 + col, GRID.rows - 2 - row * 0.9, stats);
+    const x = GRID.cols / 2 - (inRow - 1) / 2 + col;
+    const y = GRID.rows - 2 - row * 0.9;
+    if (r.hero) addHero(b, 'a', r.hero, x, y);
+    else addUnit(b, 'a', r.kind, x, y, stats?.[r.kind] ?? UNITS[r.kind].combat);
   });
   return b;
 }
 
 function addUnit(b, side, kind, x, y, s) {
+  const def = UNITS[kind]; // los enemigos (guardia, bruto) y los héroes no están en UNITS
   const u = {
     id: b.nextId++, side, kind: 'unit', type: kind, x, y, home: { x, y },
     hp: s.hp, maxHp: s.hp, dmg: s.dmg, range: s.range, speed: s.speed, atkSec: s.atkSec,
+    armor: s.armor ?? 0, regen: s.regen ?? 0,
+    bonus: def?.bonus ?? null, splash: def?.splash ?? null, siege: def?.siege ?? null,
     cd: 0, alive: true, order: null, path: null, pathKey: null, pathAge: 99,
   };
   b.units.push(u);
   b.byId.set(u.id, u);
   return u;
+}
+
+/** Un héroe: sus estadísticas según nivel y pasivas, y su habilidad lista para lanzarse. */
+function addHero(b, side, hero, x, y) {
+  const u = addUnit(b, side, 'hero', x, y, heroStats(hero.key, hero.level));
+  u.heroKey = hero.key;
+  u.heroLevel = hero.level;
+  u.ability = { ...abilityAt(hero.key, hero.level), cd: ABILITY_FIRST_CD };
+  return u;
+}
+
+/**
+ * Un duelo entre dos ejércitos en campo abierto (sin edificios): sirve para comprobar el equilibrio entre
+ * unidades. `a` y `b` son { tipo: cantidad } (tipos de UNITS); `stats` fija las estadísticas por tipo.
+ * Los dos grupos arrancan frente a frente, a distancia de verse. Termina cuando uno se queda sin tropas.
+ */
+export function createDuel(a, b, stats = null) {
+  const d = {
+    mode: 'duel', level: 0, time: 0, acc: 0, over: false, result: null, nextId: 1,
+    units: [], buildings: [], byId: new Map(), events: [], loot: { gold: 0, wood: 0 },
+    destroyed: 0, kills: 0, hallId: null, countedBuildings: 0,
+  };
+  const place = (counts, side, x) => {
+    const kinds = Object.entries(counts).flatMap(([kind, n]) => Array.from({ length: n }, () => kind));
+    const perCol = 6;
+    kinds.forEach((kind, i) => {
+      const col = Math.floor(i / perCol);
+      const row = i % perCol;
+      const dx = side === 'a' ? -col * 0.5 : col * 0.5;
+      addUnit(d, side, kind, x + dx, 12 + (row - (Math.min(perCol, kinds.length) - 1) / 2) * 0.6, stats?.[kind] ?? UNITS[kind].combat);
+    });
+  };
+  place(a, 'a', 8);
+  place(b, 'd', 12);
+  return d;
+}
+
+function checkDuelEnd(b) {
+  const a = attackers(b).length;
+  const d = defenderUnits(b).length;
+  if (a > 0 && d > 0 && b.time < 120) return undefined;
+  b.over = true;
+  const hp = (list) => Math.round(list.reduce((sum, u) => sum + u.hp, 0));
+  b.result = { winner: a > 0 && d === 0 ? 'a' : d > 0 && a === 0 ? 'd' : 'draw', aliveA: a, aliveD: d, hpA: hp(attackers(b)), hpD: hp(defenderUnits(b)), timeSec: Math.round(b.time) };
+  b.events.push({ type: 'end' });
+  return undefined;
 }
 
 /* ---------- defensa de tu base (ataque enemigo) ---------- */
@@ -119,15 +179,17 @@ export function createRaidBattle(state, raid) {
     maxDestroyed: RAID.maxDamaged(townHallLevel(state)),
   };
 
+  const fortify = researchBonus(state, 'fortify'); // Herrería: más vida de edificios y más daño de torres
   for (const src of state.buildings) {
-    const hp = defenseHp(src.type, src.level, src.damaged);
+    const hp = Math.round(defenseHp(src.type, src.level, src.damaged) * (1 + fortify));
     const e = {
       id: b.nextId++, side: 'd', kind: 'building', type: src.type, x: src.x, y: src.y,
       hp, maxHp: hp, alive: true, loot: { gold: 0, wood: 0 }, sourceId: src.id,
+      level: src.level, damaged: Boolean(src.damaged), // para dibujarlo igual que en la base
     };
     if (src.type === 'tower' && !src.damaged) {
       const t = DEFENSE.tower;
-      Object.assign(e, { dmg: Math.round(t.dmg * (1 + t.dmgPerLevel * (src.level - 1))), range: t.range, atkSec: t.atkSec, cd: 0 });
+      Object.assign(e, { dmg: Math.round(t.dmg * (1 + t.dmgPerLevel * (src.level - 1)) * (1 + fortify)), range: t.range, atkSec: t.atkSec, cd: 0 });
     }
     if (src.type === 'townhall') b.hallId = e.id;
     b.buildings.push(e);
@@ -139,11 +201,13 @@ export function createRaidBattle(state, raid) {
   const shrine = first('altar') ?? camp;
   let slot = 0;
   for (const kind of ARMY_UNITS) {
+    if (UNITS[kind].siege) continue; // las armas de asedio no defienden
+    const stats = unitCombat(state, kind);
     for (let i = 0; i < (state.army[kind] ?? 0) && slot < 24; i++, slot++) {
-      addUnit(b, 'd', kind, camp.x + 1.1 + (slot % 4) * 0.42, camp.y + 0.55 + Math.floor(slot / 4) * 0.36, UNITS[kind].combat);
+      addUnit(b, 'd', kind, camp.x + 1.1 + (slot % 4) * 0.42, camp.y + 0.55 + Math.floor(slot / 4) * 0.36, stats);
     }
   }
-  if (state.hero) addUnit(b, 'd', 'hero', shrine.x + 0.55, shrine.y + 1.25, heroCombat(state.hero.level));
+  squadHeroes(state).forEach((h, i) => addHero(b, 'd', h, shrine.x + 0.55 + i * 0.6, shrine.y + 1.25));
 
   for (const a of raid.attackers) {
     const def = ENEMY_UNITS[a.kind];
@@ -279,6 +343,8 @@ function step(b, dt) {
 
   for (const u of b.units) {
     if (!u.alive) continue;
+    if (u.regen && u.hp < u.maxHp) u.hp = Math.min(u.maxHp, u.hp + u.regen * dt);
+    if (u.ability) stepAbility(b, u, dt);
     if (u.side === 'a') stepAttacker(b, u, dt);
     else stepDefender(b, u, dt);
   }
@@ -318,11 +384,14 @@ function chooseTarget(b, u) {
 
   let best = null;
   let bestDist = COMBAT.aggro;
-  for (const e of defenderUnits(b)) {
-    const d = centerDist(u, e);
-    if (d < bestDist) {
-      best = e;
-      bestDist = d;
+  // Las armas de asedio van a por los edificios: solo pelean con unidades si no queda ninguno.
+  if (!u.siege) {
+    for (const e of defenderUnits(b)) {
+      const d = centerDist(u, e);
+      if (d < bestDist) {
+        best = e;
+        bestDist = d;
+      }
     }
   }
   if (best) return best;
@@ -341,7 +410,8 @@ function chooseTarget(b, u) {
     }
     if (nearest) return nearest;
   }
-  return null;
+  // Sin edificios que atacar (o si es un arma de asedio), va a por el enemigo más cercano, esté donde esté.
+  return defenderUnits(b).sort((p, q) => centerDist(u, p) - centerDist(u, q))[0] ?? null;
 }
 
 /**
@@ -423,12 +493,128 @@ function stepTower(b, t) {
 
 /* ---------- golpes, muertes y fin ---------- */
 
+/** Daño de un golpe de `from` sobre `target`, con la ventaja contra su tipo, los gritos de guerra y el asedio. */
+function damageOf(b, from, target) {
+  let dmg = from.dmg;
+  if (from.kind === 'unit') {
+    if (from.buffUntil > b.time) dmg *= from.buffMul;
+    if (from.bonus?.[target.type]) dmg *= from.bonus[target.type];
+    if (from.siege && target.kind === 'unit') dmg *= from.siege.vsUnits;
+  }
+  return dmg;
+}
+
+/** Aplica daño a algo: las unidades lo reducen con su armadura y con el escudo sagrado. Devuelve lo que se llevó. */
+function inflict(b, target, amount) {
+  let dmg = amount;
+  if (target.kind === 'unit') {
+    if (target.shieldUntil > b.time) dmg *= 1 - target.shieldPower;
+    dmg *= 1 - (target.armor ?? 0);
+  }
+  target.hp -= dmg;
+  if (target.hp <= 0 && target.alive) kill(b, target);
+  return dmg;
+}
+
 function hit(b, from, target) {
   if (from.cd > 0) return;
   from.cd = from.atkSec;
-  target.hp -= from.dmg;
-  b.events.push({ type: from.range >= RANGED_FROM ? 'shot' : 'hit', from: from.id, to: target.id, dmg: from.dmg });
-  if (target.hp <= 0) kill(b, target);
+  const dealt = inflict(b, target, damageOf(b, from, target));
+  b.events.push({ type: from.range >= RANGED_FROM ? 'shot' : 'hit', from: from.id, to: target.id, dmg: dealt });
+
+  // Los hechiceros dañan también a los que están alrededor del objetivo (solo unidades).
+  if (from.splash) {
+    for (const other of b.units) {
+      if (!other.alive || other === target || other.side !== target.side) continue;
+      if (centerDist(other, target) <= from.splash.radius) inflict(b, other, damageOf(b, from, other) * from.splash.fraction);
+    }
+    b.events.push({ type: 'splash', x: target.x, y: target.y, radius: from.splash.radius });
+  }
+}
+
+/* ---------- habilidades de los héroes ---------- */
+
+/** Rivales de una unidad: unidades del otro bando y, si ataca una base enemiga, también sus edificios. */
+function foesOf(b, u) {
+  const units = b.units.filter((x) => x.alive && x.side !== u.side);
+  return u.side === 'a' && b.mode === 'attack' ? [...units, ...liveBuildings(b)] : units;
+}
+
+const alliesOf = (b, u) => b.units.filter((x) => x.alive && x.side === u.side);
+
+function stepAbility(b, u, dt) {
+  const a = u.ability;
+  a.cd = Math.max(0, a.cd - dt);
+  if (a.cd <= 0) castAbility(b, u, false);
+}
+
+/**
+ * Lanza la habilidad del héroe `u` si está lista. Sola (`force` falso) solo lo hace cuando vale la pena;
+ * a mano (`force` verdadero, ver castHeroAbility) lo hace con tal de que tenga algún efecto.
+ * Devuelve si se lanzó.
+ */
+function castAbility(b, u, force) {
+  const a = u.ability;
+  if (!a || !u.alive || a.cd > 0 || b.over) return false;
+  let cast = null;
+
+  if (a.kind === 'volley' || a.kind === 'fire') {
+    const reach = Math.max(u.range + 2.5, 5);
+    const foes = foesOf(b, u);
+    let best = null;
+    let bestCount = 0;
+    for (const f of foes) {
+      if (centerDist(u, f) > reach) continue;
+      const count = foes.filter((g) => centerDist(f, g) <= a.radius).length;
+      if (count > bestCount || (count === bestCount && best && centerDist(u, f) < centerDist(u, best))) {
+        best = f;
+        bestCount = count;
+      }
+    }
+    if (best && (force || bestCount >= 2 || (best.kind === 'unit' && best.maxHp >= 100))) {
+      for (const f of foes) if (centerDist(best, f) <= a.radius) inflict(b, f, a.power);
+      cast = { x: best.x, y: best.y };
+    }
+  } else if (a.kind === 'heal') {
+    const hurt = alliesOf(b, u).filter((x) => centerDist(u, x) <= a.radius && x.hp < x.maxHp * 0.65);
+    if (hurt.length || (force && alliesOf(b, u).some((x) => x.hp < x.maxHp))) {
+      for (const x of alliesOf(b, u)) if (centerDist(u, x) <= a.radius) x.hp = Math.min(x.maxHp, x.hp + a.power);
+      cast = { x: u.x, y: u.y };
+    }
+  } else if (a.kind === 'shield' || a.kind === 'warcry') {
+    const near = foesOf(b, u).some((f) => centerDist(u, f) <= 5);
+    if (near || force) {
+      for (const x of alliesOf(b, u)) {
+        if (centerDist(u, x) > a.radius) continue;
+        if (a.kind === 'shield') {
+          x.shieldUntil = b.time + a.dur;
+          x.shieldPower = a.power;
+        } else {
+          x.buffUntil = b.time + a.dur;
+          x.buffMul = 1 + a.power;
+        }
+      }
+      cast = { x: u.x, y: u.y };
+    }
+  }
+
+  if (!cast) return false;
+  a.cd = a.cdSec;
+  b.events.push({ type: 'cast', id: u.id, kind: a.kind, x: cast.x, y: cast.y, radius: a.radius });
+  return true;
+}
+
+/** El jugador lanza a mano la habilidad de un héroe suyo. Devuelve si se pudo. */
+export function castHeroAbility(b, unitId) {
+  const u = b.byId.get(unitId);
+  return Boolean(u?.ability) && castAbility(b, u, true);
+}
+
+/** Estado de la habilidad de un héroe para la interfaz: { name, kind, cdLeft, cdSec } o null. */
+export function abilityStatus(b, unitId) {
+  const u = b.byId.get(unitId);
+  if (!u?.ability) return null;
+  return { name: u.ability.name, kind: u.ability.kind, cdLeft: u.ability.cd, cdSec: u.ability.cdSec, alive: u.alive };
 }
 
 function kill(b, target) {
@@ -447,6 +633,7 @@ function kill(b, target) {
 }
 
 function checkEnd(b) {
+  if (b.mode === 'duel') return checkDuelEnd(b);
   if (b.mode === 'raid') return checkRaidEnd(b);
   const hall = b.byId.get(b.hallId);
   if (hall && !hall.alive) return finish(b, true);

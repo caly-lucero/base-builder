@@ -30,7 +30,14 @@ export function questProgress(state, quest) {
     current = state.campaign.cleared;
     target = g.min;
   } else if (g.kind === 'hero') {
-    current = state.hero ? 1 : 0;
+    current = Object.keys(state.heroes).length;
+    target = g.min ?? 1;
+  } else if (g.kind === 'heroLevel') {
+    current = Object.values(state.heroes).reduce((max, h) => Math.max(max, h.level), 0);
+    target = g.level;
+  } else if (g.kind === 'research') {
+    current = Math.max(0, ...Object.values(state.research));
+    target = g.level;
   } else if (g.kind === 'anyLevel') {
     current = state.buildings.reduce((max, b) => (b.type === 'townhall' || isUpgrading(b) ? max : Math.max(max, b.level)), 0);
     target = g.level;

@@ -10,6 +10,7 @@
     "preview": "vite preview",
     "icons": "node scripts/make-icons.mjs",
     "walls": "node scripts/make-walls.mjs",
+    "siege": "node scripts/make-siege.mjs",
     "test": "node --test"
   },
   "dependencies": {

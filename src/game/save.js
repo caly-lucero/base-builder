@@ -4,19 +4,22 @@
 // Nota de seguridad: el checksum NO impide hacer trampa (el código está en el
 // navegador y cualquiera puede recalcularlo). Solo detecta archivos dañados o
 // editados a mano sin querer. En un juego de un jugador está bien así.
-import { ARMY_UNITS, BUILDINGS, ECONOMY, GRID, QUESTS } from '../data/config.js';
+import { ACHIEVEMENTS, ARMY_UNITS, BUILDINGS, ECONOMY, GRID, QUESTS, RESEARCH_KEYS } from '../data/config.js';
+import { HERO_MAX_LEVEL, SQUAD_SIZE, isHeroKey } from '../data/heroes.js';
 import {
   MAX_BUILDINGS,
   TOWN_HALL_CELL,
   createBuilding,
+  emptyAchievements,
   emptyArmy,
+  emptyResearch,
   findFreeCell,
   isBuildingType,
   supplyCap,
   supplyUsed,
 } from './logic.js';
 
-export const SAVE_VERSION = 7;
+export const SAVE_VERSION = 8;
 export const MAX_SAVE_BYTES = 200_000;
 
 const KEY = 'basebuilder.save';
@@ -118,7 +121,32 @@ function migrate(data, version) {
     };
   }
 
+  // v7 → v8: las granjas pasaron a ser casas; aparecieron los edificios militares nuevos, los 5 héroes
+  // (con una escuadra de 2), la Herrería y los niveles hasta el 10. El héroe único pasa a ser el Paladín.
+  if (version < 8) d = migrateV7toV8(d);
+
   return d;
+}
+
+function migrateV7toV8(d) {
+  const oldHero = isPlainObject(d.hero) ? d.hero : null;
+  const { hero: _removed, ...rest } = d;
+  return {
+    ...rest,
+    army: { ...emptyArmy(), ...(isPlainObject(d.army) ? d.army : {}) }, // los tipos nuevos empiezan en 0
+    heroes: oldHero ? { paladin: { level: oldHero.level, xp: oldHero.xp } } : {},
+    squad: oldHero ? ['paladin'] : [],
+    research: emptyResearch(),
+    achievements: emptyAchievements(),
+    buildings: Array.isArray(d.buildings)
+      ? d.buildings.map((b) => {
+          if (!isPlainObject(b)) return b;
+          const type = b.type === 'farm' ? 'house' : b.type;
+          const training = isPlainObject(b.training) && b.training.unit === 'hero' ? { ...b.training, unit: 'paladin' } : b.training;
+          return { ...b, type, training };
+        })
+      : d.buildings,
+  };
 }
 
 // v2 → v3: el mapa pasó de 12×12 a 24×24, apareció la madera y el Ayuntamiento.
@@ -197,8 +225,33 @@ export function validateState(d) {
     if (!isInt(d.army[u], 0, 999)) bad('Ejército inválido');
     army[u] = d.army[u];
   }
-  if (d.hero !== null && !(isPlainObject(d.hero) && isInt(d.hero.level, 1, 10) && isInt(d.hero.xp, 0, 99_999))) bad('Héroe inválido');
-  const hero = d.hero === null ? null : { level: d.hero.level, xp: d.hero.xp };
+
+  if (!isPlainObject(d.heroes)) bad('Héroes inválidos');
+  const heroes = {};
+  for (const [key, h] of Object.entries(d.heroes)) {
+    if (!isHeroKey(key) || !isPlainObject(h) || !isInt(h.level, 1, HERO_MAX_LEVEL) || !isInt(h.xp, 0, 99_999)) bad('Héroe inválido');
+    heroes[key] = { level: h.level, xp: h.xp };
+  }
+  if (!Array.isArray(d.squad) || d.squad.length > SQUAD_SIZE) bad('Escuadra inválida');
+  const squad = d.squad.map((k) => {
+    if (typeof k !== 'string' || !heroes[k]) bad('Escuadra inválida');
+    return k;
+  });
+  if (new Set(squad).size !== squad.length) bad('Escuadra repetida');
+
+  if (!isPlainObject(d.research)) bad('Investigaciones inválidas');
+  const research = {};
+  for (const k of RESEARCH_KEYS) {
+    if (!isInt(d.research[k], 0, 10)) bad('Investigaciones inválidas');
+    research[k] = d.research[k];
+  }
+
+  if (!isPlainObject(d.achievements)) bad('Logros inválidos');
+  const achievements = {};
+  for (const a of ACHIEVEMENTS) {
+    if (!isInt(d.achievements[a.id], 0, a.tiers.length)) bad('Logros inválidos');
+    achievements[a.id] = d.achievements[a.id];
+  }
 
   if (!isPlainObject(d.campaign) || !isInt(d.campaign.cleared, 0, 9999)) bad('Campaña inválida');
   const campaign = { cleared: d.campaign.cleared };
@@ -274,7 +327,10 @@ export function validateState(d) {
     savedAt: d.savedAt,
     claimedQuests,
     army,
-    hero,
+    heroes,
+    squad,
+    research,
+    achievements,
     campaign,
     raid,
     buildings,

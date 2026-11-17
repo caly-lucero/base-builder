@@ -82,12 +82,12 @@ test('la validación rechaza datos con checksum correcto pero contenido imposibl
     'NaN en producción': (s) => (s.buildings[MINE].stored = NaN),
     'edificios no es lista': (s) => (s.buildings = {}),
     'nivel 0': (s) => (s.buildings[MINE].level = 0),
-    'nivel sobre el máximo': (s) => (s.buildings[MINE].level = 6),
+    'nivel sobre el máximo': (s) => (s.buildings[MINE].level = 11),
     'nivel decimal': (s) => (s.buildings[MINE].level = 1.5),
     'mejora sin fecha (undefined)': (s) => delete s.buildings[MINE].upgradeEndsAt,
     'fecha de mejora como texto': (s) => (s.buildings[MINE].upgradeEndsAt = '123'),
     'fecha de mejora negativa': (s) => (s.buildings[MINE].upgradeEndsAt = -1),
-    'mejora en edificio de nivel máximo': (s) => ((s.buildings[HALL].level = 5), (s.buildings[HALL].upgradeEndsAt = T0 + 1000)),
+    'mejora en edificio de nivel máximo': (s) => ((s.buildings[HALL].level = 10), (s.buildings[HALL].upgradeEndsAt = T0 + 1000)),
     'más mejoras que obreros': (s) => {
       for (const b of s.buildings) b.upgradeEndsAt = T0 + 1000; // 3 a la vez, con 2 obreros
     },
@@ -97,12 +97,29 @@ test('la validación rechaza datos con checksum correcto pero contenido imposibl
     'soldados decimales': (s) => (s.army.soldier = 1.5),
     'soldados como texto': (s) => (s.army.soldier = '3'),
     'ejército imposible de sostener': (s) => (s.army.soldier = 999),
-    'héroe como texto': (s) => (s.hero = 'rey'),
-    'héroe sin nivel': (s) => (s.hero = { xp: 0 }),
-    'héroe con nivel absurdo': (s) => (s.hero = { level: 99, xp: 0 }),
-    'héroe sin experiencia': (s) => (s.hero = { level: 1 }),
-    'héroe con experiencia negativa': (s) => (s.hero = { level: 1, xp: -5 }),
-    'sin héroe (undefined)': (s) => delete s.hero,
+    'héroes como texto': (s) => (s.heroes = 'rey'),
+    'héroe desconocido': (s) => (s.heroes = { dragon: { level: 1, xp: 0 } }),
+    'héroe como texto': (s) => (s.heroes = { paladin: 'rey' }),
+    'héroe sin nivel': (s) => (s.heroes = { paladin: { xp: 0 } }),
+    'héroe con nivel absurdo': (s) => (s.heroes = { paladin: { level: 99, xp: 0 } }),
+    'héroe sin experiencia': (s) => (s.heroes = { paladin: { level: 1 } }),
+    'héroe con experiencia negativa': (s) => (s.heroes = { paladin: { level: 1, xp: -5 } }),
+    'sin héroes (undefined)': (s) => delete s.heroes,
+    'escuadra con un héroe que no tienes': (s) => (s.squad = ['paladin']),
+    'escuadra de 3': (s) => ((s.heroes = { paladin: { level: 1, xp: 0 }, ranger: { level: 1, xp: 0 }, priestess: { level: 1, xp: 0 } }), (s.squad = ['paladin', 'ranger', 'priestess'])),
+    'escuadra con repetidos': (s) => ((s.heroes = { paladin: { level: 1, xp: 0 } }), (s.squad = ['paladin', 'paladin'])),
+    'escuadra no es lista': (s) => (s.squad = 'paladin'),
+    'sin escuadra (undefined)': (s) => delete s.squad,
+    'logros no es objeto': (s) => (s.achievements = 3),
+    'logro con niveles de más': (s) => (s.achievements.builder = 99),
+    'logro negativo': (s) => (s.achievements.army = -1),
+    'logro decimal': (s) => (s.achievements.siege = 1.5),
+    'sin logros (undefined)': (s) => delete s.achievements,
+    'falta un logro': (s) => delete s.achievements.conquer,
+    'investigación negativa': (s) => (s.research.weapons = -1),
+    'investigación sobre el máximo': (s) => (s.research.armor = 11),
+    'investigación decimal': (s) => (s.research.fortify = 1.5),
+    'sin investigaciones (undefined)': (s) => delete s.research,
     'daño como texto': (s) => (s.buildings[MINE].damaged = 'si'),
     'daño sin campo (undefined)': (s) => delete s.buildings[MINE].damaged,
     'Ayuntamiento dañado': (s) => (s.buildings[HALL].damaged = true),
@@ -120,7 +137,7 @@ test('la validación rechaza datos con checksum correcto pero contenido imposibl
     'entrenamiento sin campo (undefined)': (s) => delete s.buildings[MINE].training,
     'entrenamiento en un edificio que no entrena': (s) => (s.buildings[MINE].training = { unit: 'soldier', endsAt: T0 + 1000 }),
     'entrenamiento de una unidad que no corresponde': (s) => {
-      s.buildings.push({ id: 7, type: 'barracks', level: 1, upgradeEndsAt: null, training: { unit: 'hero', endsAt: T0 + 1000 }, damaged: false, x: 9, y: 9, stored: 0, lastTick: T0 });
+      s.buildings.push({ id: 7, type: 'barracks', level: 1, upgradeEndsAt: null, training: { unit: 'paladin', endsAt: T0 + 1000 }, damaged: false, x: 9, y: 9, stored: 0, lastTick: T0 });
       s.nextId = 8;
     },
     'entrenamiento con fecha inválida': (s) => {
@@ -172,23 +189,31 @@ test('una mejora en curso se guarda y se recupera igual', () => {
   assert.equal(r.state.buildings[MINE].upgradeEndsAt, s.buildings[MINE].upgradeEndsAt);
 });
 
-test('el ejército, el héroe y un entrenamiento en curso se guardan y se recuperan', () => {
+test('el ejército, los héroes, las investigaciones y un entrenamiento en curso se guardan y se recuperan', () => {
   const s = sampleState();
   s.gold = 450; // dentro del tope de 500 y suficiente para lo que sigue
   s.wood = 300;
+  townHall(s).level = 4;
   const barracks = place(s, 'barracks', 9, 9, T0).building;
-  place(s, 'farm', 10, 9, T0);
-  s.army = { soldier: 3, mage: 1, knight: 0 };
-  s.hero = { level: 2, xp: 35 };
+  place(s, 'house', 10, 9, T0);
+  s.army = { ...s.army, soldier: 3, archer: 2, mage: 1 };
+  s.heroes = { paladin: { level: 2, xp: 35 }, priestess: { level: 7, xp: 120 } };
+  s.squad = ['priestess', 'paladin'];
+  s.research = { weapons: 2, armor: 0, fortify: 3 };
+  s.achievements.builder = 2;
+  s.achievements.conquer = 1;
   s.campaign = { cleared: 4 };
   assert.equal(startTraining(s, barracks.id, 'soldier', T0).ok, true);
 
   const r = parseSave(serialize(s));
   assert.equal(r.ok, true);
   assert.deepEqual(r.state, s);
-  assert.deepEqual(r.state.army, { soldier: 3, mage: 1, knight: 0 });
-  assert.deepEqual(r.state.hero, { level: 2, xp: 35 });
+  assert.equal(r.state.army.archer, 2);
+  assert.deepEqual(r.state.heroes, { paladin: { level: 2, xp: 35 }, priestess: { level: 7, xp: 120 } });
+  assert.deepEqual(r.state.squad, ['priestess', 'paladin'], 'conserva el orden de la escuadra');
+  assert.deepEqual(r.state.research, { weapons: 2, armor: 0, fortify: 3 });
   assert.deepEqual(r.state.campaign, { cleared: 4 });
+  assert.deepEqual([r.state.achievements.builder, r.state.achievements.conquer], [2, 1], 'conserva los logros reclamados');
   assert.deepEqual(r.state.buildings.find((b) => b.type === 'barracks').training, { unit: 'soldier', endsAt: T0 + 15_000 });
 });
 
@@ -347,8 +372,8 @@ test('migración v4 → v5: una partida con misiones sigue igual y sin ejército
   };
   const r = parseSave(JSON.stringify({ v: 4, sum: checksum(data), data }));
   assert.equal(r.ok, true);
-  assert.deepEqual(r.state.army, { soldier: 0, mage: 0, knight: 0 });
-  assert.equal(r.state.hero, null);
+  assert.deepEqual(r.state.army, { soldier: 0, archer: 0, mage: 0, knight: 0, catapult: 0, ram: 0 });
+  assert.deepEqual(r.state.heroes, {});
   assert.ok(r.state.buildings.every((b) => b.training === null));
   assert.deepEqual(r.state.claimedQuests, ['q_sawmill'], 'conserva las misiones');
   assert.equal(r.state.wood, 120);
@@ -367,15 +392,64 @@ test('migración v5 → v6: una partida con héroe conserva todo y añade campa�
   };
   const r = parseSave(JSON.stringify({ v: 5, sum: checksum(data), data }));
   assert.equal(r.ok, true);
-  assert.deepEqual(r.state.hero, { level: 2, xp: 0 });
+  assert.deepEqual(r.state.heroes, { paladin: { level: 2, xp: 0 } }, 'el héroe de antes es el paladín');
+  assert.deepEqual(r.state.squad, ['paladin']);
   assert.deepEqual(r.state.campaign, { cleared: 0 });
-  assert.deepEqual(r.state.army, { soldier: 2, mage: 0, knight: 0 });
+  assert.deepEqual(r.state.army, { soldier: 2, archer: 0, mage: 0, knight: 0, catapult: 0, ram: 0 });
   assert.deepEqual(r.state.claimedQuests, ['q_sawmill']);
 
   const noHero = { ...data, hero: null };
   const r2 = parseSave(JSON.stringify({ v: 5, sum: checksum(noHero), data: noHero }));
   assert.equal(r2.ok, true);
-  assert.equal(r2.state.hero, null);
+  assert.deepEqual(r2.state.heroes, {});
+  assert.deepEqual(r2.state.squad, []);
+});
+
+test('migración v7 → v8: granjas pasan a casas, el héroe pasa a ser el paladín y todo conserva su nivel', () => {
+  const data = {
+    gold: 300,
+    wood: 120,
+    nextId: 6,
+    savedAt: T0,
+    claimedQuests: ['q_sawmill'],
+    army: { soldier: 2, mage: 1, knight: 0 },
+    hero: { level: 4, xp: 55 },
+    campaign: { cleared: 2 },
+    raid: { nextAt: T0 + 5000, count: 1 },
+    buildings: [
+      { ...b2(1, 'townhall', 11, 11, 3), training: null, damaged: false },
+      { ...b2(2, 'farm', 8, 8, 2), training: null, damaged: false },
+      { ...b2(3, 'barracks', 9, 9, 3), training: null, damaged: false },
+      { ...b2(4, 'altar', 6, 6, 1), training: { unit: 'hero', endsAt: T0 + 20_000 }, damaged: false },
+      { ...b2(5, 'farm', 7, 7, 1), training: null, damaged: true },
+    ],
+  };
+  const r = parseSave(JSON.stringify({ v: 7, sum: checksum(data), data }));
+  assert.equal(r.ok, true, r.error);
+  const types = r.state.buildings.map((b) => b.type);
+  assert.deepEqual(types, ['townhall', 'house', 'barracks', 'altar', 'house']);
+  assert.equal(r.state.buildings[1].level, 2, 'la casa conserva el nivel de la granja');
+  assert.equal(r.state.buildings[4].damaged, true, 'y su daño');
+  assert.deepEqual(r.state.buildings[3].training, { unit: 'paladin', endsAt: T0 + 20_000 }, 'el héroe en camino pasa a ser el paladín');
+  assert.deepEqual(r.state.heroes, { paladin: { level: 4, xp: 55 } });
+  assert.deepEqual(r.state.squad, ['paladin']);
+  assert.deepEqual(r.state.research, { weapons: 0, armor: 0, fortify: 0 });
+  assert.ok(Object.values(r.state.achievements).every((n) => n === 0), 'sin logros reclamados');
+  assert.deepEqual(r.state.army, { soldier: 2, archer: 0, mage: 1, knight: 0, catapult: 0, ram: 0 });
+  assert.equal(r.state.hero, undefined);
+  assert.deepEqual(r.state.raid, { nextAt: T0 + 5000, count: 1 });
+});
+
+test('migración v7 → v8 sin héroe: queda sin héroes ni escuadra', () => {
+  const data = {
+    gold: 300, wood: 120, nextId: 3, savedAt: T0, claimedQuests: [], army: { soldier: 0, mage: 0, knight: 0 }, hero: null,
+    campaign: { cleared: 0 }, raid: { nextAt: 0, count: 0 },
+    buildings: [{ ...b2(1, 'townhall', 11, 11, 1), training: null, damaged: false }],
+  };
+  const r = parseSave(JSON.stringify({ v: 7, sum: checksum(data), data }));
+  assert.equal(r.ok, true, r.error);
+  assert.deepEqual(r.state.heroes, {});
+  assert.deepEqual(r.state.squad, []);
 });
 
 test('la migración no abre una partida antigua modificada, ni una con forma rara', () => {

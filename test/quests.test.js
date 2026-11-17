@@ -18,7 +18,7 @@ test('los datos de las misiones son coherentes: ids únicos, objetivos y recompe
   assert.equal(new Set(questIds()).size, QUESTS.length, 'ids únicos');
   for (const q of QUESTS) {
     assert.ok(q.text && q.id, `misión sin texto o id: ${q.id}`);
-    assert.ok(['count', 'townhall', 'anyLevel', 'army', 'unit', 'hero', 'campaign'].includes(q.goal.kind), `${q.id}: objetivo desconocido`);
+    assert.ok(['count', 'townhall', 'anyLevel', 'army', 'unit', 'hero', 'heroLevel', 'research', 'campaign'].includes(q.goal.kind), `${q.id}: objetivo desconocido`);
     if (q.goal.kind === 'count') assert.ok(Object.hasOwn(BUILDINGS, q.goal.building), `${q.id}: edificio desconocido`);
     if (q.goal.kind === 'unit') assert.ok(Object.hasOwn(UNITS, q.goal.unit), `${q.id}: unidad desconocida`);
     assert.ok(Object.keys(q.reward).length > 0, `${q.id}: sin recompensa`);
@@ -79,11 +79,29 @@ test('las misiones de ejército y héroe siguen lo entrenado', () => {
   s.army.soldier = 5; // más de los pedidos: se muestra 3/3
   assert.deepEqual(questProgress(s, soldiers), { current: 3, target: 3, done: true });
 
-  s.army = { soldier: 3, mage: 3, knight: 2 };
+  s.army = { ...s.army, soldier: 3, mage: 3, knight: 2 };
   assert.equal(questProgress(s, army8).done, true);
   assert.equal(questProgress(s, hero).done, false);
-  s.hero = { level: 1 };
+  s.heroes.paladin = { level: 1, xp: 0 };
   assert.equal(questProgress(s, hero).done, true);
+
+  const second = questById('q_hero2');
+  assert.deepEqual(questProgress(s, second), { current: 1, target: 2, done: false });
+  s.heroes.ranger = { level: 1, xp: 0 };
+  assert.equal(questProgress(s, second).done, true);
+});
+
+test('las misiones de nivel de héroe y de investigación siguen su avance', () => {
+  const s = fresh();
+  const heroLevel = questById('q_herolvl10');
+  const research = questById('q_research');
+  assert.deepEqual(questProgress(s, heroLevel), { current: 0, target: 10, done: false });
+  s.heroes.paladin = { level: 4, xp: 0 };
+  s.heroes.ranger = { level: 10, xp: 0 };
+  assert.equal(questProgress(s, heroLevel).done, true);
+  assert.equal(questProgress(s, research).done, false);
+  s.research.armor = 1;
+  assert.equal(questProgress(s, research).done, true);
 });
 
 test('las misiones de campaña siguen los niveles superados', () => {
@@ -98,7 +116,7 @@ test('las misiones de campaña siguen los niveles superados', () => {
 
 test('el héroe no cuenta como unidad de ejército', () => {
   const s = fresh();
-  s.hero = { level: 1 };
+  s.heroes.paladin = { level: 1, xp: 0 };
   assert.equal(questProgress(s, questById('q_army8')).current, 0);
 });
 
@@ -134,22 +152,25 @@ test('la recompensa no pasa del tope de recursos', () => {
 });
 
 test('se pueden reclamar varias misiones seguidas si ya estaban cumplidas, y al final no queda ninguna', () => {
-  const s = fresh(1_000_000, 1_000_000, 5);
+  const s = fresh(1_000_000, 1_000_000, 10);
   s.gold = s.wood = 0;
   // Una base avanzada que cumple todo de una vez (se omiten los topes con almacenes grandes).
-  s.buildings.push(
-    ...[1, 2, 3, 4, 5].map((i) => ({ id: 100 + i, type: 'mine', level: 5, upgradeEndsAt: null, x: i, y: 0, stored: 0, lastTick: T0 })),
-    { id: 120, type: 'sawmill', level: 1, upgradeEndsAt: null, x: 0, y: 1, stored: 0, lastTick: T0 },
-    { id: 121, type: 'storage', level: 3, upgradeEndsAt: null, x: 1, y: 1, stored: 0, lastTick: T0 },
-    { id: 122, type: 'tower', level: 1, upgradeEndsAt: null, x: 2, y: 1, stored: 0, lastTick: T0 },
-    { id: 123, type: 'farm', level: 1, upgradeEndsAt: null, x: 3, y: 1, stored: 0, lastTick: T0 },
-    { id: 124, type: 'barracks', level: 1, upgradeEndsAt: null, x: 4, y: 1, stored: 0, lastTick: T0 },
-    { id: 125, type: 'altar', level: 1, upgradeEndsAt: null, x: 5, y: 1, stored: 0, lastTick: T0 },
-    { id: 126, type: 'gate', level: 1, upgradeEndsAt: null, x: 6, y: 1, stored: 0, lastTick: T0 },
-    ...Array.from({ length: 20 }, (_, i) => ({ id: 200 + i, type: 'wall', level: 1, upgradeEndsAt: null, x: i, y: 2, stored: 0, lastTick: T0 })),
-  );
-  s.army = { soldier: 4, mage: 3, knight: 2 };
-  s.hero = { level: 1, xp: 0 };
+  const make = (id, type, x, y, level = 1) => ({ id, type, level, upgradeEndsAt: null, training: null, damaged: false, x, y, stored: 0, lastTick: T0 });
+  let id = 100;
+  let col = 0;
+  const add = (type, level = 1, count = 1) => {
+    for (let i = 0; i < count; i++) {
+      s.buildings.push(make(id++, type, col % 24, Math.floor(col / 24) + 1, level));
+      col++;
+    }
+  };
+  add('mine', 10, 5);
+  for (const t of ['sawmill', 'storage', 'tower', 'house', 'barracks', 'archery', 'atelier', 'stable', 'siege', 'forge', 'altar', 'gate']) add(t, 1);
+  add('wall', 1, 20);
+  s.army = { ...s.army, soldier: 4, archer: 5, mage: 3, knight: 2 };
+  s.heroes = { paladin: { level: 12, xp: 0 }, ranger: { level: 1, xp: 0 } };
+  s.squad = ['paladin', 'ranger'];
+  s.research.weapons = 1;
   s.campaign.cleared = 3;
   let claimed = 0;
   while (currentQuest(s)) {
