@@ -30,6 +30,9 @@ export function generateRaid(level, seed = 1) {
   const at = (kind) => attackers.push({ kind, x: 7 + rand() * 10, y: 0.5 + rand() * 1.5 });
   for (let i = 0; i < guards; i++) at('guard');
   for (let i = 0; i < brutes; i++) at('brute');
+  // Con el tiempo llegan también arañas (rápidas) y arqueros.
+  for (let i = 0; i < (lvl >= 3 ? Math.floor(lvl / 3) : 0); i++) at('spider');
+  for (let i = 0; i < (lvl >= 5 ? Math.floor((lvl - 3) / 4) : 0); i++) at('bowman');
   return { level: lvl, hpScale: 1 + 0.1 * (lvl - 1), dmgScale: 1 + 0.07 * (lvl - 1), attackers };
 }
 

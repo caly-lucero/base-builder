@@ -25,7 +25,7 @@ const ART = [
   'wallh_1', 'wallh_2', 'wallh_3', 'wallv_1', 'wallv_2', 'wallv_3',
   'unit_soldier', 'unit_archer', 'unit_mage', 'unit_knight', 'unit_catapult', 'unit_ram',
   'unit_hero', 'hero_ranger', 'hero_priest', 'hero_pyro', 'hero_warlord',
-  'enemy_guard', 'enemy_brute',
+  'enemy_guard', 'enemy_brute', 'enemy_archer', 'enemy_shaman', 'enemy_spider',
   'stump', 'log', 'rock_d', 'rock_e', 'rock_f',
   'tree_a', 'tree_b', 'tree_c',
   'rock_a', 'rock_b', 'rock_c',

@@ -36,7 +36,7 @@ import { openAchievementsPanel } from './achievementsPanel.js';
 import { isSoundOn, onNotice, runMenu } from '../game/menu.js';
 import { openHeroPanel } from './heroPanel.js';
 import * as ui from './ui.js';
-import { addGloss, addVignette, createClouds, emberPuff, ensureTextures, placeShadow, smokePuff, sparkBurst, stepClouds } from './look.js';
+import { addGloss, addVignette, createClouds, emberPuff, ensureTextures, crispCharacters, placeShadow, smokePuff, sparkBurst, stepClouds } from './look.js';
 
 const FONT = 'system-ui, "Segoe UI", Roboto, sans-serif';
 
@@ -158,6 +158,7 @@ export default class BaseScene extends Phaser.Scene {
     this.cameras.main.setBackgroundColor(0x1b4a2a); // lo que queda fuera del mapa: verde oscuro
     ensureTextures(this);
     ui.ensureUi(this);
+    crispCharacters(this, Object.keys(IMAGES));
     this.createTerrain();
     this.createDecor();
     this.createLandscape();
@@ -692,6 +693,7 @@ export default class BaseScene extends Phaser.Scene {
     const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
     const lines = [
       `Enemigo: ${plural(mission.buildings.filter((b) => b.type !== 'wall').length, 'edificio', 'edificios')} · ${plural(mission.buildings.filter((b) => b.type === 'tower').length, 'torre', 'torres')} · ${plural(mission.defenders.length, 'defensor', 'defensores')}`,
+      `Mejor: ${'★'.repeat(state.campaign.stars[level] ?? 0)}${'☆'.repeat(3 - (state.campaign.stars[level] ?? 0))}  (Ayuntamiento · 50 % · 100 %)`,
       ready ? `Tus tropas: ${armyText(state)}` : 'No tienes tropas: entrénalas en tus edificios militares',
     ];
     this.dialog({

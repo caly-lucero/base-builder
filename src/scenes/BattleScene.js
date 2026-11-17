@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
-import { ART_SIZE, ARMY_UNITS, BUILDINGS, CAMERA, GRID, LAYOUT, RAID } from '../data/config.js';
+import { IMAGES } from '../data/assets.js';
+import { ART_SIZE, ARMY_UNITS, BUILDINGS, CAMERA, GRID, LAYOUT, RAID, STARS } from '../data/config.js';
 import { HEROES } from '../data/heroes.js';
 import { abilityStatus, advanceBattle, attackers, battleStatus, castHeroAbility, clearOrders, createBattle, defenderUnits, orderAttack, orderMove, retreat, unitIdsOfKinds } from '../game/battle.js';
 import { applyBattleResult } from '../game/campaign.js';
@@ -13,7 +14,7 @@ import { grassLook } from '../game/terrain.js';
 import { wallConnectors } from '../game/walls.js';
 import { renderConnectors } from './connectors.js';
 import * as ui from './ui.js';
-import { addGloss, addVignette, emberPuff, ensureTextures, placeShadow, smokePuff, sparkBurst } from './look.js';
+import { addGloss, addVignette, emberPuff, ensureTextures, crispCharacters, placeShadow, smokePuff, sparkBurst } from './look.js';
 
 const FONT = 'system-ui, "Segoe UI", Roboto, sans-serif';
 const DEPTH = { terrain: 0, shadow: 8, world: 10, fx: 60, vignette: 90, ui: 150, buttons: 160, modal: 400 };
@@ -27,7 +28,7 @@ const BUILDING_SPRITE = {
 };
 const UNIT_SPRITE = {
   soldier: 'unit_soldier', archer: 'unit_archer', mage: 'unit_mage', knight: 'unit_knight', catapult: 'unit_catapult', ram: 'unit_ram',
-  guard: 'enemy_guard', brute: 'enemy_brute',
+  guard: 'enemy_guard', brute: 'enemy_brute', bowman: 'enemy_archer', shaman: 'enemy_shaman', spider: 'enemy_spider',
 };
 /** Dibujo de una unidad de la batalla: cada héroe tiene el suyo. */
 const unitSprite = (e) => (e.type === 'hero' ? HEROES[e.heroKey].sprite : UNIT_SPRITE[e.type]);
@@ -93,6 +94,7 @@ export default class BattleScene extends Phaser.Scene {
     this.cameras.main.setBackgroundColor(0x1b4a2a); // lo que queda fuera del mapa: verde oscuro
     ensureTextures(this);
     ui.ensureUi(this);
+    crispCharacters(this, Object.keys(IMAGES));
     this.createTerrain();
     this.createEntities();
     addVignette(this, DEPTH.vignette);
@@ -207,6 +209,13 @@ export default class BattleScene extends Phaser.Scene {
     ui.panel(this, W / 2, H / 2, W, H, 'bar', d, 'bottom');
     this.hudTop = ui.label(this, 12, 20, '', { size: 16, bold: true, color: ui.TXT.gold, origin: [0, 0.5], depth: d + 2 });
     this.hudBottom = ui.label(this, 12, 41, '', { size: 11, color: ui.TXT.blue, origin: [0, 0.5], depth: d + 2 });
+    if (!this.raid) {
+      // Las 3 estrellas del ataque, a la vista: Ayuntamiento, 50 % y 100 %.
+      const y = LAYOUT.gridTop + 24;
+      const d2 = DEPTH.buttons;
+      this.starPill = { bg: ui.panel(this, W / 2 - 20, y, 150, 32, 'pill', d2), stars: [0, 1, 2].map((i) => ui.icon(this, W / 2 - 66 + i * 26, y, 'star', 22, d2 + 1).setTint(0x2a2118).setAlpha(0.6)), text: ui.label(this, W / 2 + 8, y, '0 %', { size: 13, bold: true, origin: [0, 0.5], depth: d2 + 1 }) };
+      this.starsEarned = [false, false, false];
+    }
     this.speedBtn = ui.button(this, { x: W - 46, y: H / 2, w: 76, h: 36, kind: 'dark2', icon: 'ff', iconSize: 16, text: '×1', size: 14, depth: d + 2, onClick: () => {
       this.speed = this.speed === 1 ? 2 : 1;
       this.play('select');
@@ -621,6 +630,22 @@ export default class BattleScene extends Phaser.Scene {
 
   /* ---------- fin de la batalla ---------- */
 
+  /** Enciende las estrellas a medida que se ganan (con un toquecito y un aviso). */
+  updateStars(percent) {
+    const hall = this.battle.byId.get(this.battle.hallId);
+    const now = [Boolean(hall && !hall.alive), percent >= STARS.half, percent >= STARS.all];
+    this.starPill.text.setText(`${percent} %`);
+    now.forEach((earned, i) => {
+      if (!earned || this.starsEarned[i]) return;
+      this.starsEarned[i] = true;
+      const star = this.starPill.stars[i];
+      star.clearTint().setAlpha(1);
+      this.tweens.add({ targets: star, scale: star.scale * 1.7, duration: 200, yoyo: true });
+      this.showToast(['¡Estrella! Destruiste el Ayuntamiento', '¡Estrella! Mitad de la base destruida', '¡Tercera estrella! Base arrasada'][i], 1800);
+      this.play('upgrade_done');
+    });
+  }
+
   /** Quita la ventana abierta (la usa ui.dialog). */
   closeModal() {
     for (const p of this.modal ?? []) p.destroy();
@@ -673,9 +698,11 @@ export default class BattleScene extends Phaser.Scene {
       lines.push(`Héroes: +${r.xp} XP${r.heroLevelUps ? ' · ¡SUBEN DE NIVEL!' : ''}`);
       lines.push(r.heroes.map((h) => `${h.name} nv. ${h.level}${h.capped ? ' (tope)' : ` (${h.xp}/${h.next})`}`).join(' · '));
     }
+    if (r.newStars > 0) lines.push(`+${r.newStars} estrella${r.newStars > 1 ? 's' : ''} nueva${r.newStars > 1 ? 's' : ''}: ${rewardText(r.starBonus, '+') || 'sin espacio para el premio'}`);
     lines.push(r.cleared ? `¡${missionName(r.level)} superada!` : r.won ? 'Ya habías superado este nivel' : 'Puedes volver a intentarlo');
     ui.dialog(this, {
-      title: r.won ? '¡Victoria!' : 'Derrota',
+      title: r.won ? '¡Victoria!' : r.stars > 0 ? 'Resultado parcial' : 'Derrota',
+      stars: r.stars,
       icon: r.won ? 'trophy' : 'shield',
       tone: r.won ? 'good' : 'bad',
       lines,
@@ -841,6 +868,7 @@ export default class BattleScene extends Phaser.Scene {
       return;
     }
     const s = battleStatus(this.battle);
+    this.updateStars(s.percent);
     this.hudTop.setText(`${missionName(this.level)} · ${formatDuration(s.timeLeft * 1000)}`);
     this.hudBottom.setText(`Aliados ${s.alliesAlive} · Enemigos ${s.enemiesAlive} · Destruido ${s.percent}%`);
 

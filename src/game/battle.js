@@ -7,7 +7,7 @@
 //  - ÓRDENES: el jugador puede darle a un grupo un objetivo concreto (atacar un edificio o enemigo)
 //    o un punto al que ir. Al cumplirlo, el grupo vuelve al modo automático.
 //  - Los muros se rodean si se puede; si el camino pasa por un muro, la unidad lo ataca para abrirse paso.
-import { ARMY_UNITS, COMBAT, DEFENSE, ENEMY_BUILDINGS, ENEMY_UNITS, GRID, RAID, UNITS } from '../data/config.js';
+import { ARMY_UNITS, COMBAT, DEFENSE, ENEMY_BUILDINGS, ENEMY_UNITS, GRID, RAID, STARS, UNITS } from '../data/config.js';
 import { HEROES, abilityAt, heroStats } from '../data/heroes.js';
 import { researchBonus, squadHeroes, townHallLevel, unitCombat } from './logic.js';
 import { findPath } from './pathfinding.js';
@@ -97,7 +97,7 @@ export function createBattle(mission, army, heroes = [], stats = null) {
 }
 
 function addUnit(b, side, kind, x, y, s) {
-  const def = UNITS[kind]; // los enemigos (guardia, bruto) y los héroes no están en UNITS
+  const def = UNITS[kind] ?? ENEMY_UNITS[kind]; // los héroes no están en ninguno
   const u = {
     id: b.nextId++, side, kind: 'unit', type: kind, x, y, home: { x, y },
     hp: s.hp, maxHp: s.hp, dmg: s.dmg, range: s.range, speed: s.speed, atkSec: s.atkSec,
@@ -321,7 +321,7 @@ export function clearOrders(b, ids) {
 
 /** El jugador se retira: la batalla termina como derrota. Las unidades vivas se salvan, y lo destruido hasta ahora cuenta. */
 export function retreat(b) {
-  if (!b.over) finish(b, false);
+  if (!b.over) finish(b);
 }
 
 /* ---------- avance ---------- */
@@ -460,8 +460,11 @@ function walkTo(u, wp, dt) {
 const LEASH = 8; // hasta dónde se aleja un defensor de su puesto
 
 function stepDefender(b, u, dt) {
+  // Cuando atacan algo de la aldea, TODA la guarnición se entera: ve más lejos y se aleja más de su puesto.
+  const aggro = b.alarm ? COMBAT.aggro * 2 : COMBAT.aggro;
+  const leash = b.alarm ? LEASH * 1.8 : LEASH;
   let best = null;
-  let bestDist = COMBAT.aggro;
+  let bestDist = aggro;
   for (const a of attackers(b)) {
     const d = centerDist(u, a);
     if (d < bestDist) {
@@ -469,7 +472,7 @@ function stepDefender(b, u, dt) {
       bestDist = d;
     }
   }
-  if (best && centerDist(u, u.home) < LEASH) {
+  if (best && centerDist(u, u.home) < leash) {
     if (edgeDist(u, best) <= u.range) hit(b, u, best);
     else walkTo(u, best, dt); // los defensores no se frenan con sus propios muros
   } else if (centerDist(u, u.home) > 0.15) {
@@ -519,6 +522,7 @@ function inflict(b, target, amount) {
 function hit(b, from, target) {
   if (from.cd > 0) return;
   from.cd = from.atkSec;
+  if (from.side === 'a' && target.side === 'd') b.alarm = true; // toda la guarnición se entera
   const dealt = inflict(b, target, damageOf(b, from, target));
   b.events.push({ type: from.range >= RANGED_FROM ? 'shot' : 'hit', from: from.id, to: target.id, dmg: dealt });
 
@@ -635,15 +639,22 @@ function kill(b, target) {
 function checkEnd(b) {
   if (b.mode === 'duel') return checkDuelEnd(b);
   if (b.mode === 'raid') return checkRaidEnd(b);
-  const hall = b.byId.get(b.hallId);
-  if (hall && !hall.alive) return finish(b, true);
-  if (attackers(b).length === 0) return finish(b, false);
-  if (b.time >= COMBAT.timeLimitSec) return finish(b, false);
+  // Destruir el Ayuntamiento da la 1.ª estrella pero la batalla sigue: quedan la 2.ª (50 %) y la 3.ª (100 %).
+  // Termina al destruirlo todo, al quedarte sin tropas o al agotarse el tiempo.
+  if (b.countedBuildings > 0 && b.destroyed >= b.countedBuildings) return finish(b, true);
+  if (attackers(b).length === 0) return finish(b);
+  if (b.time >= COMBAT.timeLimitSec) return finish(b);
   return undefined;
 }
 
-function finish(b, won) {
+const hallDown = (b) => {
+  const hall = b.byId.get(b.hallId);
+  return Boolean(hall && !hall.alive);
+};
+
+function finish(b) {
   b.over = true;
+  const won = hallDown(b); // con el Ayuntamiento destruido ya es una victoria (al menos 1 estrella)
   const survivors = Object.fromEntries(ARMY_UNITS.map((k) => [k, 0]));
   let heroPresent = false;
   for (const u of attackers(b)) {
@@ -658,10 +669,13 @@ function finish(b, won) {
     kills: b.kills,
     total: b.countedBuildings,
     percent: b.countedBuildings ? Math.round((b.destroyed / b.countedBuildings) * 100) : 100,
+    stars: 0, // se calcula justo debajo
     loot: { ...b.loot },
     survivors, // soldados, hechiceros y caballeros que quedaron vivos
     casualties: Object.fromEntries(ARMY_UNITS.map((k) => [k, b.sent[k] - survivors[k]])), // los que se perdieron
     heroSurvived: heroPresent, // el héroe nunca se pierde: «cae» pero vuelve; esto solo informa
   };
-  b.events.push({ type: 'end', won });
+  const r = b.result;
+  r.stars = (r.won ? 1 : 0) + (r.percent >= STARS.half ? 1 : 0) + (r.percent >= STARS.all ? 1 : 0);
+  b.events.push({ type: 'end', won, stars: r.stars });
 }

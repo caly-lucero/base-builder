@@ -130,9 +130,15 @@ test('la validación rechaza datos con checksum correcto pero contenido imposibl
     'calendario con cuenta negativa': (s) => (s.raid = { nextAt: T0, count: -1 }),
     'sin calendario (undefined)': (s) => delete s.raid,
     'campaña no es objeto': (s) => (s.campaign = 3),
-    'campaña sin progreso': (s) => (s.campaign = {}),
-    'campaña con progreso negativo': (s) => (s.campaign = { cleared: -1 }),
-    'campaña con progreso decimal': (s) => (s.campaign = { cleared: 1.5 }),
+    'campaña sin progreso': (s) => (s.campaign = { stars: {} }),
+    'campaña con progreso negativo': (s) => (s.campaign = { cleared: -1, stars: {} }),
+    'campaña con progreso decimal': (s) => (s.campaign = { cleared: 1.5, stars: {} }),
+    'campaña sin estrellas': (s) => (s.campaign = { cleared: 1 }),
+    'estrellas no es objeto': (s) => (s.campaign.stars = 3),
+    'estrellas de más (4)': (s) => (s.campaign.stars = { 1: 4 }),
+    'estrellas negativas': (s) => (s.campaign.stars = { 1: -1 }),
+    'estrellas con nivel raro': (s) => (s.campaign.stars = { abc: 1 }),
+    'estrellas con nivel cero': (s) => (s.campaign.stars = { 0: 1 }),
     'sin campaña (undefined)': (s) => delete s.campaign,
     'entrenamiento sin campo (undefined)': (s) => delete s.buildings[MINE].training,
     'entrenamiento en un edificio que no entrena': (s) => (s.buildings[MINE].training = { unit: 'soldier', endsAt: T0 + 1000 }),
@@ -202,7 +208,7 @@ test('el ejército, los héroes, las investigaciones y un entrenamiento en curso
   s.research = { weapons: 2, armor: 0, fortify: 3 };
   s.achievements.builder = 2;
   s.achievements.conquer = 1;
-  s.campaign = { cleared: 4 };
+  s.campaign = { cleared: 4, stars: { 1: 3, 2: 2, 3: 1, 4: 1 } };
   assert.equal(startTraining(s, barracks.id, 'soldier', T0).ok, true);
 
   const r = parseSave(serialize(s));
@@ -212,7 +218,7 @@ test('el ejército, los héroes, las investigaciones y un entrenamiento en curso
   assert.deepEqual(r.state.heroes, { paladin: { level: 2, xp: 35 }, priestess: { level: 7, xp: 120 } });
   assert.deepEqual(r.state.squad, ['priestess', 'paladin'], 'conserva el orden de la escuadra');
   assert.deepEqual(r.state.research, { weapons: 2, armor: 0, fortify: 3 });
-  assert.deepEqual(r.state.campaign, { cleared: 4 });
+  assert.deepEqual(r.state.campaign, { cleared: 4, stars: { 1: 3, 2: 2, 3: 1, 4: 1 } }, 'conserva las estrellas');
   assert.deepEqual([r.state.achievements.builder, r.state.achievements.conquer], [2, 1], 'conserva los logros reclamados');
   assert.deepEqual(r.state.buildings.find((b) => b.type === 'barracks').training, { unit: 'soldier', endsAt: T0 + 15_000 });
 });
@@ -248,7 +254,7 @@ test('migración v6 → v7: nada queda dañado y el calendario queda «sin progr
   assert.equal(r.ok, true);
   assert.ok(r.state.buildings.every((b) => b.damaged === false));
   assert.deepEqual(r.state.raid, { nextAt: 0, count: 0 });
-  assert.deepEqual(r.state.campaign, { cleared: 2 }, 'conserva la campaña');
+  assert.deepEqual(r.state.campaign, { cleared: 2, stars: { 1: 1, 2: 1 } }, 'conserva la campaña; cada nivel superado cuenta como 1 estrella');
   assert.equal(r.state.buildings.length, 3);
 });
 
@@ -394,7 +400,7 @@ test('migración v5 → v6: una partida con héroe conserva todo y añade campa�
   assert.equal(r.ok, true);
   assert.deepEqual(r.state.heroes, { paladin: { level: 2, xp: 0 } }, 'el héroe de antes es el paladín');
   assert.deepEqual(r.state.squad, ['paladin']);
-  assert.deepEqual(r.state.campaign, { cleared: 0 });
+  assert.deepEqual(r.state.campaign, { cleared: 0, stars: {} });
   assert.deepEqual(r.state.army, { soldier: 2, archer: 0, mage: 0, knight: 0, catapult: 0, ram: 0 });
   assert.deepEqual(r.state.claimedQuests, ['q_sawmill']);
 
@@ -462,4 +468,17 @@ test('la migración no abre una partida antigua modificada, ni una con forma rar
   assert.equal(parseSave(v1Save((d) => (d.buildings = [null, 5, 'x']))).ok, false);
   assert.equal(parseSave(v1Save((d) => (d.nextId = 'x'))).ok, false);
   assert.equal(parseSave(v1Save((d) => (d.buildings[0].x = 'x'))).ok, false);
+});
+
+test('migración v8 → v9: cada nivel de campaña superado cuenta como 1 estrella y aparece el logro de estrellas', () => {
+  const s = sampleState();
+  const env = JSON.parse(serialize(s));
+  const data = env.data;
+  data.campaign = { cleared: 3 }; // como lo guardaba la v8
+  delete data.achievements.stars;
+  const r = parseSave(JSON.stringify({ v: 8, sum: checksum(data), data }));
+  assert.equal(r.ok, true, r.error);
+  assert.deepEqual(r.state.campaign, { cleared: 3, stars: { 1: 1, 2: 1, 3: 1 } });
+  assert.equal(r.state.achievements.stars, 0);
+  assert.equal(r.state.achievements.builder, 0);
 });

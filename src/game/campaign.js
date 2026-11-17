@@ -1,5 +1,5 @@
 // Campaña: qué se ataca y cómo se aplica el resultado de una batalla a la partida. Lógica pura.
-import { ARMY_UNITS, COMBAT, RESOURCES } from '../data/config.js';
+import { ARMY_UNITS, COMBAT, RESOURCES, starReward } from '../data/config.js';
 import { HEROES, heroXpToNext } from '../data/heroes.js';
 import { armyCount, heroLevelCap, resourceCap, squadHeroes } from './logic.js';
 
@@ -56,6 +56,22 @@ export function applyBattleResult(state, result) {
     loot[r] = state[r] - before;
   }
 
+  // Estrellas: se guarda la mejor de cada nivel y cada estrella NUEVA da un premio extra (también entra sin pasar el tope).
+  const stars = result.stars ?? (result.won ? 1 : 0);
+  const before = state.campaign.stars[result.level] ?? 0;
+  const gained = Math.max(0, stars - before);
+  const bonus = { gold: 0, wood: 0 };
+  if (gained > 0) {
+    state.campaign.stars[result.level] = stars;
+    const reward = starReward(result.level);
+    for (const r of RESOURCES) {
+      const give = reward[r] * gained;
+      const had = state[r];
+      state[r] = Math.max(had, Math.min(cap, had + give));
+      bonus[r] = state[r] - had;
+    }
+  }
+
   let cleared = false;
   if (result.won && result.level === nextCampaignLevel(state)) {
     state.campaign.cleared += 1;
@@ -68,5 +84,5 @@ export function applyBattleResult(state, result) {
     (result.won ? COMBAT.heroXpWin + COMBAT.heroXpPerLevel * result.level : 0);
   const { xp, heroLevelUps, hero, heroes } = grantHeroXp(state, earned);
 
-  return { won: result.won, level: result.level, percent: result.percent, loot, casualties: { ...result.casualties }, xp, heroLevelUps, hero, heroes, cleared };
+  return { won: result.won, level: result.level, percent: result.percent, stars, newStars: gained, starBonus: bonus, loot, casualties: { ...result.casualties }, xp, heroLevelUps, hero, heroes, cleared };
 }

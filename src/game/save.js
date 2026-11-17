@@ -19,7 +19,7 @@ import {
   supplyUsed,
 } from './logic.js';
 
-export const SAVE_VERSION = 8;
+export const SAVE_VERSION = 9;
 export const MAX_SAVE_BYTES = 200_000;
 
 const KEY = 'basebuilder.save';
@@ -125,7 +125,18 @@ function migrate(data, version) {
   // (con una escuadra de 2), la Herrería y los niveles hasta el 10. El héroe único pasa a ser el Paladín.
   if (version < 8) d = migrateV7toV8(d);
 
+  // v8 → v9: aparecieron las estrellas de campaña (cada nivel ya superado cuenta como 1 estrella) y el logro de estrellas.
+  if (version < 9) d = migrateV8toV9(d);
+
   return d;
+}
+
+function migrateV8toV9(d) {
+  const campaign = isPlainObject(d.campaign) ? d.campaign : { cleared: 0 };
+  const stars = {};
+  const cleared = Number.isInteger(campaign.cleared) ? Math.min(campaign.cleared, 9999) : 0;
+  for (let level = 1; level <= cleared; level++) stars[level] = 1;
+  return { ...d, campaign: { ...campaign, stars }, achievements: { ...emptyAchievements(), ...(isPlainObject(d.achievements) ? d.achievements : {}) } };
 }
 
 function migrateV7toV8(d) {
@@ -253,8 +264,15 @@ export function validateState(d) {
     achievements[a.id] = d.achievements[a.id];
   }
 
-  if (!isPlainObject(d.campaign) || !isInt(d.campaign.cleared, 0, 9999)) bad('Campaña inválida');
-  const campaign = { cleared: d.campaign.cleared };
+  if (!isPlainObject(d.campaign) || !isInt(d.campaign.cleared, 0, 9999) || !isPlainObject(d.campaign.stars)) bad('Campaña inválida');
+  const starEntries = Object.entries(d.campaign.stars);
+  if (starEntries.length > 10_000) bad('Campaña inválida');
+  const stars = {};
+  for (const [level, n] of starEntries) {
+    if (!/^[1-9]\d{0,3}$/.test(level) || !isInt(n, 0, 3)) bad('Estrellas inválidas');
+    if (n > 0) stars[level] = n;
+  }
+  const campaign = { cleared: d.campaign.cleared, stars };
 
   if (!isPlainObject(d.raid) || !isNum(d.raid.nextAt, 0, MAX_TIME) || !isInt(d.raid.count, 0, 1_000_000)) bad('Calendario de ataques inválido');
   const raid = { nextAt: d.raid.nextAt, count: d.raid.count };

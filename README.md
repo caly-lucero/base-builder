@@ -21,7 +21,7 @@ Cada vez que se sube algo a la rama `main`, GitHub corre las pruebas, compila y 
   | Edificio | Unidad | Papel |
   |---|---|---|
   | Cuartel | Soldado | barato y resistente; vence a los caballeros |
-  | Arquería | Arquero | dispara desde lejos; parejo con soldados y magos, pierde con caballeros |
+  | Arquería | Arquero | dispara desde lejos; vence a los magos, parejo con los soldados, pierde con los caballeros |
   | Atelier | Hechicero | daño en área; rompe soldados agrupados |
   | Caballeriza | Caballero | rápido y duro; arrasa arqueros y magos, pierde con soldados |
   | Taller de asedio | Catapulta (nivel 1) y Ariete (nivel 5) | van a por los edificios y casi no dañan unidades |
@@ -33,7 +33,8 @@ Cada vez que se sube algo a la rama `main`, GitHub corre las pruebas, compila y 
   - Ganan experiencia siempre que pelean (6 por edificio, 4 por baja, bono por ganar) y **su nivel no pasa del doble del Ayuntamiento**: al llegar al tope guardan la experiencia hasta que lo subas.
 - **Combate y campaña (botón ⚔)**: ataca bases enemigas generadas (Campaña 1, 2, 3…, cada una más dura).
   - **Automático con control de grupos**: tus unidades pelean solas (primero los enemigos cercanos, luego el edificio más cercano; los muros se rodean o se rompen). Tú puedes **elegir un grupo** (Todos, Soldados, Arqueros, Magos, Caballeros, Asedio, Héroes, tocando una unidad o con el recuadro ▭) y **darle un objetivo**: tocar un enemigo o edificio para atacarlo, o el suelo para moverlo. Al cumplir la orden vuelven al modo automático; **Auto** las devuelve de inmediato.
-  - Se gana destruyendo el Ayuntamiento enemigo; se pierde si caen todas tus tropas, se acaba el tiempo (3 min) o tocas **Retirada** (dos toques). Hay botón de velocidad ×2.
+  - **Tres estrellas, como en Clash**: ★ por destruir el Ayuntamiento enemigo (eso ya es una victoria y hace avanzar la campaña), ★ por destruir el 50 % de su base y ★ por destruirla toda (los muros no cuentan). Destruir el Ayuntamiento **no termina la batalla**: sigue hasta que arrases todo, te quedes sin tropas, se acabe el tiempo (3 min) o te retires. Se guarda la mejor cantidad de estrellas de cada nivel y **cada estrella nueva da un premio extra** que crece con el nivel. Las estrellas se encienden en vivo arriba del mapa.
+  - **La guarnición defiende en grupo**: en cuanto atacas algo de una aldea (la enemiga o la tuya), todas sus tropas se enteran, ven más lejos y acuden. Las guarniciones enemigas son variadas: guardias, arqueros (desde la campaña 3), brutos (4) y chamanes (6); en los ataques a tu base llegan además arañas y arqueros.
   - **Resultado**: las tropas caídas se pierden (los héroes no), el botín entra sin pasar el tope y los héroes de la escuadra ganan experiencia. Ganar el nivel que toca avanza la campaña.
 - **Ataques enemigos a tu base**: cada 12 minutos (el primero a los 10) llega una oleada. Un cartel rojo muestra la **cuenta regresiva** y la fuerza del ataque (crece con el Ayuntamiento y con la campaña superada). **Si estás jugando, ves la defensa en vivo** (tus torres, muros, tropas y héroes pelean solos, puedes lanzar las habilidades o **saltar la defensa**); si estabas fuera, solo ves el informe. El enemigo se retira tras destruir `2 + nivel del Ayuntamiento` edificios, y el informe cuenta cómo fue:
   - los edificios destruidos quedan **dañados** (oscuros, con la etiqueta «Dañado»): no producen, no entrenan ni mejoran hasta **repararlos**, por una parte de lo invertido (30 %). Tócalos y pulsa *Reparar*, o toca el cartel rojo para **reparar todo**;
@@ -48,7 +49,7 @@ Cada vez que se sube algo a la rama `main`, GitHub corre las pruebas, compila y 
 - La producción, las mejoras, el entrenamiento y las investigaciones **siguen mientras no juegas** (máximo 8 h de producción); al volver, el juego avisa qué terminó.
 - **Animación**: en la base, tus tropas y héroes **pasean** alrededor de su puesto; en la batalla las unidades **rebotan al caminar, se lanzan al golpear, retroceden al disparar y caen de lado** al morir. Mientras un edificio se mejora, un **martillo** lo golpea y levanta polvo; la fragua echa brasas, el altar brilla, la mina destella y el aserradero suelta astillas.
 - **Vida**: un **aldeano** por cada mina y aserradero camina entre el Ayuntamiento y su edificio llevando la carga (es adorno). Al recolectar suben números flotantes y chispas; al construir, el edificio «salta» con una nube de polvo; los árboles se mecen con el viento.
-- **Arte y sonido**: terreno, edificios con un dibujo distinto por nivel, adornos, aldeanos, unidades y héroes (Kenney, CC0; los edificios nuevos son recolores de esos dibujos y las armas de asedio y los muros están dibujados para el proyecto), 10 efectos de sonido y botón **Sonido: sí/no**.
+- **Arte y sonido**: terreno y edificios del pack Medieval RTS de Kenney (CC0; los edificios nuevos son recolores y las armas de asedio y los muros están dibujados para el proyecto) y **personajes del pack Tiny Dungeon (CC0) personalizados**: azul para tus tropas, cada héroe con su color, arma y detalle (corona, aureola, capa) y enemigos en rojo y verde pantano, con un script que los genera (`scripts/make-characters.ps1`). Hay 10 efectos de sonido y un botón de sonido en el Menú.
 - Guardado automático, exportar/importar partida y funcionamiento sin conexión.
 
 ## Controles
@@ -139,7 +140,7 @@ Arte y sonido de [Kenney](https://kenney.nl) (packs Medieval RTS, Interface Soun
 - El lienzo es de 432 px de ancho (el alto se adapta a la pantalla al arrancar) y se escala; en pantallas grandes los dibujos se ven algo suavizados. Si giras el celular hay que recargar.
 - Los enlaces entre muros usan solo dos piezas por nivel (horizontal y vertical): en esquinas y cruces se ven bien, pero no hay un dibujo especial para cada forma.
 - Los niveles 4 a 10 reutilizan el dibujo del nivel 3 con un tinte; no tienen arte propio. Los edificios militares nuevos, las casas y la herrería son **recolores** de edificios del pack (se distinguen por el color y la forma, pero no tienen un dibujo único); algunos comparten silueta.
-- Los cinco héroes comparten dibujo con los demás soldados del pack, con otro color: se parecen entre sí.
+- Los personajes son de 16 px escalados ×2 (pixel art) sobre edificios más suaves: el estilo no es del todo homogéneo.
 - Las animaciones son por código sobre un solo dibujo por unidad (no hay cuadros de caminar o atacar dibujados): se ven vivas pero no son animación de verdad. Falta arte propio.
 - Los edificios entrenan de a una unidad por vez; no hay cola de entrenamiento. Solo cuenta el edificio de mayor nivel de cada tipo para el nivel de las unidades; tener varios solo ayuda a entrenar más a la vez.
 - Una batalla en curso no se guarda: si cierras la página, no cuenta (tus tropas siguen intactas).

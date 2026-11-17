@@ -157,6 +157,15 @@ export function ensureTextures(scene) {
   });
 }
 
+/** Los personajes son pixel art: se dibujan sin suavizar para que los píxeles se vean nítidos al escalarlos. */
+export function crispCharacters(scene, keys) {
+  for (const key of keys) {
+    if (/^(unit_|hero_|enemy_|worker_)/.test(key) && key !== 'unit_catapult' && key !== 'unit_ram' && scene.textures.exists(key)) {
+      scene.textures.get(key).setFilter(Phaser.Textures.FilterMode.NEAREST);
+    }
+  }
+}
+
 /** Añade el brillo encima de un rectángulo (sin tapar su borde). Devuelve la imagen para ocultarla con él. */
 export function addGloss(scene, rect, depth = rect.depth + 0.3, strength = 1) {
   return scene.add

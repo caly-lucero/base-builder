@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { COMBAT } from '../src/data/config.js';
+import { COMBAT, starReward } from '../src/data/config.js';
 import { HERO_MAX_LEVEL, heroXpToNext } from '../src/data/heroes.js';
 import { applyBattleResult, canAttack, nextCampaignLevel } from '../src/game/campaign.js';
 import { createNewState, resourceCap, townHall } from '../src/game/logic.js';
@@ -180,4 +180,59 @@ test('canAttack pide al menos una unidad o un héroe en la escuadra', () => {
   s.squad = ['paladin'];
   assert.equal(canAttack(s), true);
   assert.ok(townHall(s));
+});
+
+/* ---------- estrellas ---------- */
+
+test('se guarda la mejor cantidad de estrellas de cada nivel y no baja', () => {
+  const s = fresh();
+  applyBattleResult(s, result({ level: 1, stars: 2 }));
+  assert.equal(s.campaign.stars[1], 2);
+  applyBattleResult(s, result({ level: 1, stars: 1 }));
+  assert.equal(s.campaign.stars[1], 2, 'un resultado peor no pisa el mejor');
+  applyBattleResult(s, result({ level: 1, stars: 3 }));
+  assert.equal(s.campaign.stars[1], 3);
+});
+
+test('cada estrella nueva da un premio extra que crece con el nivel; repetir no da nada', () => {
+  const s = fresh();
+  s.gold = 0;
+  s.wood = 0;
+  const loot = { gold: 0, wood: 0 };
+  let r = applyBattleResult(s, result({ level: 1, stars: 2, loot }));
+  const one = starReward(1);
+  assert.equal(r.newStars, 2);
+  assert.deepEqual(r.starBonus, { gold: one.gold * 2, wood: one.wood * 2 });
+  assert.equal(s.gold, one.gold * 2);
+
+  r = applyBattleResult(s, result({ level: 1, stars: 2, loot }));
+  assert.equal(r.newStars, 0);
+  assert.deepEqual(r.starBonus, { gold: 0, wood: 0 });
+
+  r = applyBattleResult(s, result({ level: 1, stars: 3, loot }));
+  assert.equal(r.newStars, 1, 'solo la tercera es nueva');
+  assert.deepEqual(r.starBonus, one);
+  assert.ok(starReward(8).gold > starReward(1).gold);
+});
+
+test('sin estrellas no se supera el nivel; con una sí', () => {
+  const s = fresh();
+  let r = applyBattleResult(s, result({ level: 1, won: false, stars: 1 })); // solo el 50 %: estrella pero no Ayuntamiento
+  assert.equal(r.cleared, false);
+  assert.equal(s.campaign.cleared, 0);
+  assert.equal(s.campaign.stars[1], 1);
+  r = applyBattleResult(s, result({ level: 1, won: true, stars: 1 }));
+  assert.equal(r.cleared, true);
+  assert.equal(r.stars, 1);
+  r = applyBattleResult(s, result({ level: 2, won: false, stars: 0 }));
+  assert.equal(r.newStars, 0);
+  assert.equal(s.campaign.stars[2], undefined, 'sin estrellas no queda registro');
+});
+
+test('el premio de estrellas no pasa del tope de recursos', () => {
+  const s = fresh();
+  s.gold = resourceCap(s) - 5;
+  const r = applyBattleResult(s, result({ level: 3, stars: 3, loot: { gold: 0, wood: 0 } }));
+  assert.equal(s.gold, resourceCap(s));
+  assert.equal(r.starBonus.gold, 5);
 });

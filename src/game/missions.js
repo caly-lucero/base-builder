@@ -68,7 +68,14 @@ export function generateMission(level) {
   // Defensores: guardias desde el principio y brutos desde el nivel 4, cerca del Ayuntamiento.
   const defenders = [];
   const near = () => ({ x: HALL.x + (rand() * 5 - 2.5), y: HALL.y + (rand() * 5 - 2.5) });
-  for (let i = 0; i < Math.min(2 + lvl, 10); i++) defenders.push({ kind: 'guard', ...near() });
+  // Una guarnición variada: guardias en general, arqueros desde el nivel 3, chamanes desde el 6 y brutos desde el 4.
+  const total = Math.min(2 + lvl, 10);
+  const bowmen = lvl >= 3 ? Math.min(1 + Math.floor((lvl - 3) / 3), 4) : 0;
+  const shamans = lvl >= 6 ? Math.min(1 + Math.floor((lvl - 6) / 4), 3) : 0;
+  const guards = Math.max(2, total - bowmen - shamans);
+  for (let i = 0; i < guards; i++) defenders.push({ kind: 'guard', ...near() });
+  for (let i = 0; i < bowmen; i++) defenders.push({ kind: 'bowman', ...near() });
+  for (let i = 0; i < shamans; i++) defenders.push({ kind: 'shaman', ...near() });
   for (let i = 0; i < Math.max(0, Math.floor((lvl - 2) / 2)); i++) defenders.push({ kind: 'brute', ...near() });
 
   return { level: lvl, hpScale: 1 + 0.12 * (lvl - 1), dmgScale: 1 + 0.08 * (lvl - 1), buildings, defenders };

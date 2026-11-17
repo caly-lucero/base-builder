@@ -588,7 +588,8 @@ export function dialog(scene, o) {
   const vertical = o.vertical ?? buttons.length > 2;
   const btnH = 46;
   const btnArea = vertical ? buttons.length * (btnH + 8) : buttons.length ? btnH + 8 : 0;
-  const h = 64 + textH + btnArea + 20;
+  const starH = o.stars === undefined ? 0 : 50;
+  const h = 64 + starH + textH + btnArea + 20;
   const cx = W / 2;
   const cy = LAYOUT.gridTop + LAYOUT.viewHeight / 2 - 10;
   const top = cy - h / 2;
@@ -602,13 +603,21 @@ export function dialog(scene, o) {
   const tone = o.tone === 'good' ? TXT.good : o.tone === 'bad' ? TXT.bad : TXT.gold;
   if (o.icon) add(icon(scene, cx - w / 2 + 34, top + 34, o.icon, 32, d + 2));
   add(label(scene, o.icon ? cx - w / 2 + 62 : cx, top + 34, o.title, { size: 19, bold: true, color: tone, origin: o.icon ? [0, 0.5] : [0.5, 0.5], depth: d + 2, wrap: w - 90 }));
-  lines.forEach((line, i) => add(label(scene, cx, top + 66 + i * 24, line, { size: 13, origin: [0.5, 0], align: 'center', depth: d + 2, wrap: w - 36 })));
-  const by = top + 64 + textH;
+  if (o.stars !== undefined) {
+    // Tres estrellas grandes: las ganadas en dorado y las que faltan apagadas.
+    for (let i = 0; i < 3; i++) {
+      const star = add(icon(scene, cx + (i - 1) * 50, top + 88, 'star', i === 1 ? 46 : 38, d + 2));
+      if (i >= o.stars) star.setTint(0x2a2118).setAlpha(0.55);
+      else scene.tweens?.add({ targets: star, scale: star.scale * 1.18, duration: 220, delay: 120 + i * 160, yoyo: true });
+    }
+  }
+  lines.forEach((line, i) => add(label(scene, cx, top + 66 + starH + i * 24, line, { size: 13, origin: [0.5, 0], align: 'center', depth: d + 2, wrap: w - 36 })));
+  const by = top + 64 + starH + textH;
   buttons.forEach((b, i) => {
     const bw = vertical ? w - 36 : (w - 36 - (buttons.length - 1) * 10) / buttons.length;
     const x = vertical ? cx : cx - (w - 36) / 2 + bw / 2 + i * (bw + 10);
     const y = vertical ? by + btnH / 2 + i * (btnH + 8) : by + btnH / 2;
-    const btn = button(scene, { x, y, w: bw, h: btnH, kind: b.kind ?? 'dark2', text: b.text, icon: b.icon, size: 14, depth: d + 2, onClick: () => {
+    const btn = button(scene, { x, y, w: bw, h: btnH, kind: b.kind ?? 'dark2', text: b.text, icon: b.icon, size: b.text.length > 18 ? 11 : 14, depth: d + 2, onClick: () => {
       if (b.close !== false) scene.closeModal();
       b.onClick?.();
     } });

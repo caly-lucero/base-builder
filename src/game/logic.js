@@ -34,7 +34,7 @@ export function createNewState(now = Date.now()) {
     squad: [], // los (hasta 2) que salen a pelear, por clave
     research: emptyResearch(), // nivel de cada investigación de la Herrería
     achievements: emptyAchievements(), // niveles reclamados de cada logro (ver achievements.js)
-    campaign: { cleared: 0 }, // niveles de campaña superados
+    campaign: { cleared: 0, stars: {} }, // niveles superados y mejores estrellas (0-3) de cada nivel
     savedAt: now,
   };
 }

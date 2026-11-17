@@ -321,8 +321,8 @@ export const BUILDINGS = {
 // `combat`: vida, daño por golpe, alcance (casillas), velocidad (casillas/s) y segundos entre golpes.
 // Extras: `bonus` (más daño contra ciertos tipos), `splash` (daño en área alrededor del objetivo, como fracción)
 // y `siege` (solo ataca edificios, y mucho; casi no daña unidades).
-// Equilibrio: el soldado aguanta y vence al caballero; el caballero arrasa arqueros y magos; los arqueros
-// castigan a los soldados desde lejos; el mago rompe grupos apretados. Hay una prueba que lo vigila.
+// Equilibrio (con el mismo gasto): el soldado vence al caballero; el caballero arrasa arqueros y magos; el arquero
+// vence al mago desde lejos y queda parejo con el soldado; el mago rompe a los soldados apretados. Hay una prueba que lo vigila.
 export const UNITS = {
   soldier: {
     name: 'Soldado', sprite: 'unit_soldier', building: 'barracks', cost: { gold: 40, wood: 10 }, supply: 1, trainSec: 15, minLevel: 1, perLevel: 0.15,
@@ -331,7 +331,7 @@ export const UNITS = {
   },
   archer: {
     name: 'Arquero', sprite: 'unit_archer', building: 'archery', cost: { gold: 55, wood: 25 }, supply: 1, trainSec: 20, minLevel: 1, perLevel: 0.15,
-    combat: { hp: 38, dmg: 9, range: 4.2, speed: 1.7, atkSec: 0.9 },
+    combat: { hp: 56, dmg: 12, range: 4.2, speed: 1.7, atkSec: 0.9 },
     bonus: { soldier: 1.25 },
   },
   mage: {
@@ -342,7 +342,7 @@ export const UNITS = {
   knight: {
     name: 'Caballero', sprite: 'unit_knight', building: 'stable', cost: { gold: 130, wood: 60 }, supply: 2, trainSec: 40, minLevel: 1, perLevel: 0.15,
     combat: { hp: 180, dmg: 15, range: 1.0, speed: 2.2, atkSec: 1.0 },
-    bonus: { archer: 1.5, mage: 1.5 },
+    bonus: { archer: 2, mage: 1.5 },
   },
   catapult: {
     name: 'Catapulta', sprite: 'unit_catapult', building: 'siege', cost: { gold: 220, wood: 140 }, supply: 3, trainSec: 70, minLevel: 1, perLevel: 0.15,
@@ -397,7 +397,20 @@ export const COMBAT = {
 export const ENEMY_UNITS = {
   guard: { name: 'Guardia', sprite: 'enemy_guard', hp: 50, dmg: 7, range: 0.9, speed: 1.6, atkSec: 0.9 },
   brute: { name: 'Bruto', sprite: 'enemy_brute', hp: 140, dmg: 12, range: 1.0, speed: 1.5, atkSec: 1.1 },
+  bowman: { name: 'Arquero enemigo', sprite: 'enemy_archer', hp: 34, dmg: 7, range: 4.0, speed: 1.6, atkSec: 1.0 },
+  shaman: { name: 'Chamán', sprite: 'enemy_shaman', hp: 40, dmg: 12, range: 3.4, speed: 1.4, atkSec: 1.4, splash: { radius: 1.0, fraction: 0.5 } },
+  spider: { name: 'Araña', sprite: 'enemy_spider', hp: 30, dmg: 6, range: 0.8, speed: 2.6, atkSec: 0.6 },
 };
+
+// Estrellas de un ataque (como en Clash): ★ por destruir el Ayuntamiento enemigo, ★ por destruir el 50 % de su
+// base y ★ por destruirla toda (los muros no cuentan). Cada estrella NUEVA de un nivel da un premio extra.
+export const STARS = { hall: 1, half: 50, all: 100, reward: { gold: 30, wood: 15, perLevel: 0.5 } };
+
+/** Premio por una estrella nueva en un nivel de campaña: crece con el nivel. */
+export const starReward = (level) => ({
+  gold: Math.round(STARS.reward.gold * (1 + STARS.reward.perLevel * (level - 1))),
+  wood: Math.round(STARS.reward.wood * (1 + STARS.reward.perLevel * (level - 1))),
+});
 
 // Defensa de TU base cuando el enemigo la ataca. La vida de cada edificio crece con su nivel; las
 // torres disparan (más daño por nivel); tu ejército y tus héroes defienden desde donde están formados.
@@ -500,7 +513,7 @@ export const BUILDABLE = TOOL_PAGES.flatMap((p) => p.tools);
 //   army         unidades de ejército (todas)                 siege   armas de asedio
 //   campaign     niveles de campaña superados                 heroes  héroes que tienes
 //   heroLevel    el nivel más alto de un héroe                 research el nivel más alto de una investigación
-//   raids        ataques enemigos sufridos
+//   raids        ataques enemigos sufridos            stars    estrellas de campaña (suma de las mejores de cada nivel)
 export const ACHIEVEMENTS = [
   { id: 'builder', name: 'Constructor', text: 'Ten edificios en tu base', kind: 'buildings', tiers: [{ target: 5, reward: { gold: 100 } }, { target: 15, reward: { gold: 300, wood: 150 } }, { target: 35, reward: { gold: 900, wood: 450 } }, { target: 70, reward: { gold: 3000, wood: 1500 } }] },
   { id: 'wall', name: 'Muralla', text: 'Levanta muros y puertas', kind: 'walls', tiers: [{ target: 20, reward: { wood: 150 } }, { target: 80, reward: { wood: 500 } }, { target: 200, reward: { wood: 1500 } }, { target: 400, reward: { wood: 5000 } }] },
@@ -512,5 +525,6 @@ export const ACHIEVEMENTS = [
   { id: 'heroes', name: 'Colección de héroes', text: 'Invoca a tus héroes', kind: 'heroes', tiers: [{ target: 1, reward: { gold: 300, wood: 150 } }, { target: 3, reward: { gold: 2500, wood: 1200 } }, { target: 5, reward: { gold: 15000, wood: 7500 } }] },
   { id: 'legend', name: 'Leyenda', text: 'Lleva a un héroe a un nivel alto', kind: 'heroLevel', tiers: [{ target: 5, reward: { gold: 500, wood: 250 } }, { target: 10, reward: { gold: 4000, wood: 2000 } }, { target: 15, reward: { gold: 15000, wood: 7500 } }, { target: 20, reward: { gold: 50000, wood: 25000 } }] },
   { id: 'smith', name: 'Herrero', text: 'Sube una investigación de la Herrería', kind: 'research', tiers: [{ target: 2, reward: { gold: 500, wood: 300 } }, { target: 5, reward: { gold: 4000, wood: 2000 } }, { target: 8, reward: { gold: 15000, wood: 7500 } }, { target: 10, reward: { gold: 40000, wood: 20000 } }] },
+  { id: 'stars', name: 'Cazador de estrellas', text: 'Gana estrellas en la campaña', kind: 'stars', tiers: [{ target: 3, reward: { gold: 300, wood: 150 } }, { target: 15, reward: { gold: 2500, wood: 1200 } }, { target: 45, reward: { gold: 12000, wood: 6000 } }, { target: 90, reward: { gold: 40000, wood: 20000 } }] },
   { id: 'survivor', name: 'Superviviente', text: 'Sobrevive a ataques enemigos', kind: 'raids', tiers: [{ target: 1, reward: { gold: 200, wood: 100 } }, { target: 5, reward: { gold: 1500, wood: 750 } }, { target: 15, reward: { gold: 8000, wood: 4000 } }, { target: 30, reward: { gold: 30000, wood: 15000 } }] },
 ];

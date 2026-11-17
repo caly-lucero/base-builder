@@ -69,6 +69,7 @@ test('los contras de diseño se cumplen: el soldado vence al caballero, el cabal
   assert.equal(matchup('knight', 'mage'), 'knight');
   assert.equal(matchup('knight', 'archer'), 'knight');
   assert.equal(matchup('mage', 'soldier'), 'mage');
+  assert.equal(matchup('archer', 'mage'), 'archer');
 });
 
 test('un nivel más alto del edificio da unidades más fuertes que ganan al mismo ejército de nivel 1', () => {
@@ -284,4 +285,88 @@ test('con héroes la batalla sigue siendo determinista', () => {
   for (let i = 0; i < 60; i++) advanceBattle(c, 1.0);
   assert.deepEqual(a.result, c.result);
   assert.deepEqual(attackers(a).map((u) => [u.id, Math.round(u.hp * 1000)]), attackers(c).map((u) => [u.id, Math.round(u.hp * 1000)]));
+});
+
+/* ---------- estrellas y alarma de la guarnición ---------- */
+
+import { retreat } from '../src/game/battle.js';
+
+const miniBase = (extra = []) => mini({ buildings: extra, hpScale: 1 });
+const killWhen = (b, types) => {
+  for (const e of b.buildings) if (types.includes(e.type)) e.hp = 1;
+};
+
+test('destruir el Ayuntamiento da la 1.ª estrella pero la batalla sigue', () => {
+  const b = createBattle(miniBase([{ type: 'mine', x: 4, y: 18 }, { type: 'sawmill', x: 20, y: 18 }, { type: 'storage', x: 4, y: 3 }]), army({ soldier: 3 }), []);
+  b.buildings.forEach((e) => (e.hp = e.maxHp = e.type === 'hall' ? 1 : 100000)); // solo el Ayuntamiento es frágil
+  const hall = b.buildings.find((e) => e.type === 'hall');
+  hall.x = 12;
+  hall.y = 20;
+  run(b, 15);
+  assert.equal(hall.alive, false, 'el Ayuntamiento cayó');
+  assert.equal(b.over, false, 'pero la batalla no terminó');
+  retreat(b);
+  assert.equal(b.result.won, true, 'con el Ayuntamiento destruido es una victoria aunque te retires');
+  assert.equal(b.result.stars, 1);
+  assert.equal(b.result.percent, 25);
+});
+
+test('destruir la mitad de la base da la 2.ª estrella aunque el Ayuntamiento siga en pie', () => {
+  const b = createBattle(miniBase([{ type: 'mine', x: 11, y: 19 }, { type: 'sawmill', x: 13, y: 19 }, { type: 'storage', x: 12, y: 21 }]), army({ soldier: 4 }), []);
+  b.buildings.forEach((e) => (e.hp = e.maxHp = e.type === 'hall' ? 100000 : 1));
+  run(b, 25);
+  retreat(b);
+  assert.equal(b.result.won, false, 'sin el Ayuntamiento no es una victoria');
+  assert.ok(b.result.percent >= 50, `destruyó ${b.result.percent} %`);
+  assert.equal(b.result.stars, b.result.percent >= 100 ? 3 : 1);
+});
+
+test('destruirlo todo da las 3 estrellas y termina la batalla', () => {
+  const b = createBattle(miniBase([{ type: 'mine', x: 11, y: 19 }, { type: 'wall', x: 8, y: 19 }]), army({ soldier: 5 }), []);
+  b.buildings.forEach((e) => (e.hp = e.maxHp = 1));
+  b.buildings.find((e) => e.type === 'hall').y = 20;
+  run(b, 60);
+  assert.equal(b.over, true);
+  assert.equal(b.result.percent, 100);
+  assert.equal(b.result.stars, 3);
+  assert.equal(b.result.won, true);
+});
+
+test('sin destruir nada no hay estrellas', () => {
+  const b = createBattle(miniBase([{ type: 'mine', x: 5, y: 3 }]), army({ soldier: 1 }), []);
+  retreat(b);
+  assert.equal(b.result.stars, 0);
+  assert.equal(b.result.won, false);
+});
+
+test('al atacar algo de la aldea, toda la guarnición se entera y acude desde más lejos', () => {
+  const m = mini({ buildings: [{ type: 'mine', x: 12, y: 20 }], defenders: [{ kind: 'guard', x: 12, y: 13 }] });
+  const quiet = createBattle(m, army({ soldier: 1 }), []);
+  const guard = defenderUnits(quiet)[0];
+  attackers(quiet)[0].x = 12;
+  attackers(quiet)[0].y = 19;
+  run(quiet, 0.3);
+  assert.ok(quiet.alarm, 'el golpe a la mina dio la alarma');
+  const startY = guard.y;
+  run(quiet, 3);
+  assert.ok(guard.y > startY + 1, `el guardia, a ${(20 - 13)} casillas, acudió (${startY} → ${guard.y})`);
+
+  // Sin alarma, el mismo guardia se queda en su puesto.
+  const calm = createBattle(m, army({ soldier: 1 }), []);
+  attackers(calm)[0].x = 3;
+  attackers(calm)[0].y = 22;
+  const g2 = defenderUnits(calm)[0];
+  const y0 = g2.y;
+  run(calm, 2);
+  assert.equal(g2.y, y0);
+  assert.ok(!calm.alarm);
+});
+
+test('las guarniciones tienen variedad: arqueros desde el nivel 3 y chamanes desde el 6', async () => {
+  const { generateMission } = await import('../src/game/missions.js');
+  const kinds = (lvl) => new Set(generateMission(lvl).defenders.map((d) => d.kind));
+  assert.deepEqual([...kinds(1)], ['guard']);
+  assert.ok(kinds(3).has('bowman'));
+  assert.ok(!kinds(3).has('shaman'));
+  assert.ok(kinds(8).has('shaman') && kinds(8).has('brute') && kinds(8).has('bowman'));
 });

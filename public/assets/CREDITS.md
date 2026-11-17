@@ -10,6 +10,7 @@ Las licencias originales están en `licenses/`.
 | [Medieval RTS](https://kenney.nl/assets/medieval-rts) | Terreno, edificios, árboles, rocas, arbustos, caja de obras | CC0 |
 | [Interface Sounds](https://kenney.nl/assets/interface-sounds) | Clics, cerrar, confirmar, error | CC0 |
 | [RPG Audio](https://kenney.nl/assets/rpg-audio) | Monedas, construir, mejorar, demoler | CC0 |
+| [Tiny Dungeon](https://kenney.nl/assets/tiny-dungeon) | Los personajes: tropas, héroes, enemigos y aldeanos (modificados, ver abajo) | CC0 |
 
 ## Correspondencia con los archivos originales
 Las imágenes son las del tamaño «Default size» (64×64 px), renombradas.
@@ -64,3 +65,9 @@ El formato de audio es `.ogg`; algunos navegadores antiguos de Apple no lo repro
 - `archery_*` (`_22`, `_10`, `_03`, tejado ocre), `atelier_*` (`_19`, `_09`, `_04`, violeta), `stable_1` (`_07`), `stable_2` y `stable_3` (`_16`, `_23`, marrón), `siege_1` (`_08`), `siege_2` y `siege_3` (`_21`, `_20`, gris azulado) y `forge_*` (`_22`, `_20`, `_06`, rojo oscuro, gris y piedra) son dibujos del pack recoloreados cambiando el tono de los tejados; el resto del dibujo no se toca.
 - `unit_archer` es `medievalUnit_14`; `hero_ranger`, `hero_priest`, `hero_pyro` y `hero_warlord` son `medievalUnit_11`, `_22`, `_07` y `_10`.
 - `unit_catapult` y `unit_ram` están **dibujados para este proyecto** con `scripts/make-siege.mjs` (el pack no trae armas de asedio); se ofrecen también como CC0.
+
+## Personajes (pack Tiny Dungeon, modificados para este proyecto)
+Los personajes parten de `tile_0084`, `_0085`, `_0086`, `_0087`, `_0088`, `_0096`, `_0097`, `_0098`, `_0099`, `_0100`, `_0109`, `_0111`, `_0112` y `_0122` del pack,
+y **no se usan tal cual**: se les cambió la paleta de colores (azul para tus tropas, verde, rojo y violeta para héroes y enemigos) y se les dibujaron
+a mano armas y detalles (espadas, escudos, arcos, aljabas, bastones, hacha, martillo, maza, coronas, aureola, plumas, capas) con el script
+`scripts/make-characters.ps1`. Se ofrecen también como CC0.

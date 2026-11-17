@@ -30,6 +30,8 @@ export function measure(state, kind) {
       return Math.max(0, ...Object.values(state.research));
     case 'raids':
       return state.raid.count;
+    case 'stars':
+      return Object.values(state.campaign.stars ?? {}).reduce((sum, n) => sum + n, 0);
     default:
       return 0;
   }
