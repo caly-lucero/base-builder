@@ -59,6 +59,88 @@ export function ensureTextures(scene) {
     ctx.fillRect(0, 0, w, h);
   });
 
+  // Camino de tierra: mancha parda blanda con motitas (varias juntas forman un sendero continuo).
+  canvasTexture(scene, 'fx_dirt', 64, 64, (ctx, w, h) => {
+    const g = ctx.createRadialGradient(w / 2, h / 2, 4, w / 2, h / 2, w / 2);
+    g.addColorStop(0, 'rgba(176,138,92,0.95)');
+    g.addColorStop(0.8, 'rgba(160,122,80,0.88)');
+    g.addColorStop(1, 'rgba(150,112,72,0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, w, h);
+    let seed = 7;
+    const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+    for (let i = 0; i < 26; i++) {
+      const x = 10 + rnd() * (w - 20);
+      const y = 10 + rnd() * (h - 20);
+      ctx.fillStyle = rnd() < 0.5 ? 'rgba(120,88,54,0.55)' : 'rgba(214,184,140,0.5)';
+      ctx.fillRect(x, y, 1.6 + rnd() * 1.6, 1.6 + rnd());
+    }
+  });
+
+  // Orilla (arena) y agua de los estanques.
+  canvasTexture(scene, 'fx_sand', 64, 64, (ctx, w, h) => {
+    const g = ctx.createRadialGradient(w / 2, h / 2, 6, w / 2, h / 2, w / 2);
+    g.addColorStop(0, 'rgba(226,206,150,1)');
+    g.addColorStop(0.7, 'rgba(214,190,134,0.95)');
+    g.addColorStop(1, 'rgba(214,190,134,0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, w, h);
+  });
+  canvasTexture(scene, 'fx_water', 64, 64, (ctx, w, h) => {
+    const g = ctx.createRadialGradient(w / 2, h / 2, 2, w / 2, h / 2, w / 2);
+    g.addColorStop(0, 'rgba(96,170,222,1)');
+    g.addColorStop(0.75, 'rgba(58,128,196,0.98)');
+    g.addColorStop(1, 'rgba(48,112,180,0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, w, h);
+    ctx.strokeStyle = 'rgba(214,238,255,0.55)';
+    ctx.lineWidth = 1.6;
+    for (const [x, y, len] of [[20, 24, 12], [34, 38, 14], [26, 46, 9]]) {
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      ctx.quadraticCurveTo(x + len / 2, y - 3, x + len, y);
+      ctx.stroke();
+    }
+  });
+
+  // Flores (3 colores) y una mata de hierba, de 16 px.
+  [['#ff8fb0', '#ffe27a'], ['#fff2a0', '#ffffff'], ['#ffffff', '#ffd0e0']].forEach(([petal, heart], i) => {
+    canvasTexture(scene, `fx_flower_${i}`, 16, 16, (ctx) => {
+      ctx.fillStyle = '#3f8a3a';
+      ctx.fillRect(7.4, 8, 1.4, 6);
+      ctx.fillStyle = petal;
+      for (const [dx, dy] of [[0, -3], [3, 0], [0, 3], [-3, 0]]) {
+        ctx.beginPath();
+        ctx.arc(8 + dx, 7 + dy, 2.2, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.fillStyle = heart;
+      ctx.beginPath();
+      ctx.arc(8, 7, 1.8, 0, Math.PI * 2);
+      ctx.fill();
+    });
+  });
+  canvasTexture(scene, 'fx_tuft', 16, 16, (ctx) => {
+    ctx.strokeStyle = '#2f7a34';
+    ctx.lineWidth = 1.6;
+    ctx.lineCap = 'round';
+    for (const [x, a] of [[5, -0.5], [8, 0], [11, 0.5], [7, -0.2], [9.5, 0.25]]) {
+      ctx.beginPath();
+      ctx.moveTo(x, 14);
+      ctx.quadraticCurveTo(x + a * 3, 9, x + a * 6, 5 + Math.abs(a) * 2);
+      ctx.stroke();
+    }
+  });
+
+  // Borde del mapa: sombra que sube desde el límite.
+  canvasTexture(scene, 'fx_edge', 8, 64, (ctx, w, h) => {
+    const g = ctx.createLinearGradient(0, 0, 0, h);
+    g.addColorStop(0, 'rgba(10,30,14,0.75)');
+    g.addColorStop(1, 'rgba(10,30,14,0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, w, h);
+  });
+
   // Sombra de nube: mancha grande, muy suave.
   canvasTexture(scene, 'fx_cloud', 128, 64, (ctx, w, h) => {
     ctx.save();

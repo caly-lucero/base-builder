@@ -28,6 +28,7 @@ import { raidCountdownMs, raidLevel } from '../game/raids.js';
 import * as quests from '../game/quests.js';
 import { contentBounds } from '../game/sprites.js';
 import * as store from '../game/store.js';
+import { flowerSpots, pathTiles, pondTiles } from '../game/landscape.js';
 import { grassLook } from '../game/terrain.js';
 import { createWorker, plannedWorkers, stepWorker, workerPosition } from '../game/workers.js';
 import { claimableCount } from '../game/achievements.js';
@@ -159,6 +160,7 @@ export default class BaseScene extends Phaser.Scene {
     ui.ensureUi(this);
     this.createTerrain();
     this.createDecor();
+    this.createLandscape();
     this.clouds = createClouds(this, DEPTH.clouds);
     addVignette(this, DEPTH.vignette);
     this.createHud();
@@ -275,7 +277,8 @@ export default class BaseScene extends Phaser.Scene {
 
   /** Árboles, rocas y arbustos: solo adorno. Se ocultan bajo los edificios (ver renderWorld). */
   createDecor() {
-    this.decor = generateDecor().map((d) => {
+    const water = new Set(pondTiles().map((t) => `${t.x},${t.y}`));
+    this.decor = generateDecor().filter((d) => !water.has(`${d.x},${d.y}`)).map((d) => {
       const kind = shadowKindOf(d.key);
       return {
         ...d,
@@ -283,6 +286,85 @@ export default class BaseScene extends Phaser.Scene {
         img: this.add.image(0, 0, d.key).setDepth(DEPTH.world + depthOf(d.x, d.y)),
         shadow: kind ? this.add.image(0, 0, 'fx_shadow').setDepth(DEPTH.shadow).setVisible(false) : null,
       };
+    });
+  }
+
+  /** Estanques, flores, caminos de tierra y el borde oscuro del mapa. Todo adorno, bajo los edificios. */
+  createLandscape() {
+    const T = DEPTH.terrain;
+    this.ponds = pondTiles().map((t) => ({ ...t, sand: this.add.image(0, 0, 'fx_sand').setDepth(T + 0.2), water: this.add.image(0, 0, 'fx_water').setDepth(T + 0.3) }));
+    this.flowers = flowerSpots().map((f) => ({ ...f, img: this.add.image(0, 0, f.kind === 3 ? 'fx_tuft' : `fx_flower_${f.kind}`).setOrigin(0.5, 0.85).setDepth(T + 0.6) }));
+    this.pathImgs = [];
+    this.pathList = [];
+    this.pathSet = new Set();
+    this.pathSig = null;
+    this.edges = [0, 1, 2, 3].map(() => this.add.image(0, 0, 'fx_edge').setOrigin(0, 0).setDepth(DEPTH.shadow - 1));
+  }
+
+  /** Recalcula los caminos cuando cambian los edificios (cuesta poco, pero no hace falta cada cuadro). */
+  refreshPaths(state) {
+    const sig = state.buildings.map((b) => `${b.id}:${b.x},${b.y}`).join('|');
+    if (sig === this.pathSig) return;
+    this.pathSig = sig;
+    this.pathSet = pathTiles(state.buildings);
+    this.pathList = [...this.pathSet].map((k) => {
+      const [x, y] = k.split(',').map(Number);
+      return { x, y };
+    });
+    while (this.pathImgs.length < this.pathList.length) this.pathImgs.push(this.add.image(0, 0, 'fx_dirt').setDepth(DEPTH.terrain + 0.4));
+  }
+
+  /** Coloca el paisaje según la cámara. */
+  renderLandscape(state) {
+    const ts = tileSize();
+    const occupied = new Set(state.buildings.map((b) => `${b.x},${b.y}`));
+    this.refreshPaths(state);
+
+    for (const p of this.ponds) {
+      const hidden = !isTileVisible(p.x, p.y) || occupied.has(`${p.x},${p.y}`);
+      p.sand.setVisible(!hidden);
+      p.water.setVisible(!hidden);
+      if (hidden) continue;
+      const c = tileCenter(p.x, p.y);
+      p.sand.setPosition(c.x, c.y).setDisplaySize(ts * 1.75, ts * 1.75);
+      p.water.setPosition(c.x, c.y).setDisplaySize(ts * 1.32, ts * 1.32);
+    }
+    this.pathImgs.forEach((img, i) => {
+      const t = this.pathList[i];
+      const show = t && isTileVisible(t.x, t.y);
+      img.setVisible(Boolean(show));
+      if (show) {
+        const c = tileCenter(t.x, t.y);
+        img.setPosition(c.x, c.y).setDisplaySize(ts * 1.5, ts * 1.5).setAngle((t.x * 53 + t.y * 91) % 360);
+      }
+    });
+    for (const f of this.flowers) {
+      const k = `${f.x},${f.y}`;
+      const show = isTileVisible(f.x, f.y) && !occupied.has(k) && !this.pathSet.has(k);
+      f.img.setVisible(show);
+      if (show) {
+        const tl = tileTopLeft(f.x, f.y);
+        f.img.setPosition(tl.x + f.ox * ts, tl.y + f.oy * ts).setDisplaySize(ts * 0.3, ts * 0.3);
+      }
+    }
+    // Borde: sombra suave dentro del mapa, a lo largo de sus cuatro lados.
+    const x0 = view.x;
+    const y0 = view.y;
+    const mw = GRID.cols * ts;
+    const mh = GRID.rows * ts;
+    const depth = ts * 1.1;
+    const [top, bottom, left, right] = this.edges;
+    top.setAngle(0).setFlipY(false).setPosition(x0, y0).setDisplaySize(mw, depth);
+    bottom.setAngle(0).setFlipY(true).setPosition(x0, y0 + mh - depth).setDisplaySize(mw, depth);
+    left.setAngle(-90).setFlipY(false).setPosition(x0, y0 + mh).setDisplaySize(mh, depth);
+    right.setAngle(90).setFlipY(false).setPosition(x0 + mw, y0).setDisplaySize(mh, depth);
+  }
+
+  /** El agua brilla un poco (el reflejo sube y baja). */
+  shimmerWater(timeMs) {
+    const t = timeMs / 1000;
+    this.ponds.forEach((p, i) => {
+      if (p.water.visible) p.water.setAlpha(0.88 + 0.1 * Math.sin(t * 1.7 + i * 1.3));
     });
   }
 
@@ -945,8 +1027,23 @@ export default class BaseScene extends Phaser.Scene {
       if (b.damaged) {
         emberPuff(this, c.x + (Math.random() - 0.5) * ts * 0.4, c.y + ts * 0.1, depth);
         if (Math.random() < 0.6) smokePuff(this, c.x + (Math.random() - 0.5) * ts * 0.3, c.y - ts * 0.1, depth, { color: 0x3a3430, size: 0.8, rise: ts * 0.9, alpha: 0.6, life: 1900 });
-      } else if (SMOKING.has(b.type) && !logic.isUpgrading(b) && Math.random() < 0.55) {
+      } else if (logic.isUpgrading(b)) {
+        // obras: polvo y astillas
+        if (Math.random() < 0.6) smokePuff(this, c.x + (Math.random() - 0.5) * ts * 0.7, c.y + ts * 0.15, depth, { color: 0xd8cdb0, size: 0.4, rise: ts * 0.3, alpha: 0.7, life: 600 });
+      } else if (SMOKING.has(b.type) && b.type !== 'forge' && b.type !== 'altar' && Math.random() < 0.55) {
         smokePuff(this, c.x + ts * 0.13, c.y - ts * 0.42, depth, { size: 0.55, rise: ts * 0.75 });
+      } else if (b.type === 'forge') {
+        // la fragua: brasas y chispas
+        emberPuff(this, c.x + ts * 0.08 + (Math.random() - 0.5) * ts * 0.2, c.y - ts * 0.15, depth, 0xff8a30);
+        if (Math.random() < 0.3) sparkBurst(this, c.x + ts * 0.1, c.y - ts * 0.2, depth, 0xffc060, 3);
+        if (Math.random() < 0.45) smokePuff(this, c.x + ts * 0.14, c.y - ts * 0.45, depth, { color: 0x6a625a, size: 0.5, rise: ts * 0.8, alpha: 0.5 });
+      } else if (b.type === 'altar') {
+        // el altar brilla con una luz violeta que sube
+        if (Math.random() < 0.7) emberPuff(this, c.x + (Math.random() - 0.5) * ts * 0.35, c.y - ts * 0.1, depth, 0xb894ff);
+      } else if (b.type === 'mine' && b.stored >= 1 && Math.random() < 0.18) {
+        sparkBurst(this, c.x + (Math.random() - 0.5) * ts * 0.4, c.y - ts * 0.1, depth, 0xfff0a0, 3); // destellos de oro
+      } else if (b.type === 'sawmill' && b.stored >= 1 && Math.random() < 0.3) {
+        smokePuff(this, c.x + (Math.random() - 0.5) * ts * 0.5, c.y + ts * 0.1, depth, { color: 0xc89a5a, size: 0.25, rise: ts * 0.3, alpha: 0.8, life: 650 }); // astillas
       }
     }
   }
@@ -1069,39 +1166,85 @@ export default class BaseScene extends Phaser.Scene {
     });
   }
 
-  /** Coloca (cada cuadro) al ejército en formación y a los héroes, con un leve balanceo. */
-  animateArmy(timeMs) {
+  /**
+   * Hace pasear a alguien alrededor de su puesto: camina a un punto cercano, descansa un rato y elige otro.
+   * `who` guarda su estado ({ x, y, target, wait, phase }); `home` es su puesto y `radius` cuánto se aleja (casillas).
+   * Devuelve { moving, flip } para dibujarlo.
+   */
+  wander(who, home, radius, dt, speed = 0.5) {
+    if (who.x === undefined) {
+      who.x = home.x;
+      who.y = home.y;
+      who.wait = Math.random() * 3;
+      who.phase = Math.random() * 6.28;
+      who.flip = false;
+    }
+    let moving = false;
+    if (who.wait > 0) who.wait -= dt;
+    else if (!who.target) {
+      const a = Math.random() * Math.PI * 2;
+      const r = Math.sqrt(Math.random()) * radius;
+      who.target = { x: home.x + Math.cos(a) * r, y: home.y + Math.sin(a) * r * 0.7 };
+    } else {
+      const dx = who.target.x - who.x;
+      const dy = who.target.y - who.y;
+      const dist = Math.hypot(dx, dy);
+      const move = speed * dt;
+      if (dist <= move) {
+        who.x = who.target.x;
+        who.y = who.target.y;
+        who.target = null;
+        who.wait = 1.2 + Math.random() * 3.5;
+      } else {
+        who.x += (dx / dist) * move;
+        who.y += (dy / dist) * move;
+        if (Math.abs(dx) > 0.01) who.flip = dx < 0;
+        moving = true;
+      }
+    }
+    // Si el puesto cambió (se movió el cuartel), vuelve poco a poco.
+    if (Math.hypot(who.x - home.x, who.y - home.y) > radius * 2.5 + 0.5) {
+      who.x += (home.x - who.x) * Math.min(1, dt * 1.5);
+      who.y += (home.y - who.y) * Math.min(1, dt * 1.5);
+    }
+    who.phase += dt * (moving ? 9 : 2);
+    return moving;
+  }
+
+  /** Coloca (cada cuadro) al ejército y a los héroes: pasean alrededor de su puesto, rebotando al caminar. */
+  animateArmy(timeMs, dt = 0.016) {
     const zoom = view.zoom;
     if (this.camp) {
       for (const a of this.army ?? []) {
         const col = a.slot % 4;
         const row = Math.floor(a.slot / 4);
-        const x = this.camp.x + 1.1 + col * 0.42;
-        const y = this.camp.y + 0.55 + row * 0.36;
-        if (!isTileVisible(Math.round(x), Math.round(y))) {
+        const home = { x: this.camp.x + 1.1 + col * 0.42, y: this.camp.y + 0.55 + row * 0.36 };
+        const moving = this.wander(a, home, 0.55, dt, 0.45);
+        if (!isTileVisible(Math.round(a.x), Math.round(a.y))) {
           a.img.setVisible(false);
           a.shadow.setVisible(false);
           continue;
         }
-        this.putShadow(a.shadow, x, y, 'unit');
-        const sway = Math.sin(timeMs / 700 + a.slot * 1.7) * 1.2 * zoom;
-        this.placeOnTile(a.img, UNITS[a.type].sprite, x, y, WORKER_GROW).setDepth(DEPTH.world + y + 0.55).setVisible(true);
-        a.img.x += sway;
+        this.putShadow(a.shadow, a.x, a.y, 'unit');
+        this.placeOnTile(a.img, UNITS[a.type].sprite, a.x, a.y, WORKER_GROW).setDepth(DEPTH.world + a.y + 0.55).setVisible(true).setFlipX(a.flip);
+        a.img.y -= moving ? Math.abs(Math.sin(a.phase)) * 2.6 * zoom : Math.sin(a.phase) * 0.6 * zoom;
+        a.img.setRotation(moving ? Math.sin(a.phase) * 0.08 : 0);
       }
     }
     if (!this.shrine) return;
     for (const [key, h] of this.heroViews) {
-      const x = this.shrine.x + 0.55 + h.slot * 0.7;
-      const y = this.shrine.y + 1.25;
       const sprite = HEROES[key].sprite;
-      const visible = isTileVisible(Math.round(x), Math.round(y));
+      const home = { x: this.shrine.x + 0.55 + h.slot * 0.7, y: this.shrine.y + 1.25 };
+      const moving = this.wander(h, home, 0.4, dt, 0.4);
+      const visible = isTileVisible(Math.round(h.x), Math.round(h.y));
       h.img.setVisible(visible);
       h.label.setVisible(visible);
       if (!visible) h.shadow.setVisible(false);
       if (visible) {
-        this.putShadow(h.shadow, x, y, 'unit', 1.5);
-        this.placeOnTile(h.img, sprite, x, y, WORKER_GROW * 1.35).setDepth(DEPTH.world + y + 0.6);
-        h.img.y -= Math.abs(Math.sin(timeMs / 600 + h.slot)) * 2 * zoom;
+        this.putShadow(h.shadow, h.x, h.y, 'unit', 1.5);
+        this.placeOnTile(h.img, sprite, h.x, h.y, WORKER_GROW * 1.35).setDepth(DEPTH.world + h.y + 0.6).setFlipX(h.flip);
+        h.img.y -= moving ? Math.abs(Math.sin(h.phase)) * 3 * zoom : Math.sin(h.phase) * 0.8 * zoom;
+        h.img.setRotation(moving ? Math.sin(h.phase) * 0.07 : 0);
         const headroom = contentBounds(this.textures, sprite).h * spriteScale() * WORKER_GROW * 1.35;
         h.label.setPosition(h.img.x, h.img.y - headroom - 6 * zoom).setScale(zoom).setDepth(h.img.depth + 0.01);
       }
@@ -1578,7 +1721,8 @@ export default class BaseScene extends Phaser.Scene {
         .setDepth(depth + 0.4);
       const bar = this.add.graphics().setDepth(depth + 0.4);
       const shadow = this.add.image(0, 0, 'fx_shadow').setDepth(DEPTH.shadow);
-      this.views.set(b.id, { type: b.type, objects: [sprite, crate, badge, level, sub, bar, shadow], sprite, crate, badge, level, sub, bar, shadow, depth });
+      const hammer = this.add.image(0, 0, 'ic_hammer').setDepth(depth + 0.6).setVisible(false);
+      this.views.set(b.id, { type: b.type, objects: [sprite, crate, badge, level, sub, bar, shadow, hammer], sprite, crate, badge, level, sub, bar, shadow, hammer, depth });
 
       if (!this.firstBuild) {
         // Un edificio nuevo «salta» al aparecer y levanta polvo.
@@ -1628,6 +1772,8 @@ export default class BaseScene extends Phaser.Scene {
       t.img.setPosition(c.x, c.y).setScale(scale * 1.02); // un poco más grande: evita líneas entre casillas
     }
 
+    this.renderLandscape(state);
+
     const occupied = new Set(state.buildings.map((b) => `${b.x},${b.y}`));
     for (const d of this.decor) {
       const visible = isTileVisible(d.x, d.y) && !occupied.has(`${d.x},${d.y}`);
@@ -1676,6 +1822,9 @@ export default class BaseScene extends Phaser.Scene {
       else v.sprite.clearTint();
       v.sprite.setAlpha(this.movingId === b.id ? 0.35 : upgrading ? 0.35 : 1);
       v.crate.setPosition(c.x, c.y).setScale(scale * 0.7).setVisible(upgrading);
+      // Mientras se mejora, un martillo golpea sobre el edificio.
+      const swing = Math.abs(Math.sin(this.time.now / 170));
+      v.hammer.setVisible(upgrading).setPosition(c.x + ts * 0.12, c.y - ts * 0.62 - swing * 6 * zoom).setDisplaySize(22 * zoom, 22 * zoom).setAngle(-35 + swing * 55).setDepth(v.depth + 0.6);
 
       v.badge.setPosition(c.x + ts / 2 - 8 * zoom, c.y - ts / 2 + 8 * zoom).setScale(zoom);
       v.level.setPosition(v.badge.x, v.badge.y).setScale(zoom).setText(String(b.level));
@@ -1768,11 +1917,12 @@ export default class BaseScene extends Phaser.Scene {
     }
 
     this.animateWorkers(Math.min(delta, 250) / 1000, this.time.now);
-    this.animateArmy(this.time.now);
+    this.animateArmy(this.time.now, Math.min(delta, 250) / 1000);
     stepClouds(this.clouds, Math.min(delta, 250) / 1000);
     this.swayTrees(this.time.now);
+    this.shimmerWater(this.time.now);
 
-    if (this.pop.size) this.viewDirty = true; // hay animaciones de construcción en curso
+    if (this.pop.size || logic.busyBuilders(store.get())) this.viewDirty = true; // hay animaciones de construcción o de obras en curso
     if (this.viewDirty) {
       this.viewDirty = false;
       this.renderWorld();

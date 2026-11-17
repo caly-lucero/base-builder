@@ -64,6 +64,7 @@ export default class BattleScene extends Phaser.Scene {
     this.markers = []; // marcas de órdenes: { x, y (casilla), until, color }
     this.lastSound = {};
     this.retreatArmedUntil = 0;
+    this.lunge = new Map(); // id de unidad -> golpe en curso { until, dx, dy } (se lanza hacia el objetivo)
     this.chips = []; // vacío en una defensa (no hay tropas que dirigir)
     this.viewDirty = true;
     this.connectors = new Map(); // enlaces entre los muros enemigos que siguen en pie
@@ -507,6 +508,15 @@ export default class BattleScene extends Phaser.Scene {
       return;
     }
     if (ev.type === 'hit' || ev.type === 'shot') {
+      const from = this.entries.get(ev.from)?.ent;
+      if (from?.kind === 'unit' && target) {
+        const dx = target.ent.x - from.x;
+        const dy = target.ent.y - from.y;
+        const len = Math.hypot(dx, dy) || 1;
+        // Los cuerpo a cuerpo se lanzan hacia el objetivo; los que disparan retroceden un poco (retroceso).
+        const sign = ev.type === 'shot' ? -0.4 : 1;
+        this.lunge.set(ev.from, { start: this.time.now, until: this.time.now + 190, dx: (dx / len) * sign, dy: (dy / len) * sign });
+      }
       if (target) {
         this.flash.set(target.ent.id, this.time.now + 90);
         if (target.img.visible && Math.random() < 0.5) {
@@ -520,7 +530,12 @@ export default class BattleScene extends Phaser.Scene {
       } else this.play('hit', 80);
     } else if (ev.type === 'die' && target?.ent.kind === 'unit') {
       this.selection.delete(ev.id);
-      this.tweens.add({ targets: [target.img, target.shadow], alpha: 0, duration: 500, onComplete: () => { target.img.destroy(); target.shadow.destroy(); } });
+      const side = target.img.flipX ? -1 : 1;
+      this.tweens.add({ targets: target.img, angle: 82 * side, y: target.img.y + 5 * view.zoom, duration: 260, ease: 'Quad.easeIn' });
+      this.tweens.add({ targets: [target.img, target.shadow], alpha: 0, delay: 260, duration: 520, onComplete: () => { target.img.destroy(); target.shadow.destroy(); } });
+      const p = tileBase(target.ent.x, target.ent.y);
+      smokePuff(this, p.x, p.y - tileSize() * 0.15, DEPTH.fx, { color: 0xd8cdb0, size: 0.5, rise: tileSize() * 0.35, alpha: 0.6, life: 700 });
+      target.dying = true;
     } else if (ev.type === 'destroy' && target) {
       this.play('boom', 120);
       const c = tileCenter(target.ent.x, target.ent.y);
@@ -689,7 +704,37 @@ export default class BattleScene extends Phaser.Scene {
     placeShadow(shadow, p.x + ts * 0.05, p.y - ts * 0.02, ts * w, ts * h, alpha);
   }
 
-  renderEntities() {
+  /**
+   * Animación de una unidad (todo por código, sin dibujos extra): al caminar rebota y se inclina; quieta, respira;
+   * al golpear se lanza hacia el objetivo. El pivote es el pie, así que la inclinación no la despega del suelo.
+   */
+  animateUnit(entry, img, e, dt) {
+    const a = (entry.anim ??= { x: e.x, y: e.y, phase: Math.random() * 6.28, speed: 0 });
+    const zoom = view.zoom;
+    const step = Math.hypot(e.x - a.x, e.y - a.y);
+    a.x = e.x;
+    a.y = e.y;
+    a.speed += (step / Math.max(dt, 0.001) - a.speed) * 0.35;
+    const moving = a.speed > 0.35;
+    a.phase += dt * (moving ? 5 + a.speed * 2.2 : 2.4);
+    const bob = moving ? Math.abs(Math.sin(a.phase)) * 3.2 * zoom : Math.sin(a.phase) * 0.7 * zoom;
+    img.y -= bob;
+    img.setRotation(moving ? Math.sin(a.phase) * 0.09 : 0);
+    img.scaleY *= 1 + (moving ? Math.sin(a.phase * 2) * 0.035 : Math.sin(a.phase) * 0.012);
+
+    const l = this.lunge.get(e.id);
+    if (l) {
+      const k = (this.time.now - l.start) / (l.until - l.start);
+      if (k >= 1) this.lunge.delete(e.id);
+      else {
+        const push = Math.sin(k * Math.PI) * 8 * zoom; // sale y vuelve
+        img.x += l.dx * push;
+        img.y += l.dy * push * 0.6;
+      }
+    }
+  }
+
+  renderEntities(dt = 0.016) {
     const now = this.time.now;
 
     // Los muros enemigos que siguen en pie se ven unidos; al caer uno, desaparecen sus enlaces.
@@ -728,6 +773,7 @@ export default class BattleScene extends Phaser.Scene {
         this.shadowAt(entry.shadow, e.x, e.y, e.type === 'hero' ? 0.62 : 0.42, e.type === 'hero' ? 0.25 : 0.17, 0.4);
         const grow = e.type === 'hero' ? UNIT_GROW * 1.3 : UNIT_GROW;
         this.placeOnTile(img, unitSprite(e), e.x, e.y, grow).setDepth(DEPTH.world + e.y + 0.5);
+        this.animateUnit(entry, img, e, dt);
         const dx = e.x - entry.lastX;
         if (Math.abs(dx) > 0.001) img.setFlipX(dx < 0);
         entry.lastX = e.x;
@@ -841,7 +887,7 @@ export default class BattleScene extends Phaser.Scene {
       this.viewDirty = false;
       this.renderTerrain();
     }
-    this.renderEntities();
+    this.renderEntities(Math.min(delta, 100) / 1000);
     this.renderOverlay();
     this.updateHud();
     this.updateHeroButtons();
