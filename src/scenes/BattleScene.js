@@ -10,7 +10,10 @@ import { depthOf, inViewport, isTileVisible, panBy, rectCenter, resetView, rotat
 import * as store from '../game/store.js';
 import { ASSET_BASE } from '../data/assets.js';
 import { fitIcon as fitIconArt, missingRotationArt, placeOnTile as placeOnTileArt, viewFrame } from './artPlace.js';
-import { drawCliff, ensureTerrainTextures, grassKey } from './terrainArt.js';
+import { darken, ensureTerrainTextures, ensureThemedGround, grassKey } from './terrainArt.js';
+import { generateDecor, mulberry32 } from '../game/decor.js';
+import { flowerSpots, occupiedBlocks, pathTiles, pondTiles } from '../game/landscape.js';
+import { mapOfLevel, themeOf } from '../game/campaignMap.js';
 import * as ui from './ui.js';
 import { addGloss, addVignette, emberPuff, ensureTextures, smokePuff, sparkBurst } from './look.js';
 
@@ -99,7 +102,6 @@ export default class BattleScene extends Phaser.Scene {
     resetView(this.raid ? RAID_CENTER : START_CENTER);
     zoomAt(LAYOUT.width / 2, LAYOUT.gridTop + LAYOUT.viewHeight / 2, this.raid ? RAID_ZOOM : START_ZOOM);
 
-    this.cameras.main.setBackgroundColor(0x8fc0e4); // lo que queda fuera de la isla: cielo
     ensureTextures(this);
     ensureTerrainTextures(this);
     ui.ensureUi(this);
@@ -160,14 +162,57 @@ export default class BattleScene extends Phaser.Scene {
   /* ---------- creación ---------- */
 
   createTerrain() {
+    // El campo de batalla es tierra firme: el suelo sigue más allá del mapa (sin cielo ni borde de isla) y lleva
+    // el paisaje del mapa de campaña (o el de tu base si te atacan): árboles, rocas, estanques, flores y caminos.
+    const theme = this.raid ? null : themeOf(mapOfLevel(this.level));
+    const ground = theme ? ensureThemedGround(this, `m${mapOfLevel(this.level)}`, theme.top, theme.bottom) : [0, 1, 2, 3].map((v) => `iso_grass_${v}`);
+    this.cameras.main.setBackgroundColor(theme ? darken(theme.bottom, 0.45) : 0x3d6b30);
+    const EXT = 6; // bloques de terreno que se dibujan más allá de cada borde
     this.terrain = []; // bloques de terreno de 2×2 cuadros
-    for (let y = 0; y < TERRAIN.rows; y++) {
-      for (let x = 0; x < TERRAIN.cols; x++) {
-        const img = this.add.image(0, 0, grassKey(x, y)).setDepth(DEPTH.terrain);
+    for (let y = -EXT; y < TERRAIN.rows + EXT; y++) {
+      for (let x = -EXT; x < TERRAIN.cols + EXT; x++) {
+        const img = this.add.image(0, 0, ground[Math.abs((x * 73856093) ^ (y * 19349663)) % ground.length]).setDepth(DEPTH.terrain);
+        const outside = x < 0 || y < 0 || x >= TERRAIN.cols || y >= TERRAIN.rows;
+        if (outside) img.setTint(0xcfcfcf);
         this.terrain.push({ x, y, img });
       }
     }
-    this.cliff = this.add.graphics().setDepth(DEPTH.terrain - 1); // el borde de roca bajo la isla
+    this.createScenery(theme, EXT);
+  }
+
+  /** Árboles, rocas, estanques, flores y caminos del campo de batalla. */
+  createScenery(theme, ext) {
+    const blocks = this.battle.buildings.map((e) => ({ id: e.id, type: e.type === 'hall' ? 'townhall' : e.type, x: e.x, y: e.y }));
+    this.occupied = occupiedBlocks(blocks);
+    this.pathSet = pathTiles(blocks);
+    // Un camino ancho de tierra desde el desembarco (abajo) hasta el Ayuntamiento.
+    const hall = this.battle.buildings.find((e) => e.id === this.battle.hallId);
+    if (hall) {
+      const bx = Math.floor((hall.cx + 0.5) / 2);
+      for (let ty = Math.floor((hall.cy + 0.5) / 2) + 4; ty < TERRAIN.rows; ty++) this.pathSet.add(`${bx},${ty}`);
+    }
+    this.pathImgs = [...this.pathSet].map((k) => {
+      const [x, y] = k.split(',').map(Number);
+      return { x, y, img: this.add.image(0, 0, 'iso_dirt').setDepth(DEPTH.terrain + 0.4) };
+    });
+    const water = pondTiles();
+    this.ponds = water.map((t) => ({ ...t, sand: this.add.image(0, 0, 'iso_sand').setDepth(DEPTH.terrain + 0.2), water: this.add.image(0, 0, 'iso_water').setDepth(DEPTH.terrain + 0.3) }));
+    const wet = new Set(water.map((t) => `${t.x},${t.y}`));
+    const seed = this.raid ? 4141 : 9000 + this.level * 17;
+    const rand = mulberry32(seed);
+    const kinds = theme?.decor ?? ['tree_a', 'tree_b', 'tree_c', 'rock_a', 'rock_c', 'bush_a', 'bush_b'];
+    const items = generateDecor(seed).map((d) => ({ x: d.x, y: d.y, key: theme ? kinds[Math.floor(rand() * kinds.length)] : d.key }));
+    for (let y = -ext; y < TERRAIN.rows + ext; y++) {
+      for (let x = -ext; x < TERRAIN.cols + ext; x++) {
+        const outside = x < 0 || y < 0 || x >= TERRAIN.cols || y >= TERRAIN.rows;
+        if (outside && rand() < 0.42) items.push({ x, y, key: kinds[Math.floor(rand() * kinds.length)] });
+      }
+    }
+    const landing = (x, y) => y >= TERRAIN.rows - 4 && x >= 6 && x <= 18; // el desembarco queda despejado
+    this.decor = items
+      .filter((d) => !wet.has(`${d.x},${d.y}`) && !this.occupied.has(`${d.x},${d.y}`) && !this.pathSet.has(`${d.x},${d.y}`) && !landing(d.x, d.y))
+      .map((d) => ({ ...d, img: this.add.image(0, 0, d.key).setDepth(DEPTH.world) }));
+    this.flowers = theme && theme.name !== 'Praderas del Reino' ? [] : flowerSpots().map((f) => ({ ...f, img: this.add.image(0, 0, f.kind === 3 ? 'tuft' : `flower_${f.kind}`).setDepth(DEPTH.terrain + 0.6) }));
   }
 
   createEntities() {
@@ -763,7 +808,38 @@ export default class BattleScene extends Phaser.Scene {
 
   renderTerrain() {
     const scale = view.zoom * 1.015; // un poco más grande: evita rendijas entre casillas
-    drawCliff(this.cliff, view.zoom);
+    const z = view.zoom;
+    const seen = (x, y, slack = 1) => isTileVisible(x * 2 + 0.5, y * 2 + 0.5, slack);
+    for (const p of this.ponds) {
+      const show = seen(p.x, p.y) && !this.occupied.has(`${p.x},${p.y}`);
+      p.sand.setVisible(show);
+      p.water.setVisible(show);
+      if (!show) continue;
+      const c = terrainCenter(p.x, p.y);
+      p.sand.setPosition(c.x, c.y).setScale(z * 1.4);
+      p.water.setPosition(c.x, c.y).setScale(z * 1.03);
+    }
+    for (const p of this.pathImgs) {
+      const show = seen(p.x, p.y);
+      p.img.setVisible(show);
+      if (show) {
+        const c = terrainCenter(p.x, p.y);
+        p.img.setPosition(c.x, c.y).setScale(z * 1.03);
+      }
+    }
+    for (const f of this.flowers) {
+      const k = `${f.x},${f.y}`;
+      const show = seen(f.x, f.y) && !this.occupied.has(k) && !this.pathSet.has(k);
+      f.img.setVisible(show);
+      if (show) this.placeOnTile(f.img, f.kind === 3 ? 'tuft' : `flower_${f.kind}`, 2 * (f.x + f.ox - 0.5) + 0.5, 2 * (f.y + f.oy - 0.5) + 0.5, 0.9);
+    }
+    for (const d of this.decor) {
+      const cx = d.x * 2 + 0.5;
+      const cy = d.y * 2 + 0.5;
+      const show = isTileVisible(cx, cy);
+      d.img.setVisible(show);
+      if (show) this.placeOnTile(d.img, d.key, cx, cy, 1).setDepth(DEPTH.world + depthOf(cx, cy));
+    }
     for (const t of this.terrain) {
       const visible = isTileVisible(t.x * 2 + 0.5, t.y * 2 + 0.5, 0.5);
       t.img.setVisible(visible);

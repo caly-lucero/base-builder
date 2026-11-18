@@ -2,7 +2,7 @@ import Phaser from 'phaser';
 import { ASSET_BASE, IMAGES, SHEETS, SOUNDS } from '../data/assets.js';
 import { ARMY_UNITS, BUILDINGS, CAMERA, ECONOMY, GRID, LAYOUT, TERRAIN, RESEARCH, RESOURCES, TOOL_PAGES, UNIQUE_BUILDINGS, UNITS, batchTimeFactor, researchStep } from '../data/config.js';
 import { HEROES, HERO_KEYS, heroXpToNext } from '../data/heroes.js';
-import { generateDecor } from '../game/decor.js';
+import { generateDecor, mulberry32 } from '../game/decor.js';
 import * as logic from '../game/logic.js';
 import * as prefs from '../game/prefs.js';
 import {
@@ -26,7 +26,7 @@ import {
   zoomAt,
 } from '../game/projection.js';
 import { fitIcon as fitIconArt, missingRotationArt, placeOnTile as placeOnTileArt, viewFrame } from './artPlace.js';
-import { drawCliff, ensureTerrainTextures, grassKey, strokeCell } from './terrainArt.js';
+import { ensureTerrainTextures, grassKey, strokeCell } from './terrainArt.js';
 import { SHEET, unitFrame } from '../game/unitArt.js';
 import { canAttack, nextCampaignLevel } from '../game/campaign.js';
 import { generateMission, missionName } from '../game/missions.js';
@@ -43,13 +43,14 @@ import { openArmyPanel } from './armyPanel.js';
 import { openCampaignPanel } from './campaignPanel.js';
 import { NODES_PER_MAP, mapOfLevel, starsOf } from '../game/campaignMap.js';
 import * as ui from './ui.js';
-import { addGloss, addVignette, createClouds, emberPuff, ensureTextures, smokePuff, sparkBurst, stepClouds } from './look.js';
+import { addGloss, addVignette, emberPuff, ensureTextures, smokePuff, sparkBurst } from './look.js';
 
 const FONT = 'system-ui, "Segoe UI", Roboto, sans-serif';
 
 // Capas de dibujado (mayor = más arriba). Lo del HUD va por encima del mundo para tapar
 // lo que sobresalga de la ventana del mapa al desplazarse o hacer zoom.
 const DAMAGED_TINT = 0x8a7a72;
+const OUTER = 6; // bloques de terreno que se dibujan más allá de cada borde del mapa
 const DEPTH = { terrain: 0, shadow: 8, world: 10, clouds: 80, vignette: 90, ghost: 100, selector: 101, ui: 150, zoomButtons: 160, panel: 200, toast: 800 };
 
 // Sombras bajo los dibujos: ancho y alto como fracción de la casilla.
@@ -169,14 +170,13 @@ export default class BaseScene extends Phaser.Scene {
 
     resetView(logic.townHall(store.get()) ?? undefined);
 
-    this.cameras.main.setBackgroundColor(0x8fc0e4); // lo que queda fuera de la isla: cielo
+    this.cameras.main.setBackgroundColor(0x3d6b30); // el suelo sigue más allá del mapa: tierra firme, no una isla en el cielo
     ensureTextures(this);
     ensureTerrainTextures(this);
     ui.ensureUi(this);
     this.createTerrain();
     this.createDecor();
     this.createLandscape();
-    this.clouds = createClouds(this, DEPTH.clouds);
     addVignette(this, DEPTH.vignette);
     this.createHud();
     this.createToolbar();
@@ -268,10 +268,11 @@ export default class BaseScene extends Phaser.Scene {
   /* ---------- creación del mundo ---------- */
 
   createTerrain() {
-    this.terrain = []; // bloques de terreno de 2×2 cuadros
-    for (let y = 0; y < TERRAIN.rows; y++) {
-      for (let x = 0; x < TERRAIN.cols; x++) {
+    this.terrain = []; // bloques de terreno de 2×2 cuadros; el suelo sigue 6 bloques más allá de cada borde del mapa
+    for (let y = -OUTER; y < TERRAIN.rows + OUTER; y++) {
+      for (let x = -OUTER; x < TERRAIN.cols + OUTER; x++) {
         const img = this.add.image(0, 0, grassKey(x, y)).setDepth(DEPTH.terrain);
+        if (x < 0 || y < 0 || x >= TERRAIN.cols || y >= TERRAIN.rows) img.setTint(0xcfcfcf);
         this.terrain.push({ x, y, img });
       }
     }
@@ -280,7 +281,18 @@ export default class BaseScene extends Phaser.Scene {
   /** Árboles, rocas y arbustos: solo adorno. Se ocultan bajo los edificios (ver renderWorld). */
   createDecor() {
     const water = new Set(pondTiles().map((t) => `${t.x},${t.y}`));
-    this.decor = generateDecor().filter((d) => !water.has(`${d.x},${d.y}`)).map((d) => {
+    // Más allá del mapa también hay bosque y rocas (siempre los mismos), para que no parezca flotar.
+    const rand = mulberry32(5150);
+    const ring = [];
+    for (let y = -OUTER; y < TERRAIN.rows + OUTER; y++) {
+      for (let x = -OUTER; x < TERRAIN.cols + OUTER; x++) {
+        if (x >= 0 && y >= 0 && x < TERRAIN.cols && y < TERRAIN.rows) continue;
+        const roll = rand();
+        const pick = rand();
+        if (roll < 0.45) ring.push({ x, y, key: pick < 0.55 ? 'tree_a' : pick < 0.8 ? 'tree_b' : pick < 0.9 ? 'rock_a' : 'bush_a' });
+      }
+    }
+    this.decor = [...generateDecor(), ...ring].filter((d) => !water.has(`${d.x},${d.y}`)).map((d) => {
       const kind = shadowKindOf(d.key);
       return {
         ...d,
@@ -300,7 +312,6 @@ export default class BaseScene extends Phaser.Scene {
     this.pathList = [];
     this.pathSet = new Set();
     this.pathSig = null;
-    this.cliff = this.add.graphics().setDepth(T - 1); // el borde de roca bajo la isla
   }
 
   /** Recalcula los caminos cuando cambian los edificios (cuesta poco, pero no hace falta cada cuadro). */
@@ -347,7 +358,6 @@ export default class BaseScene extends Phaser.Scene {
       f.img.setVisible(show);
       if (show) this.placeOnTile(f.img, f.kind === 3 ? 'tuft' : `flower_${f.kind}`, 2 * (f.x + f.ox - 0.5) + 0.5, 2 * (f.y + f.oy - 0.5) + 0.5, 0.9);
     }
-    drawCliff(this.cliff, z);
   }
 
   /** El agua brilla un poco (el reflejo sube y baja). */
@@ -2106,7 +2116,6 @@ export default class BaseScene extends Phaser.Scene {
     this.pulseHall(this.time.now);
     this.animateWorkers(Math.min(delta, 250) / 1000, this.time.now);
     this.animateArmy(this.time.now, Math.min(delta, 250) / 1000);
-    stepClouds(this.clouds, Math.min(delta, 250) / 1000);
     this.swayTrees(this.time.now);
     this.shimmerWater(this.time.now);
 

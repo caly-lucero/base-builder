@@ -116,6 +116,46 @@ export function ensureTerrainTextures(scene) {
   });
 }
 
+const mixColor = (a, b, t) => {
+  const ch = (n, sh) => (n >> sh) & 255;
+  const m = (sh) => Math.round(ch(a, sh) + (ch(b, sh) - ch(a, sh)) * t);
+  return (m(16) << 16) | (m(8) << 8) | m(0);
+};
+const hex = (n) => `#${n.toString(16).padStart(6, '0')}`;
+
+/**
+ * Césped (o arena, nieve, ceniza…) con los colores de un mapa de campaña: 4 variantes entre el color de arriba y el de abajo.
+ * Devuelve las 4 claves de textura.
+ */
+export function ensureThemedGround(scene, name, top, bottom) {
+  const W = TILE_W * TERRAIN.cells;
+  const H = TILE_H * TERRAIN.cells;
+  return Array.from({ length: GRASS_VARIANTS }, (_, v) => {
+    const key = `bt_${name}_${v}`;
+    canvasTexture(scene, key, W, H, (ctx) => {
+      const base = mixColor(top, bottom, 0.25 + 0.14 * v);
+      ctx.save();
+      diamond(ctx, W, H, 0.6);
+      ctx.fillStyle = hex(base);
+      ctx.fill();
+      ctx.clip();
+      const g = ctx.createLinearGradient(0, 0, W, H);
+      g.addColorStop(0, 'rgba(255,255,230,0.10)');
+      g.addColorStop(1, 'rgba(20,30,20,0.12)');
+      ctx.fillStyle = g;
+      ctx.fillRect(0, 0, W, H);
+      const light = hex(mixColor(base, 0xffffff, 0.35));
+      const dark = hex(mixColor(base, 0x000000, 0.35));
+      speckle(ctx, W, H, 11 + v * 7, 40, [`${light}55`, `${dark}66`, `${light}33`]);
+      ctx.restore();
+    });
+    return key;
+  });
+}
+
+/** Un color más oscuro (para el fondo de la batalla). */
+export const darken = (color, k) => mixColor(color, 0x000000, k);
+
 /** Qué textura y qué tinte lleva el césped de cada casilla (variantes repartidas de forma estable). */
 export const grassKey = (x, y) => `iso_grass_${Math.abs((x * 73856093) ^ (y * 19349663)) % GRASS_VARIANTS}`;
 
