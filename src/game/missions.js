@@ -78,5 +78,13 @@ export function generateMission(level) {
   for (let i = 0; i < shamans; i++) defenders.push({ kind: 'shaman', ...near() });
   for (let i = 0; i < Math.max(0, Math.floor((lvl - 2) / 2)); i++) defenders.push({ kind: 'brute', ...near() });
 
-  return { level: lvl, hpScale: 1 + 0.12 * (lvl - 1), dmgScale: 1 + 0.08 * (lvl - 1), buildings, defenders };
+  // El último enemigo de cada mapa (cada 10 niveles) es un jefe: más guarnición, más duro y con más botín.
+  const boss = lvl % 10 === 0;
+  if (boss) {
+    for (let i = 0; i < 3; i++) defenders.push({ kind: 'brute', ...near() });
+    const hall = buildings.find((b) => b.type === 'hall');
+    hall.loot = { gold: hall.loot.gold * 2, wood: hall.loot.wood * 2 };
+  }
+
+  return { level: lvl, boss, hpScale: (1 + 0.12 * (lvl - 1)) * (boss ? 1.25 : 1), dmgScale: (1 + 0.08 * (lvl - 1)) * (boss ? 1.15 : 1), buildings, defenders };
 }

@@ -32,7 +32,11 @@ const game = new Phaser.Game({
   scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH },
   scene: [],
 });
-if (import.meta.env.DEV) window.__game = game; // solo en desarrollo: facilita inspeccionar escenas desde la consola
+if (import.meta.env.DEV) {
+  // solo en desarrollo: facilita inspeccionar escenas y la partida desde la consola
+  window.__game = game;
+  window.__store = store;
+}
 game.scene.add('BattleScene', BattleScene, false);
 game.scene.add('BaseScene', BaseScene, true, { gained: boot.gained });
 

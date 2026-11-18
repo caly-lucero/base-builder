@@ -35,6 +35,8 @@ import { openAchievementsPanel } from './achievementsPanel.js';
 import { isSoundOn, onNotice, runMenu } from '../game/menu.js';
 import { openHeroPanel } from './heroPanel.js';
 import { openArmyPanel } from './armyPanel.js';
+import { openCampaignPanel } from './campaignPanel.js';
+import { NODES_PER_MAP, mapOfLevel, starsOf } from '../game/campaignMap.js';
 import * as ui from './ui.js';
 import { addGloss, addVignette, createClouds, emberPuff, ensureTextures, smokePuff, sparkBurst, stepClouds } from './look.js';
 
@@ -434,7 +436,7 @@ export default class BaseScene extends Phaser.Scene {
     ui.panel(this, W / 2, top + H / 2, W, H, 'bar', d, 'top');
     const defs = [
       { id: 'build', text: 'Construir', icon: 'hammer', kind: 'green', onClick: () => this.toggleBuildSheet() },
-      { id: 'attack', text: 'Atacar', icon: 'swords', kind: 'red', onClick: () => this.openAttackModal() },
+      { id: 'attack', text: 'Atacar', icon: 'swords', kind: 'red', onClick: () => this.openCampaign() },
       { id: 'heroes', text: 'Héroes', icon: 'crown', kind: 'violet', onClick: () => this.openHeroes() },
       { id: 'quests', text: 'Logros', icon: 'trophy', kind: 'gold', onClick: () => openAchievementsPanel(this) },
       { id: 'menu', text: 'Menú', icon: 'gear', kind: 'dark2', onClick: () => this.openMenu() },
@@ -667,26 +669,30 @@ export default class BaseScene extends Phaser.Scene {
     return ui.dialog(this, o);
   }
 
-  /** Ventana para confirmar el ataque: muestra al enemigo y tus tropas. */
-  openAttackModal() {
+  /** El botón Atacar abre el mapa de campaña (10 enemigos por mapa). */
+  openCampaign() {
     if (this.modal) return;
+    openCampaignPanel(this);
+  }
+
+  /** Ventana para confirmar el ataque a un enemigo del mapa (`level`): muestra su base y tus tropas. */
+  openAttackModal(level = nextCampaignLevel(store.get())) {
     const state = store.get();
-    const level = nextCampaignLevel(state);
     const mission = generateMission(level);
     const ready = canAttack(state);
     const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
     const lines = [
       `Enemigo: ${plural(mission.buildings.filter((b) => b.type !== 'wall').length, 'edificio', 'edificios')} · ${plural(mission.buildings.filter((b) => b.type === 'tower').length, 'torre', 'torres')} · ${plural(mission.defenders.length, 'defensor', 'defensores')}`,
-      `Mejor: ${'★'.repeat(state.campaign.stars[level] ?? 0)}${'☆'.repeat(3 - (state.campaign.stars[level] ?? 0))}  (Ayuntamiento · 50 % · 100 %)`,
+      `Mejor: ${'★'.repeat(starsOf(state, level))}${'☆'.repeat(3 - starsOf(state, level))}  (Ayuntamiento · 50 % · 100 %)`,
       ready ? `Tus tropas: ${armyText(state)}` : 'No tienes tropas: entrénalas en tus edificios militares',
     ];
     this.dialog({
-      title: missionName(level),
+      title: `Mapa ${mapOfLevel(level) + 1} · enemigo ${((level - 1) % NODES_PER_MAP) + 1}${(level - 1) % NODES_PER_MAP === NODES_PER_MAP - 1 ? ' (jefe)' : ''}`,
       icon: 'swords',
       lines,
       buttons: ready
-        ? [{ text: 'Atacar', kind: 'red', onClick: () => this.startBattle(level), close: false }, { text: 'Ver mi ejército', kind: 'blue', onClick: () => openArmyPanel(this) }, { text: 'Cancelar', kind: 'dark2' }]
-        : [{ text: 'Ver mi ejército', kind: 'blue', onClick: () => openArmyPanel(this) }, { text: 'Cerrar', kind: 'dark2' }],
+        ? [{ text: 'Atacar', kind: 'red', onClick: () => this.startBattle(level), close: false }, { text: 'Ver mi ejército', kind: 'blue', onClick: () => openArmyPanel(this) }, { text: 'Volver al mapa', kind: 'dark2', onClick: () => openCampaignPanel(this, mapOfLevel(level)) }]
+        : [{ text: 'Ver mi ejército', kind: 'blue', onClick: () => openArmyPanel(this) }, { text: 'Volver al mapa', kind: 'dark2', onClick: () => openCampaignPanel(this, mapOfLevel(level)) }],
     });
   }
 
