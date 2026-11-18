@@ -1785,10 +1785,13 @@ export default class BaseScene extends Phaser.Scene {
     return rectCenter(r.x, r.y, r.w, r.h);
   }
 
-  /** Capa de un edificio: la de su cuadro más cercano a la cámara, así las unidades que están detrás quedan tapadas. */
+  /**
+   * Capa de un edificio: la de su centro. Así lo que está detrás (suma x + y menor) queda tapado y lo que está delante
+   * (una torre junto al castillo, una unidad frente a un cuartel) se dibuja encima, aunque el edificio sea enorme.
+   */
   depthOfBuilding(b) {
-    const r = logic.rectOf(b);
-    return Math.max(depthOf(r.x, r.y), depthOf(r.x + r.w - 1, r.y), depthOf(r.x, r.y + r.h - 1), depthOf(r.x + r.w - 1, r.y + r.h - 1));
+    const c = logic.centerOf(b);
+    return depthOf(c.x, c.y);
   }
 
   /** Y de pantalla del borde de arriba de un dibujo. */

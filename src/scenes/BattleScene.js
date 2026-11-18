@@ -221,7 +221,7 @@ export default class BattleScene extends Phaser.Scene {
     const shadow = () => this.add.image(0, 0, 'fx_shadow').setDepth(DEPTH.shadow);
     for (const e of this.battle.buildings) {
       const baseTint = this.buildingTint(e);
-      const img = this.add.image(0, 0, this.buildingSprite(e)).setDepth(DEPTH.world + depthOf(e.x + e.w - 1, e.y + e.h - 1));
+      const img = this.add.image(0, 0, this.buildingSprite(e)).setDepth(DEPTH.world + this.buildingDepth(e));
       if (baseTint) img.setTint(baseTint);
       this.entries.set(e.id, { ent: e, img, shadow: shadow(), rubble: null, baseTint, lastX: e.x });
     }
@@ -231,9 +231,9 @@ export default class BattleScene extends Phaser.Scene {
     }
   }
 
-  /** Capa de un edificio: la de su cuadro más cercano a la cámara (con la vista girada). */
+  /** Capa de un edificio: la de su centro (lo de atrás queda tapado y lo de delante, aunque sea chico, se ve encima). */
   buildingDepth(e) {
-    return Math.max(depthOf(e.x, e.y), depthOf(e.x + e.w - 1, e.y), depthOf(e.x, e.y + e.h - 1), depthOf(e.x + e.w - 1, e.y + e.h - 1));
+    return depthOf(e.cx, e.cy);
   }
 
   /** Dibujo de un edificio: en un ataque tuyo, el del enemigo (teñido de rojo); en una defensa, el tuyo según su nivel. */
