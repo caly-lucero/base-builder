@@ -119,6 +119,72 @@ function quiver(arrowColor = C.marfil, tilt = 0.35) {
   return q;
 }
 
+/* ---------- piezas de héroe: lo que los distingue a primera vista de las tropas ---------- */
+
+/** Anillo luminoso en el suelo bajo el héroe (su color lo identifica de lejos). */
+function groundRing(color, r = 0.4) {
+  const g = new T.Group();
+  const ring = mesh(new T.TorusGeometry(r, 0.03, 8, 40), glow(color, 1.3), 0, 0.035, 0);
+  ring.rotation.x = Math.PI / 2;
+  const inner = mesh(new T.TorusGeometry(r * 0.62, 0.018, 8, 32), glow(color, 0.9), 0, 0.03, 0);
+  inner.rotation.x = Math.PI / 2;
+  const disc = mesh(new T.CircleGeometry(r, 36), new T.MeshBasicMaterial({ color, transparent: true, opacity: 0.3 }), 0, 0.02, 0);
+  disc.rotation.x = -Math.PI / 2;
+  g.add(disc, ring, inner);
+  return g;
+}
+/** Penacho de casco. */
+function plume(color = C.rojo) {
+  const g = new T.Group();
+  g.add(mesh(new T.CylinderGeometry(0.03, 0.04, 0.05, 8), mat(C.oro), 0, 0, 0));
+  for (const [x, y, rot, h] of [[0, 0.12, 0.5, 0.26], [0, 0.1, 0.25, 0.22], [0, 0.07, 0.8, 0.18]]) {
+    const f = mesh(new T.ConeGeometry(0.045, h, 6), mat(color, { roughness: 0.9, metalness: 0 }), x, y, -0.04);
+    f.rotation.x = -rot;
+    g.add(f);
+  }
+  return g;
+}
+/** Corona de oro con puntas. */
+function crown(gem = C.cian) {
+  const g = new T.Group();
+  g.add(mesh(new T.CylinderGeometry(0.1, 0.1, 0.05, 10, 1, true), mat(C.oro, { metalness: 0.5, side: T.DoubleSide }), 0, 0, 0));
+  for (let k = 0; k < 6; k++) {
+    const a = (k / 6) * Math.PI * 2;
+    g.add(mesh(new T.ConeGeometry(0.022, 0.08, 5), mat(C.oro, { metalness: 0.5 }), Math.cos(a) * 0.1, 0.06, Math.sin(a) * 0.1));
+  }
+  g.add(mesh(new T.OctahedronGeometry(0.03), glow(gem, 1.2), 0, 0.02, 0.1));
+  return g;
+}
+/** Cuernos de casco. */
+function horns(color = C.marfil) {
+  const g = new T.Group();
+  for (const sx of [-1, 1]) {
+    const h = mesh(new T.ConeGeometry(0.045, 0.24, 7), mat(color), sx * 0.15, 0.08, 0);
+    h.rotation.z = -sx * 0.9;
+    g.add(h);
+  }
+  return g;
+}
+/** Alas de plumas en la espalda. */
+function wings(color = C.marfil, tip = C.oro) {
+  const g = new T.Group();
+  for (const sx of [-1, 1]) {
+    for (let k = 0; k < 4; k++) {
+      const f = mesh(new T.BoxGeometry(0.2 - k * 0.015, 0.012, 0.07), mat(k === 3 ? tip : color, { roughness: 0.8, metalness: 0 }), sx * (0.15 + k * 0.06), 0.14 - k * 0.07, 0);
+      f.rotation.z = -sx * (0.45 + k * 0.28);
+      g.add(f);
+    }
+  }
+  return g;
+}
+/** Llama que arde sobre la mano del piromante. */
+function flame() {
+  const g = new T.Group();
+  g.add(mesh(new T.SphereGeometry(0.075, 12, 10), glow(C.fuego, 1.6), 0, 0, 0));
+  for (const [x, z, h, col] of [[0, 0, 0.24, 0xffcf4a], [0.05, 0.02, 0.16, C.fuego], [-0.05, -0.02, 0.18, C.fuego]]) g.add(mesh(new T.ConeGeometry(0.05, h, 7), glow(col, 1.4), x, 0.1 + h / 2 - 0.05, z));
+  return g;
+}
+
 /** Cuelga `item` de un hueso: p = [x, y, z], r = [rx, ry, rz] en grados. */
 function attach(obj, boneName, item, p = [0, 0, 0], r = [0, 0, 0], s = 1) {
   item.position.set(...p);
@@ -174,42 +240,58 @@ export const DESIGNS = {
   },
   async worker_3() { return { obj: await base('character-female-b'), scale: 1.1, worker: true }; },
   async worker_4() { return { obj: await base('character-male-f'), scale: 1.1, worker: true }; },
-  // Héroes
+  // Héroes: más grandes que las tropas, con anillo de luz en el suelo y piezas propias (penacho, alas, llamas, cuernos…)
   async unit_hero() {
-    const o = await base('character-knight', palette([[18, 40, 46, 1.1, 1.1]], oroGris));
-    inHand(o, sword(0xbfe9ff, C.oro, 0.36), 1.3);
-    onArm(o, shield(C.marfil, true, C.oro), 1.3);
-    withCape(o, cape(C.marfil, C.oro, 0.3, 0.38));
-    attach(o, 'head', halo(), [0, 0.28, 0], [90, 0, 0]);
-    return { obj: o, scale: 1.4 };
+    // Paladín: armadura dorada, casco con penacho, escudo con emblema, espada de luz y capa blanca
+    const o = await base('character-knight', palette([[18, 40, 46, 1.2, 1.15]], oroGris));
+    inHand(o, sword(0xbfe9ff, C.oro, 0.4), 1.45);
+    onArm(o, shield(C.marfil, true, C.oro), 1.45);
+    withCape(o, cape(C.marfil, C.oro, 0.36, 0.46));
+    attach(o, 'head', plume(C.rojo), [0, 0.26, -0.02], [0, 0, 0], 1.2);
+    attach(o, 'torso', shoulderPads(C.oro), [0, 0.28, 0], [0, 0, 0], 1.15);
+    attach(o, 'head', halo(), [0, 0.42, 0], [90, 0, 0]);
+    o.add(groundRing(C.oro));
+    return { obj: o, scale: 1.7 };
   },
   async hero_ranger() {
-    const o = await base('character-soldier', palette([[85, 170, 150, 1.2, 0.9]]));
-    inHand(o, bow(0x5a3a22, 0.46), 1.3);
-    withCape(o, cape(C.verde, C.oro, 0.28, 0.36));
-    attach(o, 'torso', quiver(C.oro, -0.35), [0, 0.15, -0.1]);
-    return { obj: o, scale: 1.4, ranged: true };
+    // Cazadora: verde bosque, capucha con pluma, gran arco, aljaba dorada y capa larga
+    const o = await base('character-soldier', palette([[85, 170, 150, 1.3, 0.85]]));
+    inHand(o, bow(0x5a3a22, 0.58), 1.45);
+    withCape(o, cape(C.verde, C.oro, 0.34, 0.5));
+    attach(o, 'torso', quiver(C.oro, -0.35), [0, 0.15, -0.1], [0, 0, 0], 1.2);
+    attach(o, 'head', mesh(new T.ConeGeometry(0.2, 0.26, 10), mat(C.verde, { roughness: 0.9, metalness: 0 })), [0, 0.2, -0.02]);
+    attach(o, 'head', mesh(new T.ConeGeometry(0.025, 0.3, 6), mat(C.rojo)), [0.1, 0.32, -0.04], [0, 0, -50]);
+    o.add(groundRing(0x56e07a));
+    return { obj: o, scale: 1.65, ranged: true };
   },
   async hero_priest() {
-    const o = await base('character-female-c');
-    inHand(o, staff(C.oro, 0.62), 1.1);
-    withCape(o, cape(C.marfil, C.oro, 0.3, 0.36));
-    attach(o, 'head', halo(), [0, 0.3, 0], [90, 0, 0]);
-    return { obj: o, scale: 1.4, ranged: true };
+    // Sacerdotisa: túnica blanca y dorada, alas de plumas, gran halo y bastón con cristal
+    const o = await base('character-female-c', palette([[200, 340, 48, 0.2, 1.4]]));
+    inHand(o, staff(C.oro, 0.75), 1.3);
+    withCape(o, cape(C.marfil, C.oro, 0.34, 0.48));
+    attach(o, 'torso', wings(C.marfil, C.oro), [0, 0.2, -0.13], [0, 0, 0], 1.25);
+    attach(o, 'head', halo(0xfff2a8), [0, 0.4, 0], [90, 0, 0], 1.3);
+    o.add(groundRing(0xfff2a8));
+    return { obj: o, scale: 1.65, ranged: true };
   },
   async hero_pyro() {
-    const o = await base('character-female-d');
-    attach(o, 'arm-right', mesh(new T.SphereGeometry(0.09, 12, 10), glow(C.fuego, 1.6)), [0, -0.14, 0.12]);
-    attach(o, 'head', wizardHat(C.rojo, C.oro), [0, 0.12, 0]);
-    withCape(o, cape(0x7a1a1f, C.fuego, 0.28, 0.36));
-    return { obj: o, scale: 1.4, ranged: true };
+    // Piromante: túnica roja y negra, sombrero alto, llama en la mano y capa de brasas
+    const o = await base('character-female-d', palette([[0, 360, 4, 1.2, 0.85]]));
+    attach(o, 'arm-right', flame(), [0, -0.16, 0.14], [0, 0, 0], 1.3);
+    attach(o, 'head', wizardHat(C.rojo, C.oro), [0, 0.12, 0], [0, 0, 0], 1.35);
+    withCape(o, cape(0x7a1a1f, C.fuego, 0.34, 0.5));
+    o.add(groundRing(C.fuego));
+    return { obj: o, scale: 1.65, ranged: true };
   },
   async hero_warlord() {
-    const o = await base('character-raider', palette([[0, 60, 4, 1.1, 0.9]], oroGris));
-    inHand(o, axe(0.5), 1.3);
-    attach(o, 'torso', shoulderPads(C.acero), [0, 0.28, 0]);
-    withCape(o, cape(C.rojo, C.oro, 0.32, 0.38));
-    return { obj: o, scale: 1.55 };
+    // Señor de la guerra: casco con cuernos, hombreras de acero, hacha enorme y capa roja
+    const o = await base('character-raider', palette([[0, 60, 4, 1.2, 0.85]], oroGris));
+    inHand(o, axe(0.62), 1.5);
+    attach(o, 'torso', shoulderPads(C.acero), [0, 0.28, 0], [0, 0, 0], 1.3);
+    attach(o, 'head', horns(), [0, 0.22, 0], [0, 0, 0], 1.3);
+    withCape(o, cape(C.rojo, C.oro, 0.38, 0.5));
+    o.add(groundRing(C.rojo));
+    return { obj: o, scale: 1.8 };
   },
   // Horda (enemigos)
   async enemy_guard() {
