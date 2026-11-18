@@ -12,8 +12,12 @@ import {
   depthOf,
   inViewport,
   isTileVisible,
+  artTurn,
   panBy,
+  rectCorners,
   resetView,
+  rotateVec,
+  rotateView,
   screenToTile,
   screenToWorld,
   tileBase,
@@ -24,7 +28,10 @@ import {
   zoomAt,
 } from '../src/game/projection.js';
 
-beforeEach(() => resetView());
+beforeEach(() => {
+  view.rot = 0;
+  resetView();
+});
 
 const viewBottom = () => LAYOUT.gridTop + LAYOUT.viewHeight;
 
@@ -49,7 +56,7 @@ test('x crece hacia abajo-derecha e y hacia abajo-izquierda', () => {
   assert.equal(sx.y - a.y, sy.y - a.y, 'bajan lo mismo');
 });
 
-test('el centro de cada casilla visible vuelve a esa misma casilla', () => {
+test('el centro de cada cuadro visible vuelve a ese mismo cuadro', () => {
   let checked = 0;
   for (let y = 0; y < GRID.rows; y++) {
     for (let x = 0; x < GRID.cols; x++) {
@@ -59,7 +66,7 @@ test('el centro de cada casilla visible vuelve a esa misma casilla', () => {
       checked++;
     }
   }
-  assert.ok(checked > 40, `se probaron ${checked} casillas visibles`);
+  assert.ok(checked > 160, `se probaron ${checked} cuadros visibles`);
 });
 
 test('screenToWorld es la inversa de tileCenter (también con fracciones)', () => {
@@ -71,15 +78,16 @@ test('screenToWorld es la inversa de tileCenter (también con fracciones)', () =
 });
 
 test('las esquinas del rombo caen en la casilla vecina o fuera de ella, y el centro dentro', () => {
-  const [top, right, bottom, left] = tileCorners(8, 8);
+  const cell = { x: TOWN_HALL_CELL.x + 3, y: TOWN_HALL_CELL.y + 3 }; // un cuadro que se ve en pantalla
+  const [top, right, bottom, left] = tileCorners(cell.x, cell.y);
   const inside = (p, dx, dy) => ({ x: p.x + dx, y: p.y + dy });
-  // un pelín hacia dentro desde cada vértice sigue siendo la casilla
-  assert.deepEqual(screenToTile(...Object.values(inside(top, 0, 2))), { x: 8, y: 8 });
-  assert.deepEqual(screenToTile(...Object.values(inside(right, -3, 0))), { x: 8, y: 8 });
-  assert.deepEqual(screenToTile(...Object.values(inside(bottom, 0, -2))), { x: 8, y: 8 });
-  assert.deepEqual(screenToTile(...Object.values(inside(left, 3, 0))), { x: 8, y: 8 });
-  // y un pelín hacia fuera ya es otra
-  assert.notDeepEqual(screenToTile(...Object.values(inside(right, 4, 0))), { x: 8, y: 8 });
+  // un pelín hacia dentro desde cada vértice sigue siendo el cuadro
+  assert.deepEqual(screenToTile(...Object.values(inside(top, 0, 2))), cell);
+  assert.deepEqual(screenToTile(...Object.values(inside(right, -3, 0))), cell);
+  assert.deepEqual(screenToTile(...Object.values(inside(bottom, 0, -2))), cell);
+  assert.deepEqual(screenToTile(...Object.values(inside(left, 3, 0))), cell);
+  // y un pelín hacia fuera ya es otro
+  assert.notDeepEqual(screenToTile(...Object.values(inside(right, 4, 0))), cell);
 });
 
 test('puntos fuera de la ventana (HUD, barra inferior, bordes) no dan casilla', () => {
@@ -206,4 +214,78 @@ test('fitLayout adapta el alto del lienzo a la proporción de la pantalla (con t
   fitLayout(0, 0); // medidas inválidas: no cambia nada
   assert.equal(LAYOUT.viewHeight, 900);
   LAYOUT.viewHeight = before;
+});
+
+/* ---------- giro de la cámara ---------- */
+
+test('al girar la vista, screenToWorld sigue siendo la inversa de tileCenter y cada cuadro vuelve a sí mismo', () => {
+  for (let rot = 0; rot < 4; rot++) {
+    view.rot = rot;
+    resetView();
+    for (const [x, y] of [[3, 4], [10.5, 7.25], [30.3, 20.8], [47, 0]]) {
+      const c = tileCenter(x, y);
+      const w = screenToWorld(c.x, c.y);
+      assert.ok(Math.abs(w.x - (x + 0.5)) < 1e-9 && Math.abs(w.y - (y + 0.5)) < 1e-9, `vista ${rot}: (${x}, ${y})`);
+    }
+    const c = tileCenter(TOWN_HALL_CELL.x + 2, TOWN_HALL_CELL.y + 3);
+    assert.deepEqual(screenToTile(c.x, c.y), { x: TOWN_HALL_CELL.x + 2, y: TOWN_HALL_CELL.y + 3 }, `vista ${rot}`);
+  }
+});
+
+test('girar la vista deja quieto el centro de la ventana y la vuelta completa deja todo como estaba', () => {
+  const cx = LAYOUT.width / 2;
+  const cy = LAYOUT.gridTop + LAYOUT.viewHeight / 2;
+  const before = screenToWorld(cx, cy);
+  const v0 = { x: view.x, y: view.y };
+  for (let i = 1; i <= 4; i++) {
+    rotateView(1);
+    const now = screenToWorld(cx, cy);
+    assert.ok(Math.abs(now.x - before.x) < 1e-6 && Math.abs(now.y - before.y) < 1e-6, `giro ${i}: el centro se movió`);
+    assert.equal(view.rot, i % 4);
+  }
+  assert.ok(Math.abs(view.x - v0.x) < 1e-6 && Math.abs(view.y - v0.y) < 1e-6);
+  rotateView(-1);
+  assert.equal(view.rot, 3);
+});
+
+test('el mapa entero sigue ocupando la misma ventana en cualquier giro', () => {
+  const area = (rot) => {
+    view.rot = rot;
+    resetView();
+    zoomAt(LAYOUT.width / 2, LAYOUT.gridTop + LAYOUT.viewHeight / 2, CAMERA.minZoom);
+    const { top, bottom, left, right } = rectCorners(0, 0, GRID.cols, GRID.rows);
+    return [Math.round(right.x - left.x), Math.round(bottom.y - top.y)];
+  };
+  const base = area(0);
+  for (const rot of [1, 2, 3]) assert.deepEqual(area(rot), base, `vista ${rot}`);
+});
+
+test('los giros cambian qué cuadro queda más cerca de la cámara (más abajo en pantalla)', () => {
+  // Sin girar, el cuadro (10, 10) está delante del (5, 5); girando 180° es al revés.
+  assert.ok(depthOf(10, 10) > depthOf(5, 5));
+  view.rot = 2;
+  assert.ok(depthOf(10, 10) < depthOf(5, 5));
+  view.rot = 1;
+  // Con un cuarto de vuelta, lo que estaba a la derecha (x mayor) pasa a estar abajo-izquierda.
+  const a = tileCenter(20, 10);
+  const b = tileCenter(10, 10);
+  assert.notEqual(Math.sign(a.x - b.x), 0);
+});
+
+test('un edificio girado usa el dibujo del giro contrario y los personajes miran según la vista', () => {
+  assert.deepEqual([0, 1, 2, 3].map((r) => artTurn(r)), [0, 3, 2, 1]);
+  assert.deepEqual(rotateVec(1, 0, 0), { dx: 1, dy: 0 });
+  assert.deepEqual(rotateVec(1, 0, 1), { dx: 0, dy: 1 });
+  assert.deepEqual(rotateVec(1, 0, 2), { dx: -1, dy: 0 });
+  assert.deepEqual(rotateVec(1, 0, 3), { dx: 0, dy: -1 });
+  // Girar 4 veces la misma dirección la deja igual.
+  let v = { dx: 2, dy: -3 };
+  for (let i = 0; i < 4; i++) v = rotateVec(v.dx, v.dy, 1);
+  assert.deepEqual(v, { dx: 2, dy: -3 });
+});
+
+test('rectCorners da los vértices de un rectángulo ordenados por pantalla', () => {
+  const r = rectCorners(10, 10, 4, 3);
+  assert.ok(r.top.y < r.left.y && r.top.y < r.right.y && r.bottom.y > r.left.y && r.bottom.y > r.right.y);
+  assert.ok(r.left.x < r.top.x && r.right.x > r.top.x);
 });

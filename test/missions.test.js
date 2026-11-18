@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { GRID } from '../src/data/config.js';
 import { advanceBattle, createBattle } from '../src/game/battle.js';
 import { generateMission, missionName } from '../src/game/missions.js';
+import { sizeOf } from '../src/game/logic.js';
 import { findPath } from '../src/game/pathfinding.js';
 
 const count = (m, type) => m.buildings.filter((b) => b.type === type).length;
@@ -12,16 +13,21 @@ test('la misma misión siempre sale igual, y niveles distintos salen distintos',
   assert.notDeepEqual(generateMission(4), generateMission(5));
 });
 
-test('cada misión tiene un Ayuntamiento, edificios dentro del mapa y sin repetir casilla', () => {
+test('cada misión tiene un Ayuntamiento, edificios dentro del mapa y sin pisarse entre sí', () => {
   for (let level = 1; level <= 25; level++) {
     const m = generateMission(level);
     assert.equal(count(m, 'hall'), 1, `nivel ${level}: un solo Ayuntamiento`);
     const seen = new Set();
     for (const b of m.buildings) {
-      assert.ok(b.x >= 0 && b.x < GRID.cols && b.y >= 0 && b.y < GRID.rows, `nivel ${level}: ${b.type} fuera del mapa`);
-      const key = `${b.x},${b.y}`;
-      assert.ok(!seen.has(key), `nivel ${level}: casilla repetida ${key}`);
-      seen.add(key);
+      const { w, h } = sizeOf(b.type);
+      assert.ok(b.x >= 0 && b.x + w <= GRID.cols && b.y >= 0 && b.y + h <= GRID.rows, `nivel ${level}: ${b.type} fuera del mapa`);
+      for (let y = b.y; y < b.y + h; y++) {
+        for (let x = b.x; x < b.x + w; x++) {
+          const key = `${x},${y}`;
+          assert.ok(!seen.has(key), `nivel ${level}: cuadro repetido ${key} (${b.type})`);
+          seen.add(key);
+        }
+      }
     }
     for (const d of m.defenders) assert.ok(d.x >= 0 && d.x < GRID.cols && d.y >= 0 && d.y < GRID.rows);
   }
@@ -41,10 +47,11 @@ test('la dificultad crece con el nivel', () => {
 
 test('el anillo de muros tiene huecos al principio y es cerrado en niveles altos', () => {
   const gaps = (m) => {
-    const wallXs = new Set(m.buildings.filter((b) => b.type === 'wall' && b.y === 10).map((b) => b.x));
+    // El lado sur del anillo (y = 21): cada hueco son 2 cuadros seguidos sin muro.
+    const wallXs = new Set(m.buildings.filter((b) => b.type === 'wall' && b.y === 21).map((b) => b.x));
     let g = 0;
-    for (let x = 9; x <= 15; x++) if (!wallXs.has(x)) g++;
-    return g;
+    for (let x = 14; x <= 32; x++) if (!wallXs.has(x)) g++;
+    return g / 2;
   };
   assert.equal(gaps(generateMission(1)), 2);
   assert.equal(gaps(generateMission(4)), 1);
@@ -54,10 +61,15 @@ test('el anillo de muros tiene huecos al principio y es cerrado en niveles altos
 test('los niveles de entrada tienen un hueco por el que se llega al Ayuntamiento sin romper muros', () => {
   for (const level of [1, 2, 3]) {
     const m = generateMission(level);
-    const solid = new Set(m.buildings.filter((b) => b.type !== 'wall').map((b) => `${b.x},${b.y}`));
-    const walls = new Set(m.buildings.filter((b) => b.type === 'wall').map((b) => `${b.x},${b.y}`));
+    const cells = (list) => new Set(list.flatMap((b) => {
+      const { w, h } = sizeOf(b.type);
+      return Array.from({ length: w * h }, (_, i) => `${b.x + (i % w)},${b.y + Math.floor(i / w)}`);
+    }));
+    const solid = cells(m.buildings.filter((b) => b.type !== 'wall'));
+    const walls = cells(m.buildings.filter((b) => b.type === 'wall'));
     const hall = m.buildings.find((b) => b.type === 'hall');
-    const path = findPath({ x: 12, y: GRID.rows - 2 }, { x: hall.x, y: hall.y }, {
+    const path = findPath({ x: 24, y: GRID.rows - 2 }, { x: hall.x + 3, y: hall.y + sizeOf('hall').h }, { // el cuadro justo debajo del Ayuntamiento
+      maxNodes: 6000,
       blocked: (x, y) => solid.has(`${x},${y}`) || walls.has(`${x},${y}`),
     });
     assert.ok(path, `nivel ${level}: sin camino libre`);

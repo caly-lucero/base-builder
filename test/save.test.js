@@ -293,7 +293,7 @@ test('migración v6 → v7: nada queda dañado y el calendario queda «sin progr
   assert.ok(r.state.buildings.every((b) => b.damaged === false));
   assert.deepEqual(r.state.raid, { nextAt: 0, count: 0 });
   assert.deepEqual(r.state.campaign, { cleared: 2, stars: { 1: 1, 2: 1 } }, 'conserva la campaña; cada nivel superado cuenta como 1 estrella');
-  assert.equal(r.state.buildings.length, 3);
+  assert.equal(r.state.buildings.length, 6, 'el muro viejo pasa a ser un bloque de 2×2 muros (4 piezas) + Ayuntamiento + mina');
 });
 
 test('las misiones reclamadas se guardan y se recuperan', () => {
@@ -347,8 +347,10 @@ test('migración v1 → v3: una partida de la fase 1 se abre centrada, con mader
 
   const mine = r.state.buildings.find((b) => b.type === 'mine');
   const storage = r.state.buildings.find((b) => b.type === 'storage');
-  assert.deepEqual([mine.x, mine.y], [8, 8], 'la base se centra: +6 en cada eje');
-  assert.deepEqual([storage.x, storage.y], [10, 10]);
+  // La base se centra (+6 casillas en cada eje) y luego cada casilla pasa a ser 2×2 cuadros: la mina (2×2) queda
+  // en (16, 16) o muy cerca si el almacén (más grande, 4×3) le quitó el sitio; ninguno pisa al Ayuntamiento.
+  assert.ok(Math.abs(mine.x - 16) <= 2 && Math.abs(mine.y - 16) <= 2, `mina en ${mine.x},${mine.y}`);
+  assert.ok(Math.abs(storage.x - 19) <= 4 && Math.abs(storage.y - 20) <= 4, `almacén en ${storage.x},${storage.y}`);
   assert.equal(mine.level, 1);
   assert.equal(mine.stored, 12.5, 'conserva lo que había');
 
@@ -386,7 +388,7 @@ test('migración: si el centro está ocupado, el Ayuntamiento va a la casilla li
   assert.equal(r.ok, true);
   const hall = townHall(r.state);
   assert.notDeepEqual([hall.x, hall.y], [TOWN_HALL_CELL.x, TOWN_HALL_CELL.y]);
-  assert.ok(Math.max(Math.abs(hall.x - TOWN_HALL_CELL.x), Math.abs(hall.y - TOWN_HALL_CELL.y)) === 1);
+  assert.equal(Math.max(Math.abs(hall.x - TOWN_HALL_CELL.x), Math.abs(hall.y - TOWN_HALL_CELL.y)), 2, 'una casilla vieja = 2 cuadros');
 });
 
 test('migración v3 → v4: una partida con Ayuntamiento y madera sigue igual y empieza sin misiones reclamadas', () => {
@@ -401,7 +403,8 @@ test('migración v3 → v4: una partida con Ayuntamiento y madera sigue igual y 
   assert.equal(r.ok, true);
   assert.deepEqual(r.state.claimedQuests, []);
   assert.equal(r.state.wood, 120, 'no se toca la madera que ya tenía');
-  assert.equal(r.state.buildings.length, 3);
+  assert.equal(r.state.buildings.length, 6, 'el muro viejo pasa a ser 4 muros');
+  assert.equal(r.state.buildings.filter((b) => b.type === 'wall').length, 4);
   assert.equal(townHall(r.state).level, 2);
 });
 
@@ -519,4 +522,41 @@ test('migración v8 → v9: cada nivel de campaña superado cuenta como 1 estrel
   assert.deepEqual(r.state.campaign, { cleared: 3, stars: { 1: 1, 2: 1, 3: 1 } });
   assert.equal(r.state.achievements.stars, 0);
   assert.equal(r.state.achievements.builder, 0);
+});
+
+test('migración v10 → v11: cada casilla vieja pasa a ser 2×2 cuadros y los muros se vuelven 4 piezas', () => {
+  const b = (id, type, x, y, level = 1) => ({ id, type, level, upgradeEndsAt: null, training: null, damaged: false, x, y, stored: 0, lastTick: T0 });
+  const data = {
+    gold: 300, wood: 120, nextId: 10, savedAt: T0, claimedQuests: [],
+    army: { soldier: 0, archer: 0, mage: 0, knight: 0, catapult: 0, ram: 0 }, heroes: {}, squad: [],
+    research: { weapons: 0, armor: 0, fortify: 0 }, achievements: {},
+    campaign: { cleared: 0, stars: {} }, raid: { nextAt: 0, count: 0 },
+    buildings: [b(1, 'townhall', 11, 11, 2), b(2, 'mine', 5, 5), b(3, 'wall', 8, 8), b(4, 'barracks', 14, 14)],
+  };
+  const s0 = sampleState();
+  data.achievements = s0.achievements;
+  const r = parseSave(JSON.stringify({ v: 10, sum: checksum(data), data }));
+  assert.equal(r.ok, true, r.error);
+
+  const hall = townHall(r.state);
+  assert.deepEqual([hall.x, hall.y], [TOWN_HALL_CELL.x, TOWN_HALL_CELL.y], 'el Ayuntamiento queda en el centro');
+  const mine = r.state.buildings.find((x) => x.type === 'mine');
+  assert.deepEqual([mine.x, mine.y], [10, 10], 'la mina (2×2) ocupa justo el bloque que era su casilla');
+  const walls = r.state.buildings.filter((x) => x.type === 'wall');
+  assert.equal(walls.length, 4, 'un muro viejo = un bloque de 2×2 muros');
+  assert.deepEqual(walls.map((w) => [w.x, w.y]).sort(), [[16, 16], [16, 17], [17, 16], [17, 17]]);
+  assert.equal(new Set(r.state.buildings.map((x) => x.id)).size, r.state.buildings.length, 'ids únicos');
+  assert.ok(r.state.nextId > Math.max(...r.state.buildings.map((x) => x.id)));
+  const barracks = r.state.buildings.find((x) => x.type === 'barracks');
+  assert.ok(Math.abs(barracks.x - 26) <= 2 && Math.abs(barracks.y - 26) <= 2, `el cuartel conserva su centro (${barracks.x},${barracks.y})`);
+
+  // La partida resultante se guarda y se lee otra vez igual, y dos edificios no pueden pisarse.
+  const again = parseSave(serialize(r.state));
+  assert.equal(again.ok, true);
+  assert.deepEqual(again.state, r.state);
+  const bad = JSON.parse(serialize(r.state));
+  bad.data.buildings.push({ ...bad.data.buildings[1], id: 99 });
+  bad.data.nextId = 100;
+  bad.sum = checksum(bad.data);
+  assert.equal(parseSave(JSON.stringify(bad)).ok, false, 'dos edificios en los mismos cuadros se rechazan');
 });

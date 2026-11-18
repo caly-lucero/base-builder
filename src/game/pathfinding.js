@@ -1,6 +1,6 @@
 // Búsqueda de caminos (A*) sobre la cuadrícula del mapa. Lógica pura: no sabe de Phaser ni de edificios,
-// solo de casillas. Las unidades se mueven en 8 direcciones; una diagonal solo se permite si las dos
-// casillas laterales están libres, para que nadie «corte» la esquina de un edificio.
+// solo de cuadros. Las unidades se mueven en 8 direcciones; una diagonal solo se permite si los dos
+// cuadros laterales están libres, para que nadie «corte» la esquina de un edificio.
 import { GRID } from '../data/config.js';
 
 const DIRS = [
@@ -10,12 +10,56 @@ const DIRS = [
 
 const inGrid = (x, y) => x >= 0 && y >= 0 && x < GRID.cols && y < GRID.rows;
 
+/** Cola de prioridad mínima (montículo binario) por el campo `f`. */
+class MinHeap {
+  constructor() {
+    this.items = [];
+  }
+
+  get size() {
+    return this.items.length;
+  }
+
+  push(item) {
+    const a = this.items;
+    a.push(item);
+    let i = a.length - 1;
+    while (i > 0) {
+      const parent = (i - 1) >> 1;
+      if (a[parent].f <= a[i].f) break;
+      [a[parent], a[i]] = [a[i], a[parent]];
+      i = parent;
+    }
+  }
+
+  pop() {
+    const a = this.items;
+    const top = a[0];
+    const last = a.pop();
+    if (a.length) {
+      a[0] = last;
+      let i = 0;
+      for (;;) {
+        const l = 2 * i + 1;
+        const r = l + 1;
+        let m = i;
+        if (l < a.length && a[l].f < a[m].f) m = l;
+        if (r < a.length && a[r].f < a[m].f) m = r;
+        if (m === i) break;
+        [a[m], a[i]] = [a[i], a[m]];
+        i = m;
+      }
+    }
+    return top;
+  }
+}
+
 /**
- * Camino de `from` a `to` (casillas enteras). Devuelve [{x,y}] SIN la casilla de salida y CON la de
+ * Camino de `from` a `to` (cuadros enteros). Devuelve [{x,y}] SIN el cuadro de salida y CON el de
  * llegada, [] si ya está allí, o null si no hay camino.
- *  - blocked(x, y): true si la casilla es intransitable. La casilla de llegada siempre cuenta como
+ *  - blocked(x, y): true si el cuadro es intransitable. El cuadro de llegada siempre cuenta como
  *    transitable (es donde está el objetivo).
- *  - extraCost(x, y): costo adicional por pisar la casilla (los muros cuestan más: se prefiere
+ *  - extraCost(x, y): costo adicional por pisar el cuadro (los muros cuestan más: se prefiere
  *    rodearlos, pero se pueden atravesar rompiéndolos).
  */
 export function findPath(from, to, { blocked = () => false, extraCost = () => 0, maxNodes = 1200 } = {}) {
@@ -32,13 +76,12 @@ export function findPath(from, to, { blocked = () => false, extraCost = () => 0,
 
   const g = new Map([[key(from.x, from.y), 0]]);
   const parent = new Map();
-  const open = [{ x: from.x, y: from.y, f: h(from.x, from.y) }];
+  const open = new MinHeap();
+  open.push({ x: from.x, y: from.y, f: h(from.x, from.y) });
   const closed = new Set();
 
-  for (let expanded = 0; open.length && expanded < maxNodes; expanded++) {
-    let best = 0;
-    for (let i = 1; i < open.length; i++) if (open[i].f < open[best].f) best = i;
-    const cur = open.splice(best, 1)[0];
+  for (let expanded = 0; open.size && expanded < maxNodes; expanded++) {
+    const cur = open.pop();
     const ck = key(cur.x, cur.y);
     if (closed.has(ck)) continue;
     closed.add(ck);

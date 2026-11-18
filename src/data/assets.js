@@ -5,9 +5,11 @@
 
 export const ASSET_BASE = 'assets/';
 
-// Edificios: 3 dibujos por tipo (niveles 1, 2 y 3; del 4 en adelante se reutiliza el 3 con tinte).
+// Edificios: 3 dibujos por tipo (niveles 1, 2 y 3; del 4 en adelante se reutiliza el 3 con tinte), cada uno en 4 giros
+// de cámara: `tipo_n` (el de siempre) y `tipo_n_r1`, `_r2`, `_r3` (la vista girada 90°, 180° y 270°).
 const BUILDING_TYPES = ['townhall', 'mine', 'sawmill', 'storage', 'tower', 'wall', 'gate', 'house', 'barracks', 'archery', 'atelier', 'stable', 'siege', 'forge', 'altar'];
-const BUILDING_ART = BUILDING_TYPES.flatMap((t) => [1, 2, 3].map((n) => `${t}_${n}`));
+export const VIEW_TURNS = 4; // giros de cámara posibles
+const BUILDING_ART = BUILDING_TYPES.flatMap((t) => [1, 2, 3].flatMap((n) => Array.from({ length: VIEW_TURNS }, (_, r) => (r ? `${t}_${n}_r${r}` : `${t}_${n}`))));
 
 // Decoración del mapa y cosas sueltas.
 const DECOR_ART = [

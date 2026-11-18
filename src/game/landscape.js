@@ -1,30 +1,52 @@
 // Paisaje de la base: caminos de tierra entre tus edificios, estanques y flores. Es solo aspecto: se calcula
 // siempre igual a partir de la partida (caminos) o de una semilla fija (estanques y flores), y no se guarda.
-import { GRID } from '../data/config.js';
+// Todo va en «bloques de terreno» de 2×2 cuadros (TERRAIN): el césped, el agua y los caminos no necesitan más detalle.
+import { TERRAIN } from '../data/config.js';
+import { centerOf, sizeOf } from './logic.js';
 import { mulberry32 } from './decor.js';
 
 export const LANDSCAPE_SEED = 77031;
 
 const key = (x, y) => `${x},${y}`;
-const inMap = (x, y) => x >= 0 && y >= 0 && x < GRID.cols && y < GRID.rows;
+const inMap = (x, y) => x >= 0 && y >= 0 && x < TERRAIN.cols && y < TERRAIN.rows;
 const SKIP = new Set(['wall', 'gate']); // los muros no necesitan camino
 
+/** Bloque de terreno donde cae el centro de un edificio. */
+const blockOf = (b) => {
+  const c = centerOf(b);
+  return { x: Math.floor((c.x + 0.5) / TERRAIN.cells), y: Math.floor((c.y + 0.5) / TERRAIN.cells) };
+};
+
+/** Bloques de terreno que pisa algún edificio (Set de "x,y"): ahí no se ve césped, flores ni adornos. */
+export function occupiedBlocks(buildings) {
+  const out = new Set();
+  for (const b of buildings) {
+    const { w, h } = sizeOf(b.type);
+    for (let y = Math.floor(b.y / TERRAIN.cells); y <= Math.floor((b.y + h - 1) / TERRAIN.cells); y++) {
+      for (let x = Math.floor(b.x / TERRAIN.cells); x <= Math.floor((b.x + w - 1) / TERRAIN.cells); x++) out.add(key(x, y));
+    }
+  }
+  return out;
+}
+
 /**
- * Casillas de tierra que unen tus edificios con el Ayuntamiento. Cada edificio se conecta con lo más cercano que
+ * Bloques de terreno de tierra que unen tus edificios con el Ayuntamiento. Cada edificio se conecta con lo más cercano que
  * ya está conectado (un árbol, no una estrella), con tramos en «L». Devuelve un Set de "x,y" que NO incluye las
- * casillas ocupadas por edificios.
+ * bloques ocupados por edificios.
  */
 export function pathTiles(buildings) {
   const hall = buildings.find((b) => b.type === 'townhall');
   if (!hall) return new Set();
-  const occupied = new Set(buildings.map((b) => key(b.x, b.y)));
+  const occupied = occupiedBlocks(buildings);
   const path = new Set();
-  const nodes = [{ x: hall.x, y: hall.y }];
+  const hallBlock = blockOf(hall);
+  const nodes = [hallBlock];
   const rest = buildings
     .filter((b) => b !== hall && !SKIP.has(b.type))
-    .sort((a, b) => Math.abs(a.x - hall.x) + Math.abs(a.y - hall.y) - (Math.abs(b.x - hall.x) + Math.abs(b.y - hall.y)) || a.id - b.id);
+    .map((b) => ({ b, at: blockOf(b) }))
+    .sort((p, q) => Math.abs(p.at.x - hallBlock.x) + Math.abs(p.at.y - hallBlock.y) - (Math.abs(q.at.x - hallBlock.x) + Math.abs(q.at.y - hallBlock.y)) || p.b.id - q.b.id);
 
-  for (const b of rest) {
+  for (const { at: b } of rest) {
     let best = nodes[0];
     let bestD = Infinity;
     for (const n of nodes) {
@@ -93,8 +115,8 @@ export function flowerSpots(seed = LANDSCAPE_SEED) {
   const rand = mulberry32(seed + 1);
   const water = new Set(pondTiles(seed).map((t) => key(t.x, t.y)));
   const out = [];
-  for (let y = 0; y < GRID.rows; y++) {
-    for (let x = 0; x < GRID.cols; x++) {
+  for (let y = 0; y < TERRAIN.rows; y++) {
+    for (let x = 0; x < TERRAIN.cols; x++) {
       const roll = rand();
       const kind = Math.floor(rand() * 4); // 0-2 flores de colores, 3 mata de hierba
       const ox = 0.15 + rand() * 0.7;

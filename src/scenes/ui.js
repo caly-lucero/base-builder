@@ -278,6 +278,32 @@ const ICONS = {
     ctx.fillStyle = '#7a4a22';
     ctx.fillRect(20, 29, 8, 13);
   },
+  rotr(ctx) {
+    // flecha circular hacia la derecha (gira la vista en el sentido de las agujas del reloj)
+    ctx.strokeStyle = '#f6ecd2';
+    ctx.fillStyle = '#f6ecd2';
+    ctx.lineWidth = 5;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.arc(24, 26, 13, Math.PI * 1.15, Math.PI * 2.4);
+    ctx.stroke();
+    const a = Math.PI * 2.4;
+    const px = 24 + 13 * Math.cos(a);
+    const py = 26 + 13 * Math.sin(a);
+    const tx = -Math.sin(a);
+    const ty = Math.cos(a);
+    ctx.beginPath();
+    ctx.moveTo(px + tx * 11, py + ty * 11);
+    ctx.lineTo(px + Math.cos(a) * 8, py + Math.sin(a) * 8);
+    ctx.lineTo(px - Math.cos(a) * 8, py - Math.sin(a) * 8);
+    ctx.closePath();
+    ctx.fill();
+  },
+  rotl(ctx) {
+    ctx.translate(48, 0);
+    ctx.scale(-1, 1);
+    ICONS.rotr(ctx);
+  },
   plus(ctx) {
     ctx.fillStyle = '#f6ecd2';
     ctx.fillRect(21, 8, 6, 32);

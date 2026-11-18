@@ -27,16 +27,16 @@ createServer((req, res) => {
   const p = url.pathname;
   if (req.method === 'POST' && p === '/save') {
     const name = (url.searchParams.get('name') ?? '').replace(/[^a-zA-Z0-9_.\-/]/g, '');
-    if (!name.endsWith('.png') || name.includes('..')) return void res.writeHead(400).end('nombre inválido');
+    if (!(name.endsWith('.png') || name.endsWith('.json')) || name.includes('..')) return void res.writeHead(400).end('nombre inválido');
     const chunks = [];
     req.on('data', (c) => chunks.push(c));
     req.on('end', () => {
       const text = Buffer.concat(chunks).toString('utf8');
-      const b64 = text.replace(/^data:image\/png;base64,/, '');
       const target = resolve(outDir, name);
       if (!target.startsWith(outDir + sep)) return void res.writeHead(400).end('ruta');
       mkdirSync(dirname(target), { recursive: true });
-      writeFileSync(target, Buffer.from(b64, 'base64'));
+      if (name.endsWith('.json')) writeFileSync(target, text);
+      else writeFileSync(target, Buffer.from(text.replace(/^data:image\/png;base64,/, ''), 'base64'));
       res.writeHead(200).end('ok');
     });
     return;

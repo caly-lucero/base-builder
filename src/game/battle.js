@@ -1,5 +1,7 @@
 // Simulación de batalla: lógica pura y determinista (sin Phaser, sin azar, sin relojes).
-// Las posiciones son casillas con decimales; el centro de la casilla (x, y) es el punto (x, y).
+// Las posiciones son cuadros con decimales; el centro del cuadro (x, y) es el punto (x, y). Los edificios ocupan
+// varios cuadros (ver `size` en config.js) y las distancias del juego (alcances, velocidades…) están pensadas en
+// «casillas» de antes, que eran de 2×2 cuadros: por eso se multiplican por `S`.
 //
 // Cómo pelean las unidades:
 //  - AUTOMÁTICO: cada atacante busca solo un objetivo: primero enemigos cercanos y, si no hay,
@@ -9,12 +11,12 @@
 //  - Los muros se rodean si se puede; si el camino pasa por un muro, la unidad lo ataca para abrirse paso.
 import { ARMY_UNITS, COMBAT, DEFENSE, ENEMY_BUILDINGS, ENEMY_UNITS, GRID, RAID, STARS, UNITS } from '../data/config.js';
 import { HEROES, abilityAt, heroStats } from '../data/heroes.js';
-import { researchBonus, squadHeroes, townHallLevel, unitCombat } from './logic.js';
+import { researchBonus, sizeOf, squadHeroes, townHallLevel, unitCombat } from './logic.js';
 import { findPath } from './pathfinding.js';
 
-const BUILDING_RADIUS = 0.5;
-const UNIT_RADIUS = 0.25;
-const RANGED_FROM = 2; // desde este alcance un golpe se muestra como disparo
+export const S = 2; // cuadros por casilla de antes: todas las distancias del combate se miden en cuadros
+const UNIT_RADIUS = 0.25 * S;
+const RANGED_FROM = 2 * S; // desde este alcance un golpe se muestra como disparo
 const ABILITY_FIRST_CD = 3; // los héroes pueden lanzar su habilidad a los 3 s de empezar
 
 /** Estadísticas de combate del héroe «paladín» a un nivel (el héroe de las partidas antiguas). */
@@ -49,6 +51,7 @@ export function createBattle(mission, army, heroes = [], stats = null) {
     units: [],
     buildings: [],
     byId: new Map(),
+    grid: new Map(), // cuadro (y·ancho + x) → edificio en pie que lo ocupa
     events: [],
     loot: { gold: 0, wood: 0 },
     destroyed: 0,
@@ -61,15 +64,10 @@ export function createBattle(mission, army, heroes = [], stats = null) {
   for (const spec of mission.buildings) {
     const def = ENEMY_BUILDINGS[spec.type];
     const hp = Math.round(def.hp * mission.hpScale);
-    const e = {
-      id: b.nextId++, side: 'd', kind: 'building', type: spec.type, x: spec.x, y: spec.y,
-      hp, maxHp: hp, alive: true, loot: spec.loot ?? { gold: 0, wood: 0 },
-    };
-    if (def.dmg) Object.assign(e, { dmg: Math.round(def.dmg * mission.dmgScale), range: def.range, atkSec: def.atkSec, cd: 0 });
+    const e = newBuilding(b, spec.type, spec.x, spec.y, hp, { loot: spec.loot ?? { gold: 0, wood: 0 } });
+    if (def.dmg) Object.assign(e, { dmg: Math.round(def.dmg * mission.dmgScale), range: def.range * S, atkSec: def.atkSec, cd: 0 });
     if (spec.type === 'hall') b.hallId = e.id;
     if (spec.type !== 'wall') b.countedBuildings++;
-    b.buildings.push(e);
-    b.byId.set(e.id, e);
   }
 
   for (const d of mission.defenders) {
@@ -88,21 +86,34 @@ export function createBattle(mission, army, heroes = [], stats = null) {
     const row = Math.floor(i / perRow);
     const inRow = Math.min(perRow, roster.length - row * perRow);
     const col = i - row * perRow;
-    const x = GRID.cols / 2 - (inRow - 1) / 2 + col;
-    const y = GRID.rows - 2 - row * 0.9;
+    const x = GRID.cols / 2 - ((inRow - 1) / 2) * S + col * S;
+    const y = GRID.rows - 2 * S - row * 0.9 * S;
     if (r.hero) addHero(b, 'a', r.hero, x, y);
     else addUnit(b, 'a', r.kind, x, y, stats?.[r.kind] ?? UNITS[r.kind].combat);
   });
   return b;
 }
 
+/** Un edificio de la batalla: ocupa su rectángulo de cuadros (`cx`, `cy` es su centro) y se anota en el plano. */
+function newBuilding(b, type, x, y, hp, extra = {}) {
+  const { w, h } = sizeOf(type);
+  const e = {
+    id: b.nextId++, side: 'd', kind: 'building', type, x, y, w, h, cx: x + (w - 1) / 2, cy: y + (h - 1) / 2,
+    hp, maxHp: hp, alive: true, loot: { gold: 0, wood: 0 }, ...extra,
+  };
+  b.buildings.push(e);
+  b.byId.set(e.id, e);
+  for (let cy = y; cy < y + h; cy++) for (let cx = x; cx < x + w; cx++) b.grid.set(cy * GRID.cols + cx, e);
+  return e;
+}
+
 function addUnit(b, side, kind, x, y, s) {
   const def = UNITS[kind] ?? ENEMY_UNITS[kind]; // los héroes no están en ninguno
   const u = {
     id: b.nextId++, side, kind: 'unit', type: kind, x, y, home: { x, y },
-    hp: s.hp, maxHp: s.hp, dmg: s.dmg, range: s.range, speed: s.speed, atkSec: s.atkSec,
+    hp: s.hp, maxHp: s.hp, dmg: s.dmg, range: s.range * S, speed: s.speed * S, atkSec: s.atkSec,
     armor: s.armor ?? 0, regen: s.regen ?? 0,
-    bonus: def?.bonus ?? null, splash: def?.splash ?? null, siege: def?.siege ?? null,
+    bonus: def?.bonus ?? null, splash: def?.splash ? { ...def.splash, radius: def.splash.radius * S } : null, siege: def?.siege ?? null,
     cd: 0, alive: true, order: null, path: null, pathKey: null, pathAge: 99,
   };
   b.units.push(u);
@@ -115,7 +126,8 @@ function addHero(b, side, hero, x, y) {
   const u = addUnit(b, side, 'hero', x, y, heroStats(hero.key, hero.level));
   u.heroKey = hero.key;
   u.heroLevel = hero.level;
-  u.ability = { ...abilityAt(hero.key, hero.level), cd: ABILITY_FIRST_CD };
+  const ability = abilityAt(hero.key, hero.level);
+  u.ability = { ...ability, radius: ability.radius * S, cd: ABILITY_FIRST_CD };
   return u;
 }
 
@@ -127,7 +139,7 @@ function addHero(b, side, hero, x, y) {
 export function createDuel(a, b, stats = null) {
   const d = {
     mode: 'duel', level: 0, time: 0, acc: 0, over: false, result: null, nextId: 1,
-    units: [], buildings: [], byId: new Map(), events: [], loot: { gold: 0, wood: 0 },
+    units: [], buildings: [], byId: new Map(), grid: new Map(), events: [], loot: { gold: 0, wood: 0 },
     destroyed: 0, kills: 0, hallId: null, countedBuildings: 0,
   };
   const place = (counts, side, x) => {
@@ -136,12 +148,12 @@ export function createDuel(a, b, stats = null) {
     kinds.forEach((kind, i) => {
       const col = Math.floor(i / perCol);
       const row = i % perCol;
-      const dx = side === 'a' ? -col * 0.5 : col * 0.5;
-      addUnit(d, side, kind, x + dx, 12 + (row - (Math.min(perCol, kinds.length) - 1) / 2) * 0.6, stats?.[kind] ?? UNITS[kind].combat);
+      const dx = side === 'a' ? -col * 0.5 * S : col * 0.5 * S;
+      addUnit(d, side, kind, x + dx, GRID.rows / 2 + (row - (Math.min(perCol, kinds.length) - 1) / 2) * 0.6 * S, stats?.[kind] ?? UNITS[kind].combat);
     });
   };
-  place(a, 'a', 8);
-  place(b, 'd', 12);
+  place(a, 'a', 8 * S);
+  place(b, 'd', 12 * S);
   return d;
 }
 
@@ -174,7 +186,7 @@ export function defenseHp(type, level, damaged = false) {
 export function createRaidBattle(state, raid) {
   const b = {
     mode: 'raid', level: raid.level, time: 0, acc: 0, over: false, result: null, nextId: 1,
-    units: [], buildings: [], byId: new Map(), events: [], loot: { gold: 0, wood: 0 },
+    units: [], buildings: [], byId: new Map(), grid: new Map(), events: [], loot: { gold: 0, wood: 0 },
     destroyed: 0, kills: 0, hallId: null, countedBuildings: 0, destroyedIds: [],
     maxDestroyed: RAID.maxDamaged(townHallLevel(state)),
   };
@@ -182,32 +194,38 @@ export function createRaidBattle(state, raid) {
   const fortify = researchBonus(state, 'fortify'); // Herrería: más vida de edificios y más daño de torres
   for (const src of state.buildings) {
     const hp = Math.round(defenseHp(src.type, src.level, src.damaged) * (1 + fortify));
-    const e = {
-      id: b.nextId++, side: 'd', kind: 'building', type: src.type, x: src.x, y: src.y,
-      hp, maxHp: hp, alive: true, loot: { gold: 0, wood: 0 }, sourceId: src.id,
+    const e = newBuilding(b, src.type, src.x, src.y, hp, {
+      sourceId: src.id,
       level: src.level, damaged: Boolean(src.damaged), // para dibujarlo igual que en la base
-    };
+    });
     if (src.type === 'tower' && !src.damaged) {
       const t = DEFENSE.tower;
-      Object.assign(e, { dmg: Math.round(t.dmg * (1 + t.dmgPerLevel * (src.level - 1)) * (1 + fortify)), range: t.range, atkSec: t.atkSec, cd: 0 });
+      Object.assign(e, { dmg: Math.round(t.dmg * (1 + t.dmgPerLevel * (src.level - 1)) * (1 + fortify)), range: t.range * S, atkSec: t.atkSec, cd: 0 });
     }
     if (src.type === 'townhall') b.hallId = e.id;
-    b.buildings.push(e);
-    b.byId.set(e.id, e);
   }
 
   const first = (type) => state.buildings.filter((x) => x.type === type).sort((p, q) => p.id - q.id)[0];
   const camp = first('barracks') ?? first('townhall');
   const shrine = first('altar') ?? camp;
+  // Las tropas se forman junto al cuartel (al lado de su rectángulo) y los héroes junto al altar.
+  const beside = (src, dx, dy) => {
+    const r = sizeOf(src.type);
+    return { x: src.x + r.w + dx, y: src.y + (r.h - 1) / 2 + dy };
+  };
   let slot = 0;
   for (const kind of ARMY_UNITS) {
     if (UNITS[kind].siege) continue; // las armas de asedio no defienden
     const stats = unitCombat(state, kind);
     for (let i = 0; i < (state.army[kind] ?? 0) && slot < 24; i++, slot++) {
-      addUnit(b, 'd', kind, camp.x + 1.1 + (slot % 4) * 0.42, camp.y + 0.55 + Math.floor(slot / 4) * 0.36, stats);
+      const p = beside(camp, 0.5 + (slot % 4) * 0.84, -1.2 + Math.floor(slot / 4) * 0.72);
+      addUnit(b, 'd', kind, p.x, p.y, stats);
     }
   }
-  squadHeroes(state).forEach((h, i) => addHero(b, 'd', h, shrine.x + 0.55 + i * 0.6, shrine.y + 1.25));
+  squadHeroes(state).forEach((h, i) => {
+    const p = beside(shrine, 0.5 + i * 1.2, 1.2);
+    addHero(b, 'd', h, p.x, p.y);
+  });
 
   for (const a of raid.attackers) {
     const def = ENEMY_UNITS[a.kind];
@@ -250,12 +268,22 @@ export const attackers = (b) => b.units.filter((u) => u.side === 'a' && u.alive)
 export const defenderUnits = (b) => b.units.filter((u) => u.side === 'd' && u.alive);
 export const liveBuildings = (b) => b.buildings.filter((e) => e.alive);
 
-const radiusOf = (e) => (e.kind === 'building' ? BUILDING_RADIUS : UNIT_RADIUS);
-const centerDist = (a, c) => Math.hypot(a.x - c.x, a.y - c.y);
+/** Punto donde está algo: su centro (en los edificios, el centro de su rectángulo). */
+const posOf = (e) => (e.kind === 'building' ? { x: e.cx, y: e.cy } : e);
+const centerDist = (a, c) => {
+  const p = posOf(a);
+  const q = posOf(c);
+  return Math.hypot(p.x - q.x, p.y - q.y);
+};
+/** Distancia de un punto al rectángulo de un edificio (0 si está dentro). */
+const rectDist = (p, e) => Math.hypot(Math.max(e.x - 0.5 - p.x, 0, p.x - (e.x + e.w - 0.5)), Math.max(e.y - 0.5 - p.y, 0, p.y - (e.y + e.h - 0.5)));
 /** Distancia entre los bordes: lo que cuenta para el alcance. */
-const edgeDist = (a, c) => centerDist(a, c) - radiusOf(c);
+const edgeDist = (a, c) => (c.kind === 'building' ? rectDist(posOf(a), c) : centerDist(a, c) - UNIT_RADIUS);
 
-const buildingAt = (b, x, y) => b.buildings.find((e) => e.alive && e.x === x && e.y === y) ?? null;
+const buildingAt = (b, x, y) => {
+  const e = b.grid.get(y * GRID.cols + x);
+  return e?.alive ? e : null;
+};
 // Muros y puertas se rodean si se puede y se rompen si no; el resto de edificios es un obstáculo sólido.
 const isWallish = (type) => type === 'wall' || type === 'gate';
 const wallAt = (b, x, y) => {
@@ -356,7 +384,7 @@ function step(b, dt) {
 
 function stepAttacker(b, u, dt) {
   if (u.order?.type === 'move') {
-    if (Math.hypot(u.order.x - u.x, u.order.y - u.y) < 0.25) {
+    if (Math.hypot(u.order.x - u.x, u.order.y - u.y) < 0.25 * S) {
       u.order = null;
       u.path = null;
     } else {
@@ -383,7 +411,7 @@ function chooseTarget(b, u) {
   }
 
   let best = null;
-  let bestDist = COMBAT.aggro;
+  let bestDist = COMBAT.aggro * S;
   // Las armas de asedio van a por los edificios: solo pelean con unidades si no queda ninguno.
   if (!u.siege) {
     for (const e of defenderUnits(b)) {
@@ -402,7 +430,7 @@ function chooseTarget(b, u) {
     let nd = Infinity;
     for (const e of b.buildings) {
       if (!e.alive || isWallish(e.type) !== wallsToo) continue;
-      const d = centerDist(u, e);
+      const d = rectDist(u, e);
       if (d < nd) {
         nearest = e;
         nd = d;
@@ -419,13 +447,16 @@ function chooseTarget(b, u) {
  * (entonces no se mueve: tiene que romperlo).
  */
 function moveToward(b, u, dest, dt) {
-  const goal = { x: Math.round(dest.x), y: Math.round(dest.y) };
-  const key = `${goal.x},${goal.y}`;
   u.pathAge += dt;
+  // Hacia un edificio se va a un cuadro libre junto a él (el cuadro se elige una vez y se revisa cada tanto).
+  if (dest.kind === 'building' && (u.approach?.id !== dest.id || u.pathAge > COMBAT.repathSec)) u.approach = { id: dest.id, goal: approachGoal(b, u, dest) };
+  const goal = dest.kind === 'building' ? u.approach.goal : { x: Math.round(dest.x), y: Math.round(dest.y) };
+  const key = `${goal.x},${goal.y}`;
   if (!u.path || u.pathKey !== key || u.pathAge > COMBAT.repathSec) {
     u.path = findPath({ x: Math.round(u.x), y: Math.round(u.y) }, goal, {
       blocked: (x, y) => solidAt(b, x, y),
       extraCost: (x, y) => (wallAt(b, x, y) ? COMBAT.wallCost : 0),
+      maxNodes: 6000,
     });
     u.pathKey = key;
     u.pathAge = 0;
@@ -439,6 +470,24 @@ function moveToward(b, u, dest, dt) {
   walkTo(u, wp, dt);
   if (next && u.x === next.x && u.y === next.y) u.path.shift();
   return null;
+}
+
+/** El cuadro libre de alrededor de un edificio que queda más cerca de la unidad (o su centro si no hay ninguno). */
+function approachGoal(b, u, target) {
+  let best = null;
+  let bestD = Infinity;
+  for (let y = target.y - 1; y <= target.y + target.h; y++) {
+    for (let x = target.x - 1; x <= target.x + target.w; x++) {
+      const inside = x >= target.x && x < target.x + target.w && y >= target.y && y < target.y + target.h;
+      if (inside || x < 0 || y < 0 || x >= GRID.cols || y >= GRID.rows || solidAt(b, x, y)) continue;
+      const d = Math.hypot(x - u.x, y - u.y);
+      if (d < bestD) {
+        bestD = d;
+        best = { x, y };
+      }
+    }
+  }
+  return best ?? { x: Math.round(target.cx), y: Math.round(target.cy) };
 }
 
 function walkTo(u, wp, dt) {
@@ -457,11 +506,11 @@ function walkTo(u, wp, dt) {
 
 /* ---------- defensores ---------- */
 
-const LEASH = 8; // hasta dónde se aleja un defensor de su puesto
+const LEASH = 8 * S; // hasta dónde se aleja un defensor de su puesto
 
 function stepDefender(b, u, dt) {
   // Cuando atacan algo de la aldea, TODA la guarnición se entera: ve más lejos y se aleja más de su puesto.
-  const aggro = b.alarm ? COMBAT.aggro * 2 : COMBAT.aggro;
+  const aggro = (b.alarm ? COMBAT.aggro * 2 : COMBAT.aggro) * S;
   const leash = b.alarm ? LEASH * 1.8 : LEASH;
   let best = null;
   let bestDist = aggro;
@@ -475,7 +524,7 @@ function stepDefender(b, u, dt) {
   if (best && centerDist(u, u.home) < leash) {
     if (edgeDist(u, best) <= u.range) hit(b, u, best);
     else walkTo(u, best, dt); // los defensores no se frenan con sus propios muros
-  } else if (centerDist(u, u.home) > 0.15) {
+  } else if (centerDist(u, u.home) > 0.15 * S) {
     walkTo(u, u.home, dt);
   }
 }
@@ -532,7 +581,7 @@ function hit(b, from, target) {
       if (!other.alive || other === target || other.side !== target.side) continue;
       if (centerDist(other, target) <= from.splash.radius) inflict(b, other, damageOf(b, from, other) * from.splash.fraction);
     }
-    b.events.push({ type: 'splash', x: target.x, y: target.y, radius: from.splash.radius });
+    b.events.push({ type: 'splash', x: posOf(target).x, y: posOf(target).y, radius: from.splash.radius });
   }
 }
 
@@ -563,7 +612,7 @@ function castAbility(b, u, force) {
   let cast = null;
 
   if (a.kind === 'volley' || a.kind === 'fire') {
-    const reach = Math.max(u.range + 2.5, 5);
+    const reach = Math.max(u.range + 2.5 * S, 5 * S);
     const foes = foesOf(b, u);
     let best = null;
     let bestCount = 0;
@@ -577,7 +626,7 @@ function castAbility(b, u, force) {
     }
     if (best && (force || bestCount >= 2 || (best.kind === 'unit' && best.maxHp >= 100))) {
       for (const f of foes) if (centerDist(best, f) <= a.radius) inflict(b, f, a.power);
-      cast = { x: best.x, y: best.y };
+      cast = { x: posOf(best).x, y: posOf(best).y };
     }
   } else if (a.kind === 'heal') {
     const hurt = alliesOf(b, u).filter((x) => centerDist(u, x) <= a.radius && x.hp < x.maxHp * 0.65);
@@ -586,7 +635,7 @@ function castAbility(b, u, force) {
       cast = { x: u.x, y: u.y };
     }
   } else if (a.kind === 'shield' || a.kind === 'warcry') {
-    const near = foesOf(b, u).some((f) => centerDist(u, f) <= 5);
+    const near = foesOf(b, u).some((f) => centerDist(u, f) <= 5 * S);
     if (near || force) {
       for (const x of alliesOf(b, u)) {
         if (centerDist(u, x) > a.radius) continue;
@@ -628,6 +677,7 @@ function kill(b, target) {
   // «Bajas del enemigo»: en un ataque tuyo son los defensores; en una defensa, los atacantes.
   if (target.kind === 'unit' && target.side === (b.mode === 'raid' ? 'a' : 'd')) b.kills++;
   if (target.kind === 'building') {
+    for (let cy = target.y; cy < target.y + target.h; cy++) for (let cx = target.x; cx < target.x + target.w; cx++) b.grid.delete(cy * GRID.cols + cx);
     if (!isWallish(target.type)) b.destroyed++;
     b.destroyedIds?.push(target.sourceId);
     b.loot.gold += target.loot.gold ?? 0;

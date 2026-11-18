@@ -1,7 +1,7 @@
 // Terreno isométrico dibujado por código: rombos de césped, tierra, arena y agua, y el borde de roca de la isla.
-// Todo es adorno y no se guarda. Las texturas miden 96×48 (una casilla a zoom 1).
-import { CLIFF, TILE_H, TILE_W, tileCorners } from '../game/projection.js';
-import { GRID } from '../data/config.js';
+// Todo es adorno y no se guarda. Las texturas miden 96×48: un bloque de terreno de 2×2 cuadros a zoom 1.
+import { CLIFF, TILE_H, TILE_W, rectCorners, tileCorners } from '../game/projection.js';
+import { GRID, TERRAIN } from '../data/config.js';
 
 const GRASS_VARIANTS = 4;
 
@@ -42,8 +42,8 @@ function speckle(ctx, w, h, seed, n, colors, size = 1.6) {
 
 /** Crea (si faltan) las texturas del terreno. Es seguro llamarlo en cada escena. */
 export function ensureTerrainTextures(scene) {
-  const W = TILE_W;
-  const H = TILE_H;
+  const W = TILE_W * TERRAIN.cells;
+  const H = TILE_H * TERRAIN.cells;
   for (let v = 0; v < GRASS_VARIANTS; v++) {
     canvasTexture(scene, `iso_grass_${v}`, W, H, (ctx) => {
       const base = ['#6aa84f', '#71ae54', '#66a24b', '#76b258'][v];
@@ -125,7 +125,7 @@ export const grassKey = (x, y) => `iso_grass_${Math.abs((x * 73856093) ^ (y * 19
  */
 export function drawCliff(g, zoom) {
   g.clear();
-  const [top, right, bottom, left] = tileCornersOfMap();
+  const { right, bottom, left } = rectCorners(0, 0, GRID.cols, GRID.rows); // los vértices del mapa en pantalla
   const h = CLIFF * zoom;
   const faces = [
     { a: left, b: bottom, color: 0x6a4a30, shade: 0x553a26 },
@@ -147,22 +147,11 @@ export function drawCliff(g, zoom) {
     g.fillStyle(0x4b8a3a, 1); // el filo de hierba
     g.fillPoints([{ x: f.a.x, y: f.a.y }, { x: f.b.x, y: f.b.y }, { x: f.b.x, y: f.b.y + 5 * zoom }, { x: f.a.x, y: f.a.y + 5 * zoom }], true);
   }
-  void top;
 }
 
-/** Los cuatro vértices del mapa entero en pantalla: [arriba, derecha, abajo, izquierda]. */
-function tileCornersOfMap() {
-  const a = tileCorners(0, 0)[0]; // arriba
-  const b = tileCorners(GRID.cols - 1, 0)[1]; // derecha
-  const c = tileCorners(GRID.cols - 1, GRID.rows - 1)[2]; // abajo
-  const d = tileCorners(0, GRID.rows - 1)[3]; // izquierda
-  return [a, b, c, d];
-}
-
-/** Rombo relleno de una casilla (para el selector y la vista previa de colocar). */
-export function strokeCell(g, x, y, color, alpha = 1, width = 3, fill = 0.25) {
-  const [a, b, c, d] = tileCorners(x, y);
-  const pts = [a, b, c, d];
+/** Rombo relleno de un rectángulo de cuadros w×h con su esquina en (x, y) (para el selector y la vista previa de colocar). */
+export function strokeCell(g, x, y, color, alpha = 1, width = 3, fill = 0.25, w = 1, h = 1) {
+  const pts = [tileCorners(x, y)[0], tileCorners(x + w - 1, y)[1], tileCorners(x + w - 1, y + h - 1)[2], tileCorners(x, y + h - 1)[3]];
   if (fill > 0) {
     g.fillStyle(color, fill);
     g.fillPoints(pts, true);

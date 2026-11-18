@@ -5,8 +5,11 @@ import { HEROES, SQUAD_SIZE, heroCap, isHeroKey } from '../data/heroes.js';
 
 export const MAX_BUILDINGS = GRID.cols * GRID.rows;
 
-/** Casilla del Ayuntamiento en una partida nueva: el centro del mapa. */
-export const TOWN_HALL_CELL = { x: Math.floor(GRID.cols / 2) - 1, y: Math.floor(GRID.rows / 2) - 1 };
+/** Cuadro de arriba del Ayuntamiento en una partida nueva: queda en el centro del mapa. */
+export const TOWN_HALL_CELL = {
+  x: Math.floor((GRID.cols - BUILDINGS.townhall.size.w) / 2),
+  y: Math.floor((GRID.rows - BUILDINGS.townhall.size.h) / 2),
+};
 
 export function createBuilding(id, type, x, y, now, level = 1) {
   return { id, type, level, upgradeEndsAt: null, training: null, damaged: false, x, y, stored: 0, lastTick: now };
@@ -43,24 +46,79 @@ export function isBuildingType(type) {
   return typeof type === 'string' && Object.hasOwn(BUILDINGS, type);
 }
 
-export function inBounds(x, y) {
-  return Number.isInteger(x) && Number.isInteger(y) && x >= 0 && y >= 0 && x < GRID.cols && y < GRID.rows;
+export function inBounds(x, y, cols = GRID.cols, rows = GRID.rows) {
+  return Number.isInteger(x) && Number.isInteger(y) && x >= 0 && y >= 0 && x < cols && y < rows;
 }
 
+/* ---------- tamaño de los edificios (cuántos cuadros ocupan) ---------- */
+
+/** Tamaño { w, h } en cuadros de un tipo de edificio (el del enemigo `hall` es como el Ayuntamiento). */
+export const sizeOf = (type) => BUILDINGS[type === 'hall' ? 'townhall' : type].size;
+
+/** El rectángulo que ocupa un edificio: { x, y, w, h } (x, y = cuadro de más arriba). */
+export function rectOf(b) {
+  const { w, h } = sizeOf(b.type);
+  return { x: b.x, y: b.y, w, h };
+}
+
+/** Centro de un edificio en cuadros, con la convención «el centro del cuadro (x, y) es (x, y)». */
+export function centerOf(b) {
+  const { w, h } = sizeOf(b.type);
+  return { x: b.x + (w - 1) / 2, y: b.y + (h - 1) / 2 };
+}
+
+/** ¿El edificio `type` puesto con su esquina en (x, y) cabe dentro del mapa? */
+export function fitsInMap(type, x, y) {
+  const { w, h } = sizeOf(type);
+  return Number.isInteger(x) && Number.isInteger(y) && x >= 0 && y >= 0 && x + w <= GRID.cols && y + h <= GRID.rows;
+}
+
+const overlaps = (a, b) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+
+/** Edificio que ocupa el cuadro (x, y), si hay alguno. */
 export function buildingAt(state, x, y) {
-  return state.buildings.find((b) => b.x === x && b.y === y) ?? null;
+  return state.buildings.find((b) => overlapsCell(b, x, y)) ?? null;
 }
 
-/** Casilla libre más cercana a (cx, cy), buscando en anillos crecientes. `occupied` es un Set de "x,y". */
-export function findFreeCell(occupied, cx, cy) {
-  const limit = Math.max(GRID.cols, GRID.rows);
+function overlapsCell(b, x, y) {
+  const { w, h } = sizeOf(b.type);
+  return x >= b.x && x < b.x + w && y >= b.y && y < b.y + h;
+}
+
+/** Edificios (distintos de `ignoreId`) que pisan el rectángulo de `type` puesto en (x, y). */
+export function buildingsInArea(state, type, x, y, ignoreId = null) {
+  const { w, h } = sizeOf(type);
+  const area = { x, y, w, h };
+  return state.buildings.filter((b) => b.id !== ignoreId && overlaps(area, rectOf(b)));
+}
+
+/** ¿Hay sitio para `type` en (x, y)? (dentro del mapa y sin pisar a otros). */
+export const areaIsFree = (state, type, x, y, ignoreId = null) => fitsInMap(type, x, y) && buildingsInArea(state, type, x, y, ignoreId).length === 0;
+
+/** Cuadro libre más cercano a (cx, cy), buscando en anillos crecientes. `occupied` es un Set de "x,y". */
+export function findFreeCell(occupied, cx, cy, cols = GRID.cols, rows = GRID.rows) {
+  const limit = Math.max(cols, rows);
   for (let r = 0; r <= limit; r++) {
     for (let dy = -r; dy <= r; dy++) {
       for (let dx = -r; dx <= r; dx++) {
         if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
         const x = cx + dx;
         const y = cy + dy;
-        if (inBounds(x, y) && !occupied.has(`${x},${y}`)) return { x, y };
+        if (inBounds(x, y, cols, rows) && !occupied.has(`${x},${y}`)) return { x, y };
+      }
+    }
+  }
+  return null;
+}
+
+/** Sitio más cercano a (cx, cy) donde cabe `type`, buscando en anillos crecientes; null si no hay. */
+export function findFreeSpot(state, type, cx, cy, ignoreId = null) {
+  const limit = Math.max(GRID.cols, GRID.rows);
+  for (let r = 0; r <= limit; r++) {
+    for (let dy = -r; dy <= r; dy++) {
+      for (let dx = -r; dx <= r; dx++) {
+        if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+        if (areaIsFree(state, type, cx + dx, cy + dy, ignoreId)) return { x: cx + dx, y: cy + dy };
       }
     }
   }
@@ -381,8 +439,8 @@ export function placementError(state, type, x, y) {
   if (!isBuildingType(type)) return 'Edificio desconocido';
   const def = BUILDINGS[type];
   if (def.buildable === false) return 'Ese edificio no se puede construir';
-  if (!inBounds(x, y)) return 'Fuera del mapa';
-  if (buildingAt(state, x, y)) return 'Casilla ocupada';
+  if (!fitsInMap(type, x, y)) return 'Fuera del mapa';
+  if (buildingsInArea(state, type, x, y).length) return 'Casilla ocupada';
   if (state.buildings.length >= MAX_BUILDINGS) return 'Mapa lleno';
 
   const limit = limitFor(state, type);
@@ -551,13 +609,13 @@ export function repairAll(state, now = Date.now()) {
   return { ok: true, repaired, left, cost: spent };
 }
 
-/** Cambia un edificio de casilla (gratis). */
+/** Cambia un edificio de sitio (gratis): (x, y) es el cuadro de arriba del lugar nuevo. */
 export function moveBuilding(state, id, x, y) {
   const b = state.buildings.find((v) => v.id === id);
   if (!b) return fail('No existe ese edificio');
-  if (!inBounds(x, y)) return fail('Fuera del mapa');
+  if (!fitsInMap(b.type, x, y)) return fail('Fuera del mapa');
   if (b.x === x && b.y === y) return fail('Ya está ahí');
-  if (buildingAt(state, x, y)) return fail('Casilla ocupada');
+  if (buildingsInArea(state, b.type, x, y, id).length) return fail('Casilla ocupada');
   b.x = x;
   b.y = y;
   return { ok: true };

@@ -64,6 +64,9 @@ function serviceWorkerPlugin() {
         .map((f) => relative(outDir, f).split(sep).join('/'))
         .filter((f) => f !== 'sw.js')
         .sort();
+      // Los dibujos de edificios de las vistas giradas (_r1 a _r3) pesan mucho y casi nadie los usa al instalar:
+      // se descargan al girar la cámara y entonces quedan en la caché (ver el manejador de fetch de abajo).
+      const precached = files.filter((f) => !/_r[1-3]\.png$/.test(f));
 
       const template = readFileSync(join(root, 'sw.template.js'), 'utf8');
 
@@ -71,7 +74,7 @@ function serviceWorkerPlugin() {
       for (const f of files) hash.update(f).update(readFileSync(join(outDir, f)));
       const version = hash.digest('hex').slice(0, 12);
 
-      const urls = ['./', ...files.map((f) => './' + f)];
+      const urls = ['./', ...precached.map((f) => './' + f)];
       const source = template
         .replace('__CACHE_VERSION__', version)
         .replace('__PRECACHE__', JSON.stringify(urls, null, 2));

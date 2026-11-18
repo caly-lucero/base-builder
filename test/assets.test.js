@@ -6,6 +6,8 @@ import { BUILDINGS, ENEMY_UNITS, UNITS } from '../src/data/config.js';
 import { HEROES } from '../src/data/heroes.js';
 import { DECOR_KEYS, DECOR_SEED, generateDecor } from '../src/game/decor.js';
 import { GRID } from '../src/data/config.js';
+import { ART_BOXES } from '../src/data/artBoxes.js';
+import { VIEW_TURNS } from '../src/data/assets.js';
 import { SHEET } from '../src/game/unitArt.js';
 
 const ASSETS = new URL('../public/assets/', import.meta.url);
@@ -57,12 +59,33 @@ test('las hojas de animación tienen el tamaño de la cuadrícula (8×4 cuadros)
   }
 });
 
-test('los edificios miden 192×256 y la decoración 160×176 (el arte se ancla por esas medidas)', () => {
+test('cada dibujo de edificio mide lo que dice artBoxes.js (y su apoyo cae dentro) y la decoración 160×176', () => {
   for (const [key, file] of Object.entries(IMAGES)) {
     const { w, h } = pngSize(new URL(file, ASSETS));
-    if (file.startsWith('iso/buildings/')) assert.deepEqual([w, h], [192, 256], key);
+    if (file.startsWith('iso/buildings/')) {
+      const box = ART_BOXES[key];
+      assert.ok(box, `${key}: sin medidas en artBoxes.js`);
+      assert.deepEqual([w, h], [box.w, box.h], key);
+      assert.ok(box.x > 0 && box.x < box.w && box.y > 0 && box.y < box.h, `${key}: el punto de apoyo debe caer dentro del dibujo`);
+    }
     else if (/^(flower_|tuft)/.test(key)) assert.deepEqual([w, h], [32, 24], key);
     else assert.deepEqual([w, h], [160, 176], key);
+  }
+});
+
+test('cada edificio tiene sus 3 dibujos en los 4 giros de cámara', () => {
+  for (const type of Object.keys(BUILDINGS)) {
+    for (const n of [1, 2, 3]) {
+      for (let r = 0; r < VIEW_TURNS; r++) assert.ok(Object.hasOwn(IMAGES, r ? `${type}_${n}_r${r}` : `${type}_${n}`), `${type}_${n} giro ${r}`);
+    }
+  }
+});
+
+test('el dibujo de cada edificio cubre su rectángulo en el suelo (el arte tiene el ancho de sus cuadros)', () => {
+  for (const [type, def] of Object.entries(BUILDINGS)) {
+    const box = ART_BOXES[`${type}_1`];
+    const ground = (def.size.w + def.size.h) * 24; // ancho del rombo de su rectángulo a zoom 1
+    assert.ok(box.w >= ground * 0.8, `${type}: el dibujo (${box.w}px) es más angosto que su suelo (${ground}px)`);
   }
 });
 

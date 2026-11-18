@@ -1,15 +1,15 @@
 import Phaser from 'phaser';
-import { ARMY_UNITS, CAMERA, GRID, LAYOUT, RAID, STARS } from '../data/config.js';
+import { ARMY_UNITS, CAMERA, LAYOUT, RAID, STARS, TERRAIN } from '../data/config.js';
 import { HEROES } from '../data/heroes.js';
 import { abilityStatus, advanceBattle, attackers, battleStatus, castHeroAbility, clearOrders, createBattle, defenderUnits, orderAttack, orderMove, retreat, unitIdsOfKinds } from '../game/battle.js';
 import { applyBattleResult } from '../game/campaign.js';
 import { formatDuration, squadHeroes, statsOf, unitCombat } from '../game/logic.js';
 import { generateMission, missionName } from '../game/missions.js';
 import * as prefs from '../game/prefs.js';
-import { depthOf, inViewport, isTileVisible, panBy, resetView, screenToTile, tileBase, tileCenter, tileSize, view, zoomAt } from '../game/projection.js';
-import { unitFrame } from '../game/unitArt.js';
+import { depthOf, inViewport, isTileVisible, panBy, rectCenter, resetView, rotateView, screenToTile, terrainCenter, tileBase, tileCenter, tileSize, view, zoomAt } from '../game/projection.js';
 import * as store from '../game/store.js';
-import { fitIcon as fitIconArt, placeOnTile as placeOnTileArt } from './artPlace.js';
+import { ASSET_BASE } from '../data/assets.js';
+import { fitIcon as fitIconArt, missingRotationArt, placeOnTile as placeOnTileArt, viewFrame } from './artPlace.js';
 import { drawCliff, ensureTerrainTextures, grassKey } from './terrainArt.js';
 import * as ui from './ui.js';
 import { addGloss, addVignette, emberPuff, ensureTextures, smokePuff, sparkBurst } from './look.js';
@@ -32,12 +32,16 @@ const UNIT_SPRITE = {
 const unitSprite = (e) => (e.type === 'hero' ? HEROES[e.heroKey].sprite : UNIT_SPRITE[e.type]);
 const ENEMY_TINT = 0xffa890; // los edificios de la Horda: los mismos dibujos, teñidos de rojizo
 const DAMAGED_TINT = 0x8a7a72;
-const RAID_CENTER = { x: 12, y: 9 }; // en una defensa se ve tu base con el borde de arriba, por donde llega el enemigo
+const RAID_CENTER = { x: 23, y: 18 }; // en una defensa se ve tu base con el borde de arriba, por donde llega el enemigo
 const RAID_ZOOM = 0.7;
+/** Lo que medía una casilla antes (2 cuadros): los efectos y barras conservan su tamaño. */
+const oldTile = () => tileSize() * 2;
+/** Punto donde está algo: su centro (en un edificio, el centro de su rectángulo). */
+const posOf = (e) => (e.kind === 'building' ? { x: e.cx, y: e.cy } : e);
 const UNIT_GROW = 1; // el arte isométrico ya viene al tamaño final
 const BUILDING_GROW = 1;
-const START_ZOOM = 0.6;
-const START_CENTER = { x: 12, y: 13.5 }; // deja ver la base enemiga arriba y el desembarco abajo
+const START_ZOOM = 0.5;
+const START_CENTER = { x: 23, y: 24 }; // deja ver la base enemiga arriba y el desembarco abajo
 
 const rewardText = (r, sign = '') =>
   [r.gold > 0 && `${sign}${r.gold} oro`, r.wood > 0 && `${sign}${r.wood} madera`].filter(Boolean).join(' · ');
@@ -68,11 +72,18 @@ export default class BattleScene extends Phaser.Scene {
     this.viewDirty = true;
   }
 
+  preload() {
+    // Si la cámara quedó girada en la base, aquí hacen falta los dibujos de ese lado.
+    this.load.setPath(ASSET_BASE);
+    for (const [key, file] of missingRotationArt(this, view.rot)) this.load.image(key, file);
+  }
+
   create() {
     this.sound.mute = prefs.get().muted;
     this.input.addPointer(1);
     this.cursors = this.input.keyboard?.createCursorKeys();
     this.wasd = this.input.keyboard?.addKeys('W,A,S,D');
+    this.turnKeys = this.input.keyboard?.addKeys('Q,E');
 
     store.holdRaids(true); // mientras tú atacas, nadie te ataca
     const state = store.get();
@@ -149,9 +160,9 @@ export default class BattleScene extends Phaser.Scene {
   /* ---------- creación ---------- */
 
   createTerrain() {
-    this.terrain = [];
-    for (let y = 0; y < GRID.rows; y++) {
-      for (let x = 0; x < GRID.cols; x++) {
+    this.terrain = []; // bloques de terreno de 2×2 cuadros
+    for (let y = 0; y < TERRAIN.rows; y++) {
+      for (let x = 0; x < TERRAIN.cols; x++) {
         const img = this.add.image(0, 0, grassKey(x, y)).setDepth(DEPTH.terrain);
         this.terrain.push({ x, y, img });
       }
@@ -163,7 +174,7 @@ export default class BattleScene extends Phaser.Scene {
     const shadow = () => this.add.image(0, 0, 'fx_shadow').setDepth(DEPTH.shadow);
     for (const e of this.battle.buildings) {
       const baseTint = this.buildingTint(e);
-      const img = this.add.image(0, 0, this.buildingSprite(e)).setDepth(DEPTH.world + depthOf(e.x, e.y));
+      const img = this.add.image(0, 0, this.buildingSprite(e)).setDepth(DEPTH.world + depthOf(e.x + e.w - 1, e.y + e.h - 1));
       if (baseTint) img.setTint(baseTint);
       this.entries.set(e.id, { ent: e, img, shadow: shadow(), rubble: null, baseTint, lastX: e.x });
     }
@@ -171,6 +182,11 @@ export default class BattleScene extends Phaser.Scene {
       const img = this.add.image(0, 0, unitSprite(u), 0);
       this.entries.set(u.id, { ent: u, img, shadow: shadow(), rubble: null, baseTint: null, lastX: u.x });
     }
+  }
+
+  /** Capa de un edificio: la de su cuadro más cercano a la cámara (con la vista girada). */
+  buildingDepth(e) {
+    return Math.max(depthOf(e.x, e.y), depthOf(e.x + e.w - 1, e.y), depthOf(e.x, e.y + e.h - 1), depthOf(e.x + e.w - 1, e.y + e.h - 1));
   }
 
   /** Dibujo de un edificio: en un ataque tuyo, el del enemigo (teñido de rojo); en una defensa, el tuyo según su nivel. */
@@ -186,10 +202,10 @@ export default class BattleScene extends Phaser.Scene {
   /** Los edificios muy dañados echan humo y llamas (en una defensa, los tuyos). */
   burnTick() {
     if (this.finished) return;
-    const ts = tileSize();
+    const ts = oldTile();
     for (const e of this.battle.buildings) {
-      if (!e.alive || e.hp / e.maxHp > 0.5 || !isTileVisible(e.x, e.y, 0)) continue;
-      const c = tileCenter(e.x, e.y);
+      if (!e.alive || e.hp / e.maxHp > 0.5 || !this.entries.get(e.id)?.img.visible) continue;
+      const c = rectCenter(e.x, e.y, e.w, e.h);
       const depth = DEPTH.fx;
       emberPuff(this, c.x + (Math.random() - 0.5) * ts * 0.5, c.y - ts * 0.3, depth);
       if (Math.random() < 0.6) smokePuff(this, c.x + (Math.random() - 0.5) * ts * 0.4, c.y - ts * 0.55, depth, { color: 0x3a3430, size: 0.8, rise: ts * 0.9, alpha: 0.55, life: 1700 });
@@ -335,12 +351,37 @@ export default class BattleScene extends Phaser.Scene {
         this.showToast(this.boxMode ? 'Recuadro: arrastra sobre el mapa para elegir tropas' : 'Recuadro desactivado');
       });
     }
+    round('rotl', () => this.turnView(-1));
+    round('rotr', () => this.turnView(1));
     round('home', () => {
       resetView(this.raid ? RAID_CENTER : START_CENTER);
       zoomAt(mid().x, mid().y, this.raid ? RAID_ZOOM : START_ZOOM);
       this.viewDirty = true;
     });
     this.sideEndY = y;
+  }
+
+  /** Gira la cámara un cuarto de vuelta (−1 a la izquierda, 1 a la derecha). */
+  turnView(quarters) {
+    if (this.turning) return;
+    const next = (((view.rot + quarters) % 4) + 4) % 4;
+    const missing = missingRotationArt(this, next);
+    const apply = () => {
+      this.turning = false;
+      rotateView(quarters);
+      this.viewDirty = true;
+    };
+    if (!missing.length) return apply();
+    this.turning = true;
+    this.showToast('Preparando la vista…', 1500);
+    this.load.setPath(ASSET_BASE);
+    for (const [key, file] of missing) this.load.image(key, file);
+    this.load.once('complete', apply);
+    this.load.once('loaderror', () => {
+      this.turning = false;
+      this.showToast('No se pudo cargar esa vista: sin conexión', 2200);
+    });
+    this.load.start();
   }
 
   /* ---------- selección y órdenes ---------- */
@@ -369,7 +410,7 @@ export default class BattleScene extends Phaser.Scene {
 
   /** Qué hay bajo el puntero: primero unidades (más cercana), luego el edificio de esa casilla. */
   pick(px, py) {
-    const ts = tileSize();
+    const ts = oldTile();
     let best = null;
     let bestDist = ts * 0.55;
     for (const u of this.battle.units) {
@@ -382,8 +423,21 @@ export default class BattleScene extends Phaser.Scene {
       }
     }
     if (best) return best;
+    // Edificios: primero por lo que se ve (se puede tocar el tejado de uno alto; gana el más cercano a la cámara)…
+    let hit = null;
+    for (const e of this.battle.buildings) {
+      const img = this.entries.get(e.id)?.img;
+      if (!e.alive || !img?.visible || !img.width) continue;
+      const lx = (px - img.x) / img.scaleX + img.originX * img.width;
+      const ly = (py - img.y) / img.scaleY + img.originY * img.height;
+      if (lx < 0 || ly < 0 || lx >= img.width || ly >= img.height) continue;
+      if (this.textures.getPixelAlpha(Math.floor(lx), Math.floor(ly), img.texture.key) < 40) continue;
+      if (!hit || img.depth > this.entries.get(hit.id).img.depth) hit = e;
+    }
+    if (hit) return hit;
+    // …y si no, por los cuadros que ocupa.
     const tile = screenToTile(px, py);
-    return tile ? (this.battle.buildings.find((e) => e.alive && e.x === tile.x && e.y === tile.y) ?? null) : null;
+    return tile ? (this.battle.buildings.find((e) => e.alive && tile.x >= e.x && tile.x < e.x + e.w && tile.y >= e.y && tile.y < e.y + e.h) ?? null) : null;
   }
 
   mark(x, y, color) {
@@ -403,7 +457,7 @@ export default class BattleScene extends Phaser.Scene {
         return;
       }
       if (orderAttack(this.battle, [...this.selection], e.id)) {
-        this.mark(e.x, e.y, COLORS.bad);
+        this.mark(posOf(e).x, posOf(e).y, COLORS.bad);
         this.play('select');
       }
     } else if (g.tile && this.selection.size) {
@@ -468,7 +522,7 @@ export default class BattleScene extends Phaser.Scene {
       const { x1, y1, x2, y2 } = this.boxRect;
       const [l, r] = [Math.min(x1, x2), Math.max(x1, x2)];
       const [t, b] = [Math.min(y1, y2), Math.max(y1, y2)];
-      const ts = tileSize();
+      const ts = oldTile();
       const ids = attackers(this.battle)
         .filter((u) => {
           const p = tileBase(u.x, u.y);
@@ -507,14 +561,14 @@ export default class BattleScene extends Phaser.Scene {
     }
     if (quiet && ev.type === 'destroy' && target) {
       target.shadow.setVisible(false);
-      target.rubble = this.add.image(0, 0, 'rock_a').setDepth(DEPTH.world + depthOf(target.ent.x, target.ent.y) - 0.1);
+      target.rubble = this.add.image(0, 0, 'rock_a').setDepth(DEPTH.world + depthOf(posOf(target.ent).x, posOf(target.ent).y) - 0.1);
       return;
     }
     if (ev.type === 'hit' || ev.type === 'shot') {
       const from = this.entries.get(ev.from)?.ent;
       if (from?.kind === 'unit' && target) {
-        const dx = target.ent.x - from.x;
-        const dy = target.ent.y - from.y;
+        const dx = posOf(target.ent).x - from.x;
+        const dy = posOf(target.ent).y - from.y;
         const len = Math.hypot(dx, dy) || 1;
         // Los cuerpo a cuerpo se lanzan hacia el objetivo; los que disparan retroceden un poco (retroceso).
         const sign = ev.type === 'shot' ? -0.4 : 1;
@@ -523,8 +577,8 @@ export default class BattleScene extends Phaser.Scene {
       if (target) {
         this.flash.set(target.ent.id, this.time.now + 90);
         if (target.img.visible && Math.random() < 0.5) {
-          const p = tileBase(target.ent.x, target.ent.y);
-          sparkBurst(this, p.x, p.y - tileSize() * 0.35, DEPTH.fx + 2, ev.type === 'shot' ? 0xa8e0ff : 0xfff0c0, 4);
+          const p = tileBase(posOf(target.ent).x, posOf(target.ent).y);
+          sparkBurst(this, p.x, p.y - oldTile() * 0.35, DEPTH.fx + 2, ev.type === 'shot' ? 0xa8e0ff : 0xfff0c0, 4);
         }
       }
       if (ev.type === 'shot') {
@@ -534,20 +588,20 @@ export default class BattleScene extends Phaser.Scene {
     } else if (ev.type === 'die' && target?.ent.kind === 'unit') {
       this.selection.delete(ev.id);
       const dir = target.anim?.dir ?? { dx: 1, dy: 0 };
-      const f = unitFrame('die', dir.dx, dir.dy);
+      const f = viewFrame('die', dir.dx, dir.dy);
       target.img.setFrame(f.frame).setFlipX(f.flipX).setRotation(0);
       this.tweens.add({ targets: [target.img, target.shadow], alpha: 0, delay: 650, duration: 600, onComplete: () => { target.img.destroy(); target.shadow.destroy(); } });
       const p = tileBase(target.ent.x, target.ent.y);
-      smokePuff(this, p.x, p.y - tileSize() * 0.15, DEPTH.fx, { color: 0xd8cdb0, size: 0.5, rise: tileSize() * 0.35, alpha: 0.6, life: 700 });
+      smokePuff(this, p.x, p.y - oldTile() * 0.15, DEPTH.fx, { color: 0xd8cdb0, size: 0.5, rise: oldTile() * 0.35, alpha: 0.6, life: 700 });
       target.dying = true;
     } else if (ev.type === 'destroy' && target) {
       this.play('boom', 120);
-      const c = tileCenter(target.ent.x, target.ent.y);
+      const c = rectCenter(target.ent.x, target.ent.y, target.ent.w, target.ent.h);
       this.dust(c.x, c.y);
-      sparkBurst(this, c.x, c.y - tileSize() * 0.2, DEPTH.fx + 2, 0xffb060, 12);
-      for (let i = 0; i < 4; i++) smokePuff(this, c.x + (Math.random() - 0.5) * 20, c.y, DEPTH.fx, { color: 0x4a423c, size: 1.1, rise: tileSize() * 1.1, alpha: 0.7, life: 1800 });
+      sparkBurst(this, c.x, c.y - oldTile() * 0.2, DEPTH.fx + 2, 0xffb060, 12);
+      for (let i = 0; i < 4; i++) smokePuff(this, c.x + (Math.random() - 0.5) * 20, c.y, DEPTH.fx, { color: 0x4a423c, size: 1.1, rise: oldTile() * 1.1, alpha: 0.7, life: 1800 });
       target.shadow.setVisible(false);
-      target.rubble = this.add.image(0, 0, 'rock_a').setDepth(DEPTH.world + depthOf(target.ent.x, target.ent.y) - 0.1);
+      target.rubble = this.add.image(0, 0, 'rock_a').setDepth(DEPTH.world + depthOf(posOf(target.ent).x, posOf(target.ent).y) - 0.1);
     } else if (ev.type === 'cast') {
       this.castFx(ev);
     } else if (ev.type === 'splash') {
@@ -568,7 +622,7 @@ export default class BattleScene extends Phaser.Scene {
   /** La habilidad de un héroe: un efecto distinto para cada una. */
   castFx(ev) {
     const c = tileCenter(ev.x, ev.y);
-    const ts = tileSize();
+    const ts = tileSize(); // los radios vienen en cuadros
     if (ev.kind === 'fire') {
       this.ring(ev.x, ev.y, ev.radius, 0xff7a2a, 0.3);
       sparkBurst(this, c.x, c.y - ts * 0.2, DEPTH.fx + 3, 0xff9a40, 18);
@@ -601,9 +655,9 @@ export default class BattleScene extends Phaser.Scene {
 
   projectile(from, to) {
     if (!from || !to) return;
-    const a = tileBase(from.x, from.y);
-    const b = tileBase(to.x, to.y);
-    const ts = tileSize();
+    const a = tileBase(posOf(from).x, posOf(from).y);
+    const b = tileBase(posOf(to).x, posOf(to).y);
+    const ts = oldTile();
     const orb = this.add
       .image(a.x, a.y - ts * 0.5, 'fx_soft')
       .setTint(from.kind === 'building' ? 0xffb050 : 0x66ccff)
@@ -711,10 +765,10 @@ export default class BattleScene extends Phaser.Scene {
     const scale = view.zoom * 1.015; // un poco más grande: evita rendijas entre casillas
     drawCliff(this.cliff, view.zoom);
     for (const t of this.terrain) {
-      const visible = isTileVisible(t.x, t.y, 0);
+      const visible = isTileVisible(t.x * 2 + 0.5, t.y * 2 + 0.5, 0.5);
       t.img.setVisible(visible);
       if (visible) {
-        const c = tileCenter(t.x, t.y);
+        const c = terrainCenter(t.x, t.y);
         t.img.setPosition(c.x, c.y).setScale(scale);
       }
     }
@@ -748,13 +802,13 @@ export default class BattleScene extends Phaser.Scene {
       if (k >= 1) this.lunge.delete(e.id);
       else {
         a.dir = l.face;
-        f = unitFrame('attack', l.face.dx, l.face.dy, k);
+        f = viewFrame('attack', l.face.dx, l.face.dy, k);
         const push = Math.sin(k * Math.PI) * 6 * zoom; // sale un poco hacia el objetivo y vuelve
         img.x += l.dx * push * 0.9;
         img.y += l.dy * push * 0.5;
       }
     }
-    if (!f) f = moving ? unitFrame('walk', a.dir.dx, a.dir.dy, a.phase) : unitFrame('idle', a.dir.dx, a.dir.dy);
+    if (!f) f = moving ? viewFrame('walk', a.dir.dx, a.dir.dy, a.phase) : viewFrame('idle', a.dir.dx, a.dir.dy);
     img.setFrame(f.frame).setFlipX(f.flipX);
   }
 
@@ -767,19 +821,19 @@ export default class BattleScene extends Phaser.Scene {
       if (!img.active) continue; // ya se destruyó (unidad caída)
 
       if (e.kind === 'building') {
-        const visible = isTileVisible(e.x, e.y);
+        const visible = isTileVisible(e.cx, e.cy, 0.8 + (e.w + e.h) / 8);
         if (!e.alive) {
           img.setVisible(false);
           entry.shadow.setVisible(false);
           if (entry.rubble) {
-            this.placeOnTile(entry.rubble, 'rock_a', e.x, e.y, 0.9).setVisible(visible);
+            this.placeOnTile(entry.rubble, 'rock_a', e.cx, e.cy, 0.9 + (e.w + e.h) / 12).setVisible(visible);
           }
           continue;
         }
         img.setVisible(visible);
         entry.shadow.setVisible(visible);
         if (visible) {
-          this.placeOnTile(img, this.buildingSprite(e), e.x, e.y, BUILDING_GROW);
+          this.placeOnTile(img, this.buildingSprite(e), e.cx, e.cy, BUILDING_GROW).setDepth(DEPTH.world + this.buildingDepth(e));
           entry.shadow.setVisible(false);
         }
       } else if (e.alive) {
@@ -801,7 +855,7 @@ export default class BattleScene extends Phaser.Scene {
 
   renderOverlay() {
     const g = this.gfx;
-    const ts = tileSize();
+    const ts = oldTile();
     const zoom = view.zoom;
     g.clear();
 
@@ -810,11 +864,12 @@ export default class BattleScene extends Phaser.Scene {
       g.fillStyle(color, 1).fillRect(cx - w / 2, cy, w * Math.max(0, ratio), 6 * zoom);
     };
     for (const e of this.battle.buildings) {
-      if (!e.alive || !isTileVisible(e.x, e.y)) continue;
+      const img = this.entries.get(e.id)?.img;
+      if (!e.alive || !img?.visible) continue;
       if (e.hp >= e.maxHp && e.type !== 'hall' && e.type !== 'townhall' && e.type !== 'tower') continue;
-      const p = tileBase(e.x, e.y);
-      const tall = e.type === 'hall' || e.type === 'townhall' ? 2.0 : e.type === 'tower' ? 1.6 : e.type === 'wall' || e.type === 'gate' ? 0.9 : 1.35;
-      bar(p.x, p.y - ts * tall, ts * 0.9, e.hp / e.maxHp, this.raid ? 0x55cc55 : 0xe05050);
+      const top = img.y - img.displayHeight * img.originY; // la barra va sobre el dibujo
+      const w = Math.min(1.5, 0.45 + (e.w + e.h) / 10) * ts;
+      bar(img.x, Math.max(top, img.y - ts * 2.6) - 6 * zoom, w, e.hp / e.maxHp, this.raid ? 0x55cc55 : 0xe05050);
     }
     for (const u of this.battle.units) {
       if (!u.alive || u.hp >= u.maxHp || !isTileVisible(Math.round(u.x), Math.round(u.y))) continue;
@@ -882,6 +937,8 @@ export default class BattleScene extends Phaser.Scene {
   }
 
   update(_time, delta) {
+    if (this.turnKeys && Phaser.Input.Keyboard.JustDown(this.turnKeys.Q)) this.turnView(-1);
+    if (this.turnKeys && Phaser.Input.Keyboard.JustDown(this.turnKeys.E)) this.turnView(1);
     let dx = 0;
     let dy = 0;
     const k = this.cursors;

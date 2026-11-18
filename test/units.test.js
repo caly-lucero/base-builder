@@ -7,9 +7,16 @@ import {
 
 const army = (over = {}) => ({ soldier: 0, archer: 0, mage: 0, knight: 0, catapult: 0, ram: 0, ...over });
 
-/** Misión mínima: un Ayuntamiento y lo que se pida. */
+/** Misión mínima: un Ayuntamiento (7×7, centro en el cuadro 23, 13) y lo que se pida. Las posiciones son cuadros del mapa de 48×48. */
 function mini({ buildings = [], defenders = [], hpScale = 1, dmgScale = 1 } = {}) {
-  return { level: 1, hpScale, dmgScale, defenders, buildings: [{ type: 'hall', x: 12, y: 8, loot: { gold: 10, wood: 5 } }, ...buildings] };
+  return { level: 1, hpScale, dmgScale, defenders, buildings: [{ type: 'hall', x: 20, y: 10, loot: { gold: 10, wood: 5 } }, ...buildings] };
+}
+
+/** Cambia de sitio un edificio ya creado (su rectángulo, su centro y el plano de cuadros). */
+function moveHall(b, e, x, y) {
+  for (const [k, v] of [...b.grid]) if (v === e) b.grid.delete(k);
+  Object.assign(e, { x, y, cx: x + (e.w - 1) / 2, cy: y + (e.h - 1) / 2 });
+  for (let cy = y; cy < y + e.h; cy++) for (let cx = x; cx < x + e.w; cx++) b.grid.set(cy * 48 + cx, e);
 }
 
 const run = (b, seconds, dt = 0.1) => {
@@ -115,19 +122,19 @@ test('el hechicero daña también a los que rodean al objetivo', () => {
   const b = createDuel({ mage: 1 }, { soldier: 3 });
   const targets = defenderUnits(b);
   targets.forEach((t, i) => {
-    t.x = 11;
-    t.y = 12 + i * 0.4; // apretados
+    t.x = 22;
+    t.y = 24 + i * 0.8; // apretados
   });
   const mage = attackers(b)[0];
-  mage.x = 8;
-  mage.y = 12;
+  mage.x = 16;
+  mage.y = 24;
   run(b, 1.5);
   const hurt = targets.filter((t) => t.hp < t.maxHp).length;
   assert.ok(hurt >= 2, `${hurt} heridos: el área alcanzó a más de uno`);
 });
 
 test('las armas de asedio van a por los edificios, no a por las unidades', () => {
-  const b = createBattle(mini({ buildings: [{ type: 'mine', x: 5, y: 8 }], defenders: [{ kind: 'guard', x: 8, y: 13 }] }), army({ catapult: 1 }), []);
+  const b = createBattle(mini({ buildings: [{ type: 'mine', x: 10, y: 16 }], defenders: [{ kind: 'guard', x: 16, y: 26 }] }), army({ catapult: 1 }), []);
   const cat = attackers(b)[0];
   run(b, 6);
   const guard = defenderUnits(b)[0];
@@ -137,10 +144,10 @@ test('las armas de asedio van a por los edificios, no a por las unidades', () =>
 
 test('un arma de asedio daña mucho a un edificio y casi nada a una unidad', () => {
   const dmgTo = (target) => {
-    const b = createBattle(mini({ buildings: [{ type: 'mine', x: 12, y: 18 }], defenders: [{ kind: 'guard', x: 12, y: 18 }] }), army({ ram: 1 }), []);
+    const b = createBattle(mini({ buildings: [{ type: 'mine', x: 24, y: 36 }], defenders: [{ kind: 'guard', x: 24.5, y: 36.5 }] }), army({ ram: 1 }), []);
     const ram = attackers(b)[0];
-    ram.x = 12;
-    ram.y = 19;
+    ram.x = 24.5;
+    ram.y = 38.5;
     const t = target === 'building' ? b.buildings.find((e) => e.type === 'mine') : defenderUnits(b)[0];
     const before = t.hp;
     ram.cd = 0;
@@ -163,7 +170,7 @@ test('las estadísticas pasadas a la batalla (nivel del edificio, investigacione
 
 /* ---------- héroes en la batalla ---------- */
 
-const withHeroes = (heroes, m = mini({ defenders: [{ kind: 'brute', x: 12, y: 16 }, { kind: 'guard', x: 12.4, y: 16 }, { kind: 'guard', x: 11.6, y: 16 }] })) =>
+const withHeroes = (heroes, m = mini({ defenders: [{ kind: 'brute', x: 24, y: 32 }, { kind: 'guard', x: 24.8, y: 32 }, { kind: 'guard', x: 23.2, y: 32 }] })) =>
   createBattle(m, army(), heroes);
 
 test('dos héroes salen a pelear con su nombre, nivel y habilidad', () => {
@@ -180,8 +187,8 @@ test('la bola de fuego daña en área, y se recarga', () => {
   const b = withHeroes([{ key: 'pyromancer', level: 1 }]);
   const hero = attackers(b)[0];
   const foes = defenderUnits(b);
-  hero.x = 12;
-  hero.y = 12.5; // a 3.5 casillas del grupo
+  hero.x = 24;
+  hero.y = 25; // a 7 cuadros del grupo
   hero.ability.cd = 0;
   const before = foes.map((f) => f.hp);
   assert.equal(castHeroAbility(b, hero.id), true);
@@ -198,10 +205,10 @@ test('la lluvia de flechas de la cazadora golpea a los enemigos agrupados, no a 
   const b = withHeroes([{ key: 'ranger', level: 1 }]);
   const hero = attackers(b)[0];
   const [brute, g1, g2] = defenderUnits(b);
-  g2.x = 3; // uno aparte
-  g2.y = 16;
-  hero.x = 12;
-  hero.y = 12;
+  g2.x = 6; // uno aparte
+  g2.y = 32;
+  hero.x = 24;
+  hero.y = 24;
   hero.ability.cd = 0;
   const far = g2.hp;
   assert.equal(castHeroAbility(b, hero.id), true);
@@ -227,14 +234,15 @@ test('la sanación cura a los aliados cercanos y solo hasta su vida máxima', ()
 test('el escudo sagrado reduce el daño que reciben los aliados cercanos mientras dura', () => {
   const b = withHeroes([{ key: 'paladin', level: 1 }, { key: 'ranger', level: 1 }]);
   const [paladin, ranger] = attackers(b);
-  ranger.x = paladin.x + 1;
+  ranger.x = paladin.x + 2;
   ranger.y = paladin.y;
   paladin.ability.cd = 0;
   assert.equal(castHeroAbility(b, paladin.id), true);
   assert.ok(ranger.shieldUntil > b.time);
   const guard = defenderUnits(b).find((u) => u.type === 'guard');
   guard.x = ranger.x;
-  guard.y = ranger.y - 0.5;
+  guard.y = ranger.y - 1;
+  guard.home = { x: guard.x, y: guard.y }; // sin volver a su puesto lejano
   guard.cd = 0;
   const before = ranger.hp;
   run(b, 0.15);
@@ -245,7 +253,7 @@ test('el escudo sagrado reduce el daño que reciben los aliados cercanos mientra
 test('el grito de guerra sube el daño de los aliados cercanos por un rato', () => {
   const b = withHeroes([{ key: 'warlord', level: 1 }, { key: 'paladin', level: 1 }]);
   const [warlord, paladin] = attackers(b);
-  paladin.x = warlord.x + 1;
+  paladin.x = warlord.x + 2;
   paladin.y = warlord.y;
   warlord.ability.cd = 0;
   assert.equal(castHeroAbility(b, warlord.id), true);
@@ -258,7 +266,7 @@ test('una habilidad lanzada sola solo se usa cuando vale la pena (hay enemigos c
   const b = withHeroes([{ key: 'pyromancer', level: 1 }]);
   const hero = attackers(b)[0];
   hero.x = 3;
-  hero.y = 23; // muy lejos de todo
+  hero.y = 46; // muy lejos de todo
   hero.speed = 0; // y quieto
   run(b, 4);
   assert.equal(abilityStatus(b, hero.id).cdLeft, 0, 'sigue lista: no se gastó en el aire');
@@ -271,14 +279,14 @@ test('la regeneración de un héroe lo cura con el tiempo', () => {
   assert.ok(hero.regen > 0);
   hero.hp = 20;
   hero.x = 3;
-  hero.y = 23;
+  hero.y = 46;
   run(b, 5);
   assert.ok(hero.hp > 20);
 });
 
 test('con héroes la batalla sigue siendo determinista', () => {
   const heroes = [{ key: 'paladin', level: 6 }, { key: 'pyromancer', level: 4 }];
-  const m = mini({ defenders: [{ kind: 'brute', x: 12, y: 12 }, { kind: 'guard', x: 11, y: 12 }, { kind: 'guard', x: 13, y: 12 }] });
+  const m = mini({ defenders: [{ kind: 'brute', x: 24, y: 24 }, { kind: 'guard', x: 22, y: 24 }, { kind: 'guard', x: 26, y: 24 }] });
   const a = createBattle(m, army({ soldier: 4, archer: 3 }), heroes);
   const c = createBattle(m, army({ soldier: 4, archer: 3 }), heroes);
   for (let i = 0; i < 600; i++) advanceBattle(a, 0.1);
@@ -297,11 +305,10 @@ const killWhen = (b, types) => {
 };
 
 test('destruir el Ayuntamiento da la 1.ª estrella pero la batalla sigue', () => {
-  const b = createBattle(miniBase([{ type: 'mine', x: 4, y: 18 }, { type: 'sawmill', x: 20, y: 18 }, { type: 'storage', x: 4, y: 3 }]), army({ soldier: 3 }), []);
+  const b = createBattle(miniBase([{ type: 'mine', x: 8, y: 36 }, { type: 'sawmill', x: 40, y: 36 }, { type: 'storage', x: 8, y: 6 }]), army({ soldier: 3 }), []);
   b.buildings.forEach((e) => (e.hp = e.maxHp = e.type === 'hall' ? 1 : 100000)); // solo el Ayuntamiento es frágil
   const hall = b.buildings.find((e) => e.type === 'hall');
-  hall.x = 12;
-  hall.y = 20;
+  moveHall(b, hall, 20, 36);
   run(b, 15);
   assert.equal(hall.alive, false, 'el Ayuntamiento cayó');
   assert.equal(b.over, false, 'pero la batalla no terminó');
@@ -312,7 +319,7 @@ test('destruir el Ayuntamiento da la 1.ª estrella pero la batalla sigue', () =>
 });
 
 test('destruir la mitad de la base da la 2.ª estrella aunque el Ayuntamiento siga en pie', () => {
-  const b = createBattle(miniBase([{ type: 'mine', x: 11, y: 19 }, { type: 'sawmill', x: 13, y: 19 }, { type: 'storage', x: 12, y: 21 }]), army({ soldier: 4 }), []);
+  const b = createBattle(miniBase([{ type: 'mine', x: 22, y: 36 }, { type: 'sawmill', x: 26, y: 36 }, { type: 'storage', x: 24, y: 40 }]), army({ soldier: 4 }), []);
   b.buildings.forEach((e) => (e.hp = e.maxHp = e.type === 'hall' ? 100000 : 1));
   run(b, 25);
   retreat(b);
@@ -322,9 +329,9 @@ test('destruir la mitad de la base da la 2.ª estrella aunque el Ayuntamiento si
 });
 
 test('destruirlo todo da las 3 estrellas y termina la batalla', () => {
-  const b = createBattle(miniBase([{ type: 'mine', x: 11, y: 19 }, { type: 'wall', x: 8, y: 19 }]), army({ soldier: 5 }), []);
-  b.buildings.forEach((e) => (e.hp = e.maxHp = 1));
-  b.buildings.find((e) => e.type === 'hall').y = 20;
+  const b = createBattle(miniBase([{ type: 'mine', x: 22, y: 36 }, { type: 'wall', x: 16, y: 38 }]), army({ soldier: 5 }), []);
+  b.buildings.forEach((e) => (e.hp = e.maxHp = e.type === 'hall' ? 1 : 1));
+  moveHall(b, b.buildings.find((e) => e.type === 'hall'), 20, 30);
   run(b, 60);
   assert.equal(b.over, true);
   assert.equal(b.result.percent, 100);
@@ -333,28 +340,28 @@ test('destruirlo todo da las 3 estrellas y termina la batalla', () => {
 });
 
 test('sin destruir nada no hay estrellas', () => {
-  const b = createBattle(miniBase([{ type: 'mine', x: 5, y: 3 }]), army({ soldier: 1 }), []);
+  const b = createBattle(miniBase([{ type: 'mine', x: 10, y: 6 }]), army({ soldier: 1 }), []);
   retreat(b);
   assert.equal(b.result.stars, 0);
   assert.equal(b.result.won, false);
 });
 
 test('al atacar algo de la aldea, toda la guarnición se entera y acude desde más lejos', () => {
-  const m = mini({ buildings: [{ type: 'mine', x: 12, y: 20 }], defenders: [{ kind: 'guard', x: 12, y: 13 }] });
+  const m = mini({ buildings: [{ type: 'mine', x: 24, y: 40 }], defenders: [{ kind: 'guard', x: 24, y: 26 }] });
   const quiet = createBattle(m, army({ soldier: 1 }), []);
   const guard = defenderUnits(quiet)[0];
-  attackers(quiet)[0].x = 12;
-  attackers(quiet)[0].y = 19;
+  attackers(quiet)[0].x = 24;
+  attackers(quiet)[0].y = 38;
   run(quiet, 0.3);
   assert.ok(quiet.alarm, 'el golpe a la mina dio la alarma');
   const startY = guard.y;
   run(quiet, 3);
-  assert.ok(guard.y > startY + 1, `el guardia, a ${(20 - 13)} casillas, acudió (${startY} → ${guard.y})`);
+  assert.ok(guard.y > startY + 2, `el guardia, a ${40 - 26} cuadros, acudió (${startY} → ${guard.y})`);
 
   // Sin alarma, el mismo guardia se queda en su puesto.
   const calm = createBattle(m, army({ soldier: 1 }), []);
-  attackers(calm)[0].x = 3;
-  attackers(calm)[0].y = 22;
+  attackers(calm)[0].x = 6;
+  attackers(calm)[0].y = 44;
   const g2 = defenderUnits(calm)[0];
   const y0 = g2.y;
   run(calm, 2);

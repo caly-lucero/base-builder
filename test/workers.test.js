@@ -20,15 +20,15 @@ const w0 = () => ({ phase: 'out', t: 0, wait: 0 });
 
 test('solo se dibujan unos pocos aldeanos, alternando oro y madera y siempre los mismos', () => {
   const s = fresh();
-  for (let i = 0; i < 3; i++) place(s, 'mine', i, 5, T0);
-  for (let i = 0; i < 3; i++) place(s, 'sawmill', i, 8, T0);
+  for (let i = 0; i < 3; i++) place(s, 'mine', i * 4, 5, T0);
+  for (let i = 0; i < 3; i++) place(s, 'sawmill', i * 4, 10, T0);
   const planned = plannedWorkers(s);
   assert.equal(planned.length, 6);
   const shown = symbolicWorkers(planned);
   assert.equal(shown.length, MAX_VISIBLE_WORKERS);
   assert.deepEqual(shown.map((p) => p.resource), ['gold', 'wood', 'gold']);
   assert.deepEqual(shown.map((p) => p.buildingId), symbolicWorkers([...planned].reverse()).map((p) => p.buildingId), 'no depende del orden');
-  place(s, 'mine', 5, 5, T0);
+  place(s, 'mine', 20, 5, T0);
   assert.deepEqual(symbolicWorkers(plannedWorkers(s)).map((p) => p.buildingId), shown.map((p) => p.buildingId), 'construir más no cambia a quién se ve');
   assert.deepEqual(symbolicWorkers([]), []);
 });
@@ -37,15 +37,15 @@ test('una partida nueva no tiene aldeanos; hay uno por cada edificio productor',
   const s = fresh();
   assert.deepEqual(plannedWorkers(s), []);
   const mine = place(s, 'mine', 2, 2, T0).building;
-  const saw = place(s, 'sawmill', 3, 2, T0).building;
-  place(s, 'tower', 4, 2, T0); // no produce
-  place(s, 'wall', 5, 2, T0); // no produce
+  const saw = place(s, 'sawmill', 6, 2, T0).building;
+  place(s, 'tower', 10, 2, T0); // no produce
+  place(s, 'wall', 14, 2, T0); // no produce
 
   const planned = plannedWorkers(s);
   assert.equal(planned.length, 2);
   const hall = townHall(s);
   assert.deepEqual(planned.find((p) => p.buildingId === mine.id), {
-    buildingId: mine.id, resource: 'gold', home: { x: hall.x, y: hall.y }, site: { x: 2, y: 2 },
+    buildingId: mine.id, resource: 'gold', home: { x: hall.x + 3, y: hall.y + 3 }, site: { x: 2.5, y: 2.5 }, // los centros de los rectángulos
   });
   assert.equal(planned.find((p) => p.buildingId === saw.id).resource, 'wood');
 });

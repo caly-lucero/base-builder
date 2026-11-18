@@ -7,7 +7,8 @@ import { applyRaidResult, generateRaid, raidCountdownMs, raidDue, raidLevel, res
 
 const T0 = 1_700_000_000_000;
 
-/** Partida con edificios puestos a mano. `spec`: [tipo, x, y, nivel]. */
+/** Partida con edificios puestos a mano. `spec`: [tipo, x, y, nivel] (x, y = cuadro de arriba a la izquierda; el
+ *  Ayuntamiento ocupa x 20–26, y 20–26 del mapa de 48×48). */
 function base(spec = [], { thLevel = 1, army = {}, hero = null } = {}) {
   const s = createNewState(T0);
   s.gold = 400;
@@ -49,25 +50,25 @@ test('una oleada es determinista, cambia con la semilla y crece con el nivel', (
 
 test('los atacantes llegan por el borde de arriba, dentro del mapa', () => {
   for (const lvl of [1, 5, 12]) {
-    for (const a of generateRaid(lvl).attackers) assert.ok(a.y >= 0 && a.y <= 2.1 && a.x >= 7 && a.x <= 17.1);
+    for (const a of generateRaid(lvl).attackers) assert.ok(a.y >= 0 && a.y <= 4.1 && a.x >= 14 && a.x <= 34.1);
   }
 });
 
 /* ---------- la defensa como batalla ---------- */
 
 test('la defensa pone a tus edificios, ejército y héroe como defensores y al enemigo como atacante', () => {
-  const s = base([['barracks', 13, 9], ['tower', 9, 9, 3], ['mine', 14, 12]], { army: { soldier: 3, mage: 1 }, hero: { level: 2, xp: 0 } });
+  const s = base([['barracks', 10, 6], ['tower', 4, 6, 3], ['mine', 18, 14]], { army: { soldier: 3, mage: 1 }, hero: { level: 2, xp: 0 } });
   const b = createRaidBattle(s, generateRaid(2));
   assert.equal(b.mode, 'raid');
   assert.equal(b.buildings.length, s.buildings.length);
   assert.equal(defenderUnits(b).length, 3 + 1 + 1, 'soldados, hechicero y héroe');
   assert.equal(attackers(b).length, generateRaid(2).attackers.length);
-  assert.ok(attackers(b).every((u) => u.y < 3), 'el enemigo entra por arriba');
+  assert.ok(attackers(b).every((u) => u.y < 5), 'el enemigo entra por arriba');
   assert.equal(b.byId.get(b.hallId).type, 'townhall');
 });
 
 test('las torres disparan según su nivel, y una torre dañada no dispara', () => {
-  const s = base([['tower', 9, 9, 1], ['tower', 10, 9, 4], ['tower', 11, 9, 1]]);
+  const s = base([['tower', 4, 6, 1], ['tower', 8, 6, 4], ['tower', 12, 6, 1]]);
   s.buildings.at(-1).damaged = true;
   const b = createRaidBattle(s, generateRaid(1));
   const towers = b.buildings.filter((e) => e.type === 'tower');
@@ -79,21 +80,21 @@ test('la vida de un edificio crece con el nivel y un edificio dañado entra a me
   assert.ok(defenseHp('mine', 5) > defenseHp('mine', 1));
   assert.equal(defenseHp('mine', 1), DEFENSE.baseHp.mine);
   assert.equal(defenseHp('mine', 2, true), Math.round(DEFENSE.baseHp.mine * (1 + DEFENSE.hpPerLevel) * DEFENSE.damagedHpFactor));
-  const s = base([['mine', 9, 9]]);
+  const s = base([['mine', 6, 6]]);
   s.buildings.at(-1).damaged = true;
   const hp = createRaidBattle(s, generateRaid(1)).buildings.at(-1).hp;
   assert.equal(hp, defenseHp('mine', 1, true));
 });
 
 test('simular una defensa no modifica la partida', () => {
-  const s = base([['mine', 9, 9], ['tower', 10, 9]], { army: { soldier: 2 } });
+  const s = base([['mine', 6, 6], ['tower', 10, 6]], { army: { soldier: 2 } });
   const before = JSON.stringify(s);
   simulateRaid(s, generateRaid(2));
   assert.equal(JSON.stringify(s), before);
 });
 
 test('sin defensa el enemigo destruye edificios y se retira (o tumba el Ayuntamiento)', () => {
-  const spec = [['mine', 9, 9], ['sawmill', 14, 9], ['storage', 9, 13], ['house', 14, 13]];
+  const spec = [['mine', 6, 6], ['sawmill', 12, 6], ['storage', 6, 12], ['house', 12, 12]];
   const res = simulateRaid(base(spec), generateRaid(1));
   assert.ok(['retreated', 'raided'].includes(res.outcome), `resultado: ${res.outcome}`);
   assert.ok(res.destroyed >= 1);
@@ -101,14 +102,14 @@ test('sin defensa el enemigo destruye edificios y se retira (o tumba el Ayuntami
 });
 
 test('el enemigo se retira tras destruir 2 + nivel del Ayuntamiento edificios, no más (salvo golpes simultáneos)', () => {
-  const spec = Array.from({ length: 10 }, (_, i) => ['mine', 5 + i, 9]);
+  const spec = Array.from({ length: 10 }, (_, i) => ['mine', 2 + i * 4, 6]);
   const res = simulateRaid(base(spec), generateRaid(6));
   const max = RAID.maxDamaged(1);
   assert.ok(res.destroyed >= 1 && res.destroyed <= max + 3, `destruyó ${res.destroyed} (máximo ${max})`);
 });
 
 test('una buena defensa rechaza la primera oleada', () => {
-  const spec = [['barracks', 13, 9], ['tower', 9, 9, 2], ['tower', 15, 9, 2], ['tower', 12, 13, 2], ['mine', 9, 13]];
+  const spec = [['barracks', 28, 17], ['tower', 19, 15, 2], ['tower', 26, 15, 2], ['tower', 23, 17, 2], ['mine', 12, 18]];
   const res = simulateRaid(base(spec, { thLevel: 2, army: { soldier: 10 }, hero: { level: 2, xp: 0 } }), generateRaid(1));
   assert.equal(res.outcome, 'repelled', JSON.stringify(res));
   assert.equal(res.destroyed, 0);
@@ -117,7 +118,7 @@ test('una buena defensa rechaza la primera oleada', () => {
 
 test('los muros frenan: con un anillo cerrado el enemigo tarda más en llegar al Ayuntamiento', () => {
   const walls = [];
-  for (let x = 8; x <= 14; x++) for (let y = 8; y <= 14; y++) if (x === 8 || x === 14 || y === 8 || y === 14) walls.push(['wall', x, y]);
+  for (let x = 14; x <= 32; x++) for (let y = 14; y <= 32; y++) if (x === 14 || x === 32 || y === 14 || y === 32) walls.push(['wall', x, y]);
   const open = simulateRaid(base([]), generateRaid(1));
   const walled = simulateRaid(base(walls), generateRaid(1));
   assert.ok(walled.destroyedIds.length > 0, 'rompen muros');
@@ -125,7 +126,7 @@ test('los muros frenan: con un anillo cerrado el enemigo tarda más en llegar al
 });
 
 test('la defensa es determinista', () => {
-  const s = base([['mine', 9, 9], ['tower', 10, 9]], { army: { soldier: 3 } });
+  const s = base([['mine', 6, 6], ['tower', 10, 6]], { army: { soldier: 3 } });
   assert.deepEqual(simulateRaid(s, generateRaid(3, 2)), simulateRaid(s, generateRaid(3, 2)));
 });
 
@@ -136,7 +137,7 @@ const result = (over = {}) => ({
 });
 
 test('lo destruido queda dañado, el Ayuntamiento nunca', () => {
-  const s = base([['mine', 9, 9], ['wall', 10, 9], ['tower', 11, 9]]);
+  const s = base([['mine', 6, 6], ['wall', 10, 6], ['tower', 12, 6]]);
   const ids = s.buildings.map((b) => b.id); // incluye el Ayuntamiento
   const report = applyRaidResult(s, result({ destroyedIds: ids }));
   assert.equal(townHall(s).damaged, false);
@@ -146,7 +147,7 @@ test('lo destruido queda dañado, el Ayuntamiento nunca', () => {
 });
 
 test('lo ya dañado no se cuenta otra vez', () => {
-  const s = base([['mine', 9, 9]]);
+  const s = base([['mine', 6, 6]]);
   s.buildings.at(-1).damaged = true;
   assert.equal(applyRaidResult(s, result({ destroyedIds: [s.buildings.at(-1).id] })).damaged, 0);
 });
@@ -214,7 +215,7 @@ test('una partida nueva tiene el primer ataque a los 10 minutos', () => {
 });
 
 test('resolver un ataque aplica el resultado, programa el siguiente y cuenta uno más', () => {
-  const s = base([['mine', 9, 9], ['sawmill', 14, 9], ['storage', 9, 13]]);
+  const s = base([['mine', 6, 6], ['sawmill', 12, 6], ['storage', 6, 12]]);
   s.raid.nextAt = T0;
   const now = T0 + 3 * 60 * 60 * 1000; // volvió tras 3 horas: se resuelve UNO solo
   const report = resolveRaid(s, now);
@@ -225,7 +226,7 @@ test('resolver un ataque aplica el resultado, programa el siguiente y cuenta uno
 });
 
 test('las tropas no mueren al defender', () => {
-  const s = base([['barracks', 13, 9]], { army: { soldier: 4, mage: 2 } });
+  const s = base([['barracks', 10, 6]], { army: { soldier: 4, mage: 2 } });
   const before = { ...s.army };
   resolveRaid(s, T0);
   assert.deepEqual(s.army, before);
@@ -235,7 +236,7 @@ test('las tropas no mueren al defender', () => {
 /* ---------- ver la defensa en pantalla ---------- */
 
 test('el informe trae una repetición (sin avanzar) que termina igual que el resultado', () => {
-  const s = base([['tower', 11, 8], ['mine', 9, 9], ['sawmill', 14, 9], ['barracks', 13, 13]], { army: { soldier: 3 }, hero: { level: 1, xp: 0 } });
+  const s = base([['tower', 22, 16], ['mine', 6, 6], ['sawmill', 12, 6], ['barracks', 30, 18]], { army: { soldier: 3 }, hero: { level: 1, xp: 0 } });
   s.raid.nextAt = T0;
   const report = resolveRaid(s, T0);
   const replay = report.replay;
@@ -253,18 +254,19 @@ test('el informe trae una repetición (sin avanzar) que termina igual que el res
 });
 
 test('los edificios de la defensa llevan nivel y si estaban dañados (para dibujarlos igual que en la base)', () => {
-  const s = base([['mine', 9, 9, 3], ['farm', 14, 9]]);
-  s.buildings.find((b) => b.type === 'farm').damaged = true;
+  const s = base([['mine', 6, 6, 3], ['house', 12, 6]]);
+  s.buildings.find((b) => b.type === 'house').damaged = true;
   const b = createRaidBattle(s, generateRaid(1, 1));
   const mine = b.buildings.find((e) => e.type === 'mine');
-  const farm = b.buildings.find((e) => e.type === 'farm');
+  const house = b.buildings.find((e) => e.type === 'house');
   assert.equal(mine.level, 3);
   assert.equal(mine.damaged, false);
-  assert.equal(farm.damaged, true);
+  assert.equal(house.damaged, true);
+  assert.deepEqual([mine.w, mine.h, mine.cx, mine.cy], [2, 2, 6.5, 6.5], 'ocupa su rectángulo y tiene centro');
 });
 
 test('la defensa usa el nivel de tus edificios militares, tus investigaciones y a los 2 héroes de la escuadra', () => {
-  const spec = [['archery', 13, 9, 6], ['tower', 9, 9, 1]];
+  const spec = [['archery', 10, 6, 6], ['tower', 4, 6, 1]];
   const s = base(spec, { thLevel: 6, army: { archer: 4 } });
   s.heroes = { paladin: { level: 3, xp: 0 }, priestess: { level: 1, xp: 0 }, ranger: { level: 1, xp: 0 } };
   s.squad = ['paladin', 'ranger'];
@@ -282,7 +284,7 @@ test('la defensa usa el nivel de tus edificios militares, tus investigaciones y 
 });
 
 test('las armas de asedio no defienden la base', () => {
-  const s = base([['siege', 13, 9]], { thLevel: 10, army: { catapult: 2, soldier: 1 } });
+  const s = base([['siege', 10, 6]], { thLevel: 10, army: { catapult: 2, soldier: 1 } });
   const b = createRaidBattle(s, generateRaid(1));
   assert.deepEqual(defenderUnits(b).map((u) => u.type), ['soldier']);
 });

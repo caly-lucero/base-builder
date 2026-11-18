@@ -1,17 +1,19 @@
 // Medición y anclaje de sprites. Cada tipo de dibujo se apoya en su casilla por un punto distinto
 // (los pone tools/iso): edificios y adornos por el centro del rombo que pisan, personajes por los pies.
 import { IMAGES, SHEETS } from '../data/assets.js';
+import { ART_BOXES } from '../data/artBoxes.js';
 import { PORTRAIT_FRAME, SHEET } from './unitArt.js';
 
 const ALPHA_THRESHOLD = 20;
 const cache = new Map();
 
-// Punto de apoyo (en px del lienzo) y tamaño del lienzo de cada tipo de dibujo.
+// Punto de apoyo (en px del lienzo) y tamaño del lienzo de cada tipo de dibujo. Cada edificio tiene el suyo
+// (ver ART_BOXES: el lienzo se recorta a lo que ocupa y el apoyo es el centro de su rectángulo).
 const BUILDING = { w: 192, h: 256, x: 96, y: 196 };
 const DECOR = { w: 160, h: 176, x: 80, y: 128 };
 const FLOWER = { w: 32, h: 24, x: 16, y: 17 };
 
-const BUILDING_KEY = /^(townhall|mine|sawmill|storage|tower|wall|gate|house|barracks|archery|atelier|stable|siege|forge|altar)_\d$/;
+const BUILDING_KEY = /^(townhall|mine|sawmill|storage|tower|wall|gate|house|barracks|archery|atelier|stable|siege|forge|altar)_\d(_r\d)?$/;
 
 /** ¿La clave es una hoja de personaje (varios cuadros)? */
 export const isSheet = (key) => Object.hasOwn(SHEETS, key);
@@ -19,7 +21,7 @@ export const isSheet = (key) => Object.hasOwn(SHEETS, key);
 /** Origen (0-1) con el que se apoya un dibujo en su casilla: el punto de la imagen que cae en el centro del rombo. */
 export function anchorOf(key) {
   if (isSheet(key)) return { x: SHEET.anchorX / SHEET.frameWidth, y: SHEET.anchorY / SHEET.frameHeight };
-  const t = BUILDING_KEY.test(key) ? BUILDING : /^(flower_|tuft)/.test(key) ? FLOWER : DECOR;
+  const t = ART_BOXES[key] ?? (BUILDING_KEY.test(key) ? BUILDING : /^(flower_|tuft)/.test(key) ? FLOWER : DECOR);
   return { x: t.x / t.w, y: t.y / t.h };
 }
 

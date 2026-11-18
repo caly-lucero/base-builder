@@ -1,9 +1,9 @@
 // Aldeanos: adorno animado, no afecta a la economía. Cada edificio productor (mina,
 // aserradero) tiene un aldeano que camina entre el Ayuntamiento y el edificio llevando
 // lo que produce. Esta parte es lógica pura (rutas y tiempos); el dibujo está en la escena.
-import { isUpgrading, statsOf, townHall } from './logic.js';
+import { centerOf, isUpgrading, statsOf, townHall } from './logic.js';
 
-export const WORKER_SPEED = 1.5; // casillas por segundo
+export const WORKER_SPEED = 3; // cuadros por segundo
 export const WORK_TIME = 0.8; // segundos que trabaja en el edificio
 export const REST_TIME = 0.5; // segundos que descansa en el Ayuntamiento
 
@@ -18,7 +18,7 @@ export function plannedWorkers(state) {
   for (const b of state.buildings) {
     const resource = statsOf(b.type, b.level).produces;
     if (!resource || isUpgrading(b)) continue;
-    out.push({ buildingId: b.id, resource, home: { x: hall.x, y: hall.y }, site: { x: b.x, y: b.y } });
+    out.push({ buildingId: b.id, resource, home: centerOf(hall), site: centerOf(b) });
   }
   return out;
 }

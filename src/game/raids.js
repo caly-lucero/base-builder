@@ -27,7 +27,7 @@ export function generateRaid(level, seed = 1) {
   const guards = 2 + Math.round(lvl * 1.5);
   const brutes = Math.floor((lvl - 1) / 2);
   const attackers = [];
-  const at = (kind) => attackers.push({ kind, x: 7 + rand() * 10, y: 0.5 + rand() * 1.5 });
+  const at = (kind) => attackers.push({ kind, x: 14 + rand() * 20, y: 1 + rand() * 3 });
   for (let i = 0; i < guards; i++) at('guard');
   for (let i = 0; i < brutes; i++) at('brute');
   // Con el tiempo llegan también arañas (rápidas) y arqueros.

@@ -1,7 +1,9 @@
 // Datos del juego. Balancear = editar este archivo, sin tocar la lógica.
 
-// El mapa es de 24×24 casillas; en pantalla se ve una parte (ver CAMERA y LAYOUT).
-export const GRID = { cols: 24, rows: 24, tile: 48 };
+// El mapa es de 48×48 cuadros (cada cuadro es un rombo de 48×24 px a zoom 1). Los edificios ocupan varios cuadros
+// (ver `size` en BUILDINGS). El terreno (césped, estanques, flores, árboles) se dibuja en bloques de 2×2 cuadros.
+export const GRID = { cols: 48, rows: 48, tile: 24 };
+export const TERRAIN = { cols: 24, rows: 24, cells: 2 };
 
 /** Lado en píxeles de los sprites originales (pack Kenney Medieval RTS). */
 export const ART_SIZE = 64;
@@ -34,7 +36,7 @@ export function fitLayout(screenW, screenH) {
 export const CAMERA = {
   minZoom: 0.25, // con 0.25 casi todo el mapa (un rombo de 24×24 casillas) cabe en la ventana
   maxZoom: 1.6,
-  startZoom: 1.0, // zoom al abrir la base (más cerca: en el celular se ve grande y se toca bien)
+  startZoom: 0.85, // zoom al abrir la base (con edificios grandes: el Ayuntamiento cabe entero en el celular)
   holdToMoveMs: 380, // con el dedo, tiempo que hay que mantener pulsado un edificio antes de poder arrastrarlo
   dragThreshold: 8, // píxeles que hay que mover antes de que un toque sea un arrastre
   keyPanSpeed: 420, // píxeles por segundo con las flechas
@@ -92,8 +94,8 @@ const LIMITS = {
   house: [2, 4, 6, 8, 10, 12, 14, 16, 18, 20],
   storage: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
   tower: [2, 4, 6, 8, 10, 12, 14, 16, 18, 20],
-  wall: [20, 50, 100, 150, 220, 260, 300, 340, 380, 420],
-  gate: [4, 10, 20, 30, 45, 55, 65, 75, 85, 95],
+  wall: [40, 100, 200, 300, 440, 520, 600, 680, 760, 840], // cada muro es un cuadro (la mitad de largo que antes)
+  gate: [8, 20, 40, 60, 90, 110, 130, 150, 170, 190],
   // Edificios militares: solo UNO de cada clase (su nivel y su lote de entrenamiento crecen al mejorarlo).
   barracks: [0, 1, 1, 1, 1, 1, 1, 1, 1, 1],
   altar: [0, 1, 1, 1, 1, 1, 1, 1, 1, 1],
@@ -156,6 +158,7 @@ function military(sprites, k = 1) {
 // cuántos edificios de cada tipo se pueden tener (`limits`) y hasta qué nivel se puede mejorar el resto.
 export const BUILDINGS = {
   townhall: {
+    size: { w: 7, h: 7 }, // cuadros que ocupa
     name: 'Ayuntamiento',
     buildable: false, // lo trae la partida; no se construye ni se demuele
     cost: {},
@@ -164,6 +167,7 @@ export const BUILDINGS = {
     levels: townHallLevels(),
   },
   mine: {
+    size: { w: 2, h: 2 }, // cuadros que ocupa
     name: 'Mina de oro',
     shortName: 'Mina', // para la barra de herramientas
     cost: { gold: 50 },
@@ -179,6 +183,7 @@ export const BUILDINGS = {
     ),
   },
   sawmill: {
+    size: { w: 2, h: 2 }, // cuadros que ocupa
     name: 'Aserradero',
     cost: { gold: 60 },
     levels: extend(
@@ -193,6 +198,7 @@ export const BUILDINGS = {
     ),
   },
   storage: {
+    size: { w: 4, h: 3 }, // cuadros que ocupa
     name: 'Almacén',
     cost: { gold: 100, wood: 30 },
     levels: extend(
@@ -207,6 +213,7 @@ export const BUILDINGS = {
     ),
   },
   tower: {
+    size: { w: 2, h: 2 }, // cuadros que ocupa
     name: 'Torre',
     cost: { gold: 150, wood: 60 },
     // Dispara a los atacantes de tu base; su vida y su daño crecen con el nivel (ver DEFENSE).
@@ -219,36 +226,39 @@ export const BUILDINGS = {
     ]),
   },
   wall: {
+    size: { w: 1, h: 1 }, // cuadros que ocupa
     name: 'Muro',
-    cost: { wood: 8 },
+    cost: { wood: 4 },
     // En el combate frena a las unidades enemigas.
     levels: extend(
       [
         { sprite: 'wall_1' },
-        { sprite: 'wall_2', upgradeCost: { wood: 20 }, upgradeSec: 10 },
-        { sprite: 'wall_3', upgradeCost: { wood: 50 }, upgradeSec: 20 },
-        { sprite: 'wall_3', tint: TIER_4, upgradeCost: { wood: 120 }, upgradeSec: 40 },
-        { sprite: 'wall_3', tint: TIER_5, upgradeCost: { wood: 250 }, upgradeSec: 80 },
+        { sprite: 'wall_2', upgradeCost: { wood: 10 }, upgradeSec: 10 },
+        { sprite: 'wall_3', upgradeCost: { wood: 25 }, upgradeSec: 20 },
+        { sprite: 'wall_3', tint: TIER_4, upgradeCost: { wood: 60 }, upgradeSec: 40 },
+        { sprite: 'wall_3', tint: TIER_5, upgradeCost: { wood: 125 }, upgradeSec: 80 },
       ],
       { cost: 2.0, time: 1.8 },
     ),
   },
   gate: {
+    size: { w: 1, h: 1 }, // cuadros que ocupa
     name: 'Puerta',
-    cost: { wood: 30 },
+    cost: { wood: 15 },
     // Como un muro con paso: en el combate deja pasar a las unidades propias.
     levels: extend(
       [
         { sprite: 'gate_1' },
-        { sprite: 'gate_2', upgradeCost: { wood: 60 }, upgradeSec: 15 },
-        { sprite: 'gate_3', upgradeCost: { wood: 120 }, upgradeSec: 30 },
-        { sprite: 'gate_3', tint: TIER_4, upgradeCost: { wood: 240 }, upgradeSec: 60 },
-        { sprite: 'gate_3', tint: TIER_5, upgradeCost: { wood: 480 }, upgradeSec: 120 },
+        { sprite: 'gate_2', upgradeCost: { wood: 30 }, upgradeSec: 15 },
+        { sprite: 'gate_3', upgradeCost: { wood: 60 }, upgradeSec: 30 },
+        { sprite: 'gate_3', tint: TIER_4, upgradeCost: { wood: 120 }, upgradeSec: 60 },
+        { sprite: 'gate_3', tint: TIER_5, upgradeCost: { wood: 240 }, upgradeSec: 120 },
       ],
       { cost: 2.0, time: 1.8 },
     ),
   },
   house: {
+    size: { w: 2, h: 2 }, // cuadros que ocupa
     name: 'Casa',
     cost: { gold: 60, wood: 20 },
     // `supply`: población que suma. Sin población libre no se pueden entrenar más unidades.
@@ -265,24 +275,28 @@ export const BUILDINGS = {
   },
   // --- Edificios militares: cada uno entrena un tipo de unidad. Su nivel es el de sus unidades. ---
   barracks: {
+    size: { w: 5, h: 5 }, // cuadros que ocupa
     name: 'Cuartel',
     cost: { gold: 120, wood: 60 },
     trains: ['soldier'],
     levels: military(['barracks_1', 'barracks_2', 'barracks_3']),
   },
   archery: {
+    size: { w: 5, h: 5 }, // cuadros que ocupa
     name: 'Arquería',
     cost: { gold: 160, wood: 90 },
     trains: ['archer'],
     levels: military(['archery_1', 'archery_2', 'archery_3'], 1.2),
   },
   atelier: {
+    size: { w: 4, h: 4 }, // cuadros que ocupa
     name: 'Atelier',
     cost: { gold: 220, wood: 120 },
     trains: ['mage'],
     levels: military(['atelier_1', 'atelier_2', 'atelier_3'], 1.5),
   },
   stable: {
+    size: { w: 5, h: 4 }, // cuadros que ocupa
     name: 'Caballeriza',
     shortName: 'Caballer.', // para la barra de herramientas
     cost: { gold: 300, wood: 160 },
@@ -290,6 +304,7 @@ export const BUILDINGS = {
     levels: military(['stable_1', 'stable_2', 'stable_3'], 1.8),
   },
   siege: {
+    size: { w: 6, h: 5 }, // cuadros que ocupa
     name: 'Taller de asedio',
     shortName: 'Asedio',
     cost: { gold: 500, wood: 320 },
@@ -297,12 +312,14 @@ export const BUILDINGS = {
     levels: military(['siege_1', 'siege_2', 'siege_3'], 2.4),
   },
   forge: {
+    size: { w: 4, h: 3 }, // cuadros que ocupa
     name: 'Herrería',
     cost: { gold: 260, wood: 150 },
     trains: ['weapons', 'armor', 'fortify'], // aquí no se entrena: se investigan mejoras (ver RESEARCH)
     levels: military(['forge_1', 'forge_2', 'forge_3'], 1.4),
   },
   altar: {
+    size: { w: 3, h: 3 }, // cuadros que ocupa
     name: 'Altar del héroe',
     shortName: 'Altar',
     cost: { gold: 200, wood: 100 },
@@ -339,7 +356,7 @@ export const UNITS = {
   mage: {
     name: 'Hechicero', sprite: 'unit_mage', building: 'atelier', cost: { gold: 85, wood: 40 }, supply: 1, trainSec: 28, minLevel: 1, perLevel: 0.15,
     combat: { hp: 34, dmg: 15, range: 3.4, speed: 1.5, atkSec: 1.3 },
-    splash: { radius: 1.1, fraction: 0.5 },
+    splash: { radius: 1.25, fraction: 0.5 },
   },
   knight: {
     name: 'Caballero', sprite: 'unit_knight', building: 'stable', cost: { gold: 130, wood: 60 }, supply: 2, trainSec: 40, minLevel: 1, perLevel: 0.15,

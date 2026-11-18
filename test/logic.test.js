@@ -79,26 +79,26 @@ test('una partida nueva trae el Ayuntamiento en el centro y los recursos inicial
 
 test('construir cobra oro y madera, deja el edificio en nivel 1 y ocupa la casilla', () => {
   const s = fresh(1000, 1000, 1);
-  const r = place(s, 'storage', 3, 4, T0);
+  const r = place(s, 'storage', 3 * 8, 4 * 8, T0);
   assert.equal(r.ok, true);
   assert.equal(r.building.level, 1);
   assert.equal(r.building.upgradeEndsAt, null);
   assert.equal(s.gold, 1000 - BUILDINGS.storage.cost.gold);
   assert.equal(s.wood, 1000 - BUILDINGS.storage.cost.wood);
-  assert.equal(place(s, 'mine', 3, 4, T0).reason, 'Casilla ocupada');
+  assert.equal(place(s, 'mine', 3 * 8, 4 * 8, T0).reason, 'Casilla ocupada');
 });
 
 test('no se construye sin el recurso que falta, fuera del mapa, ni con tipos raros', () => {
   const poorGold = fresh(10, 1000, 1);
-  assert.equal(place(poorGold, 'mine', 0, 0, T0).reason, 'Oro insuficiente');
+  assert.equal(place(poorGold, 'mine', 0 * 8, 0 * 8, T0).reason, 'Oro insuficiente');
   const poorWood = fresh(1000, 5, 1);
-  assert.equal(place(poorWood, 'storage', 0, 0, T0).reason, 'Madera insuficiente');
+  assert.equal(place(poorWood, 'storage', 0 * 8, 0 * 8, T0).reason, 'Madera insuficiente');
 
   const s = fresh();
-  assert.equal(place(s, 'mine', 99, 0, T0).reason, 'Fuera del mapa');
-  assert.equal(place(s, 'constructor', 0, 0, T0).reason, 'Edificio desconocido');
-  assert.equal(place(s, '__proto__', 0, 0, T0).reason, 'Edificio desconocido');
-  assert.equal(place(s, 'townhall', 0, 0, T0).reason, 'Ese edificio no se puede construir');
+  assert.equal(place(s, 'mine', 99 * 8, 0 * 8, T0).reason, 'Fuera del mapa');
+  assert.equal(place(s, 'constructor', 0 * 8, 0 * 8, T0).reason, 'Edificio desconocido');
+  assert.equal(place(s, '__proto__', 0 * 8, 0 * 8, T0).reason, 'Edificio desconocido');
+  assert.equal(place(s, 'townhall', 0 * 8, 0 * 8, T0).reason, 'Ese edificio no se puede construir');
   assert.equal(place(s, 'mine', TOWN_HALL_CELL.x, TOWN_HALL_CELL.y, T0).reason, 'Casilla ocupada');
 });
 
@@ -118,20 +118,20 @@ test('placementError explica por qué no se puede construir y no modifica el est
 test('el nivel del Ayuntamiento limita cuántos edificios de cada tipo se pueden tener', () => {
   const s = fresh(5000, 5000, 1);
   assert.equal(limitFor(s, 'mine'), TH[0].limits.mine);
-  for (let i = 0; i < TH[0].limits.mine; i++) assert.equal(place(s, 'mine', i, 0, T0).ok, true);
-  const blocked = place(s, 'mine', 9, 0, T0);
+  for (let i = 0; i < TH[0].limits.mine; i++) assert.equal(place(s, 'mine', i * 8, 0 * 8, T0).ok, true);
+  const blocked = place(s, 'mine', 3 * 8, 0 * 8, T0);
   assert.equal(blocked.ok, false);
   assert.match(blocked.reason, /Límite de Mina de oro: 3/);
 
   townHall(s).level = 2; // al subir el Ayuntamiento se permiten más
-  assert.equal(place(s, 'mine', 9, 0, T0).ok, true);
+  assert.equal(place(s, 'mine', 3 * 8, 0 * 8, T0).ok, true);
   assert.equal(countOf(s, 'mine'), TH[0].limits.mine + 1);
 });
 
 test('los muros tienen su propio límite y cuestan solo madera', () => {
   const s = fresh(0, 10_000, 1);
-  for (let i = 0; i < TH[0].limits.wall; i++) assert.equal(place(s, 'wall', i, 1, T0).ok, true, `muro ${i}`);
-  assert.match(place(s, 'wall', 0, 2, T0).reason, /Límite de Muro/);
+  for (let i = 0; i < TH[0].limits.wall; i++) assert.equal(place(s, 'wall', i, 8, T0).ok, true, `muro ${i}`);
+  assert.match(place(s, 'wall', 0, 16, T0).reason, /Límite de Muro/);
   assert.equal(s.gold, 0, 'no gastó oro');
   assert.equal(s.wood, 10_000 - BUILDINGS.wall.cost.wood * TH[0].limits.wall);
 });
@@ -140,8 +140,8 @@ test('los muros tienen su propio límite y cuestan solo madera', () => {
 
 test('la mina produce oro y el aserradero madera, cada uno con su capacidad', () => {
   const s = fresh(1000, 1000, 1);
-  const mine = place(s, 'mine', 0, 0, T0).building;
-  const saw = place(s, 'sawmill', 1, 0, T0).building;
+  const mine = place(s, 'mine', 0 * 8, 0 * 8, T0).building;
+  const saw = place(s, 'sawmill', 1 * 8, 0 * 8, T0).building;
 
   const gained = tickAll(s, T0 + 10_000);
   assert.equal(mine.stored, 5); // 0.5 oro/s * 10 s
@@ -156,7 +156,7 @@ test('la mina produce oro y el aserradero madera, cada uno con su capacidad', ()
 
 test('el Ayuntamiento, el almacén y la torre no producen nada', () => {
   const s = fresh();
-  const tower = place(s, 'tower', 0, 0, T0).building;
+  const tower = place(s, 'tower', 0 * 8, 0 * 8, T0).building;
   const gained = tickAll(s, T0 + 60_000);
   assert.deepEqual(gained, { gold: 0, wood: 0 });
   assert.equal(tower.stored, 0);
@@ -164,7 +164,7 @@ test('el Ayuntamiento, el almacén y la torre no producen nada', () => {
 
 test('si el reloj retrocede no se genera ni se pierde nada', () => {
   const s = fresh(1000, 1000, 1);
-  const mine = place(s, 'mine', 0, 0, T0).building;
+  const mine = place(s, 'mine', 0 * 8, 0 * 8, T0).building;
   tickAll(s, T0 + 10_000);
   const gained = tickAll(s, T0); // reloj hacia atrás
   assert.equal(gained.gold, 0);
@@ -174,8 +174,8 @@ test('si el reloj retrocede no se genera ni se pierde nada', () => {
 
 test('recolectar manda cada recurso a su reserva y respeta el tope', () => {
   const s = fresh(1000, 1000, 1);
-  const mine = place(s, 'mine', 0, 0, T0).building;
-  const saw = place(s, 'sawmill', 1, 0, T0).building;
+  const mine = place(s, 'mine', 0 * 8, 0 * 8, T0).building;
+  const saw = place(s, 'sawmill', 1 * 8, 0 * 8, T0).building;
   mine.stored = 100;
   saw.stored = 50;
   s.gold = resourceCap(s) - 30; // caben 30 de oro
@@ -196,9 +196,9 @@ test('recolectar manda cada recurso a su reserva y respeta el tope', () => {
 
 test('collectAll suma oro y madera por separado', () => {
   const s = fresh(1000, 1000, 3);
-  const a = place(s, 'mine', 0, 0, T0).building;
-  const b = place(s, 'mine', 1, 0, T0).building;
-  const c = place(s, 'sawmill', 2, 0, T0).building;
+  const a = place(s, 'mine', 0 * 8, 0 * 8, T0).building;
+  const b = place(s, 'mine', 1 * 8, 0 * 8, T0).building;
+  const c = place(s, 'sawmill', 2 * 8, 0 * 8, T0).building;
   s.gold = 100;
   s.wood = 100;
   a.stored = 10;
@@ -211,7 +211,7 @@ test('collectAll suma oro y madera por separado', () => {
 
 test('el almacén sube el tope de oro y de madera, y no se demuele si algo no cabría', () => {
   const s = fresh(1000, 1000, 1);
-  const { building } = place(s, 'storage', 0, 0, T0);
+  const { building } = place(s, 'storage', 0 * 8, 0 * 8, T0);
   assert.equal(resourceCap(s), ECONOMY.baseCap + STORAGE[0].capBonus);
 
   s.gold = ECONOMY.baseCap + 100;
@@ -232,7 +232,7 @@ test('el almacén sube el tope de oro y de madera, y no se demuele si algo no ca
 
 test('iniciar una mejora cobra sus costos y fija cuándo termina', () => {
   const s = fresh(1000, 1000, 3);
-  const { building } = place(s, 'mine', 0, 0, T0);
+  const { building } = place(s, 'mine', 0 * 8, 0 * 8, T0);
   const gold = s.gold;
   const wood = s.wood;
   const r = startUpgrade(s, building.id, T0);
@@ -245,7 +245,7 @@ test('iniciar una mejora cobra sus costos y fija cuándo termina', () => {
 
 test('una mejora que pide madera la cobra, y sin ella no empieza', () => {
   const s = fresh(1000, 1000, 3);
-  const { building } = place(s, 'tower', 0, 0, T0);
+  const { building } = place(s, 'tower', 0 * 8, 0 * 8, T0);
   s.wood = 10;
   assert.equal(startUpgrade(s, building.id, T0).reason, 'Madera insuficiente');
   s.wood = 1000;
@@ -255,7 +255,7 @@ test('una mejora que pide madera la cobra, y sin ella no empieza', () => {
 
 test('un edificio no puede pasar del nivel del Ayuntamiento; subir el Ayuntamiento lo permite', () => {
   const s = fresh(5000, 5000, 1);
-  const mine = place(s, 'mine', 0, 0, T0).building;
+  const mine = place(s, 'mine', 0 * 8, 0 * 8, T0).building;
   assert.equal(startUpgrade(s, mine.id, T0).reason, 'Mejora antes el Ayuntamiento');
 
   const th = townHall(s);
@@ -270,7 +270,7 @@ test('un edificio no puede pasar del nivel del Ayuntamiento; subir el Ayuntamien
 
 test('durante la mejora no produce; al terminar sube de nivel, avisa y produce con las nuevas estadísticas', () => {
   const s = fresh(1000, 1000, 3);
-  const { building } = place(s, 'mine', 0, 0, T0);
+  const { building } = place(s, 'mine', 0 * 8, 0 * 8, T0);
   startUpgrade(s, building.id, T0);
   const endsAt = building.upgradeEndsAt;
 
@@ -288,7 +288,7 @@ test('durante la mejora no produce; al terminar sube de nivel, avisa y produce c
 
 test('una mejora que terminó mientras no jugabas se completa al volver', () => {
   const s = fresh(1000, 1000, 3);
-  const { building } = place(s, 'storage', 0, 0, T0);
+  const { building } = place(s, 'storage', 0 * 8, 0 * 8, T0);
   startUpgrade(s, building.id, T0);
   assert.equal(resourceCap(s), ECONOMY.baseCap + STORAGE[0].capBonus, 'mientras mejora conserva el nivel anterior');
   tickAll(s, T0 + 3 * 60 * 60 * 1000); // 3 h después
@@ -298,14 +298,14 @@ test('una mejora que terminó mientras no jugabas se completa al volver', () => 
 
 test('la producción acumulada antes de empezar la mejora no se pierde', () => {
   const s = fresh(1000, 1000, 3);
-  const { building } = place(s, 'mine', 0, 0, T0);
+  const { building } = place(s, 'mine', 0 * 8, 0 * 8, T0);
   startUpgrade(s, building.id, T0 + 10_000);
   assert.equal(building.stored, 5);
 });
 
 test('solo hay tantas mejoras simultáneas como obreros (el Ayuntamiento también usa uno)', () => {
   const s = fresh(5000, 5000, 2); // Ayuntamiento nivel 2: puede mejorar a 3 y los demás a 2
-  const ids = [0, 1, 2].map((x) => place(s, 'mine', x, 0, T0).building.id);
+  const ids = [0, 1, 2].map((x) => place(s, 'mine', x * 8, 0 * 8, T0).building.id);
   assert.equal(startUpgrade(s, ids[0], T0).ok, true);
   assert.equal(startUpgrade(s, ids[1], T0).ok, true);
   assert.equal(busyBuilders(s), ECONOMY.builders);
@@ -318,7 +318,7 @@ test('solo hay tantas mejoras simultáneas como obreros (el Ayuntamiento tambié
 
 test('mejorar valida recursos, nivel máximo, mejora repetida y existencia', () => {
   const s = fresh(1000, 1000, 10);
-  const { building } = place(s, 'mine', 0, 0, T0);
+  const { building } = place(s, 'mine', 0 * 8, 0 * 8, T0);
   assert.equal(startUpgrade(s, 999, T0).reason, 'No existe ese edificio');
 
   s.gold = 10;
@@ -381,16 +381,16 @@ test('el Ayuntamiento desbloquea los edificios militares: cuartel 2, arquería 4
   for (const [type, level] of Object.entries(need)) {
     assert.equal(unlockLevel(type), level, type);
     const low = fresh(99999, 99999, level - 1);
-    assert.match(place(low, type, 0, 0, T0).reason, /pide/, `${type} no se construye antes`);
+    assert.match(place(low, type, 0 * 8, 0 * 8, T0).reason, /pide/, `${type} no se construye antes`);
     const ok = fresh(99999, 99999, level);
-    assert.equal(place(ok, type, 0, 0, T0).ok, true, `${type} sí con el nivel ${level}`);
+    assert.equal(place(ok, type, 0 * 8, 0 * 8, T0).ok, true, `${type} sí con el nivel ${level}`);
   }
   assert.equal(unlockLevel('house'), 1);
 });
 
 test('un cuartel de nivel alto entrena más rápido', () => {
   const s = fresh(5000, 5000, 5);
-  const b = place(s, 'barracks', 0, 0, T0).building;
+  const b = place(s, 'barracks', 0 * 8, 0 * 8, T0).building;
   startTraining(s, b.id, 'soldier', T0);
   const normal = b.training.endsAt - T0;
   tickAll(s, T0 + 60_000);
@@ -404,7 +404,7 @@ test('un cuartel de nivel alto entrena más rápido', () => {
 
 test('un reloj o guardado manipulado no puede dejar una mejora más lejos que su duración', () => {
   const s = fresh(1000, 1000, 3);
-  const { building } = place(s, 'mine', 0, 0, T0);
+  const { building } = place(s, 'mine', 0 * 8, 0 * 8, T0);
   startUpgrade(s, building.id, T0);
   building.upgradeEndsAt = T0 + 1e12; // alguien lo editó a un futuro lejano
   tickAll(s, T0 + 5_000);
@@ -415,7 +415,7 @@ test('un reloj o guardado manipulado no puede dejar una mejora más lejos que su
 
 test('no se puede demoler en plena mejora ni el Ayuntamiento; el reembolso incluye lo invertido', () => {
   const s = fresh(1000, 1000, 3);
-  const { building } = place(s, 'mine', 0, 0, T0);
+  const { building } = place(s, 'mine', 0 * 8, 0 * 8, T0);
   startUpgrade(s, building.id, T0);
   assert.equal(demolish(s, building.id).reason, 'Espera a que termine la mejora');
   assert.equal(demolish(s, townHall(s).id).reason, 'El Ayuntamiento no se puede demoler');
@@ -429,26 +429,31 @@ test('no se puede demoler en plena mejora ni el Ayuntamiento; el reembolso inclu
 
 test('mover un edificio lo cambia de casilla sin perder nivel ni producción', () => {
   const s = fresh(1000, 1000, 3);
-  const mine = place(s, 'mine', 2, 2, T0).building;
+  const mine = place(s, 'mine', 2 * 8, 2 * 8, T0).building;
   mine.stored = 42;
   mine.level = 2;
 
   assert.equal(moveBuilding(s, mine.id, 5, 6).ok, true);
   assert.deepEqual([mine.x, mine.y, mine.stored, mine.level], [5, 6, 42, 2]);
-  assert.equal(buildingAt(s, 2, 2), null);
+  assert.equal(buildingAt(s, 16, 16), null);
   assert.equal(buildingAt(s, 5, 6), mine);
+  assert.equal(buildingAt(s, 6, 7), mine, 'ocupa 2×2 cuadros');
+  assert.equal(buildingAt(s, 7, 7), null);
 });
 
 test('mover valida casilla ocupada, fuera del mapa, misma casilla y existencia', () => {
   const s = fresh(1000, 1000, 3);
-  const a = place(s, 'mine', 2, 2, T0).building;
-  place(s, 'mine', 3, 2, T0);
-  assert.equal(moveBuilding(s, a.id, 3, 2).reason, 'Casilla ocupada');
+  const a = place(s, 'mine', 2 * 8, 2 * 8, T0).building;
+  place(s, 'mine', 3 * 8, 2 * 8, T0);
+  assert.equal(moveBuilding(s, a.id, 24, 16).reason, 'Casilla ocupada');
+  assert.equal(moveBuilding(s, a.id, 23, 17).reason, 'Casilla ocupada', 'pisar solo un borde también cuenta');
   assert.equal(moveBuilding(s, a.id, -1, 2).reason, 'Fuera del mapa');
   assert.equal(moveBuilding(s, a.id, 99, 2).reason, 'Fuera del mapa');
-  assert.equal(moveBuilding(s, a.id, 2, 2).reason, 'Ya está ahí');
+  assert.equal(moveBuilding(s, a.id, 47, 2).reason, 'Fuera del mapa', 'un edificio de 2×2 no cabe en el último cuadro');
+  assert.equal(moveBuilding(s, a.id, 16, 16).reason, 'Ya está ahí');
   assert.equal(moveBuilding(s, 999, 4, 4).reason, 'No existe ese edificio');
-  assert.deepEqual([a.x, a.y], [2, 2], 'no se movió');
+  assert.equal(moveBuilding(s, a.id, 17, 16).ok, true, 'puede moverse a un sitio que solapa con donde estaba');
+  assert.deepEqual([a.x, a.y], [17, 16]);
 });
 
 test('el Ayuntamiento se puede mover', () => {
@@ -465,7 +470,7 @@ const TH2_SUPPLY = TH[1].baseSupply;
 test('la población máxima suma la del Ayuntamiento y la de cada casa', () => {
   const s = fresh(5000, 5000, 1);
   assert.equal(supplyCap(s), TH1_SUPPLY);
-  const house = place(s, 'house', 0, 0, T0).building;
+  const house = place(s, 'house', 0 * 8, 0 * 8, T0).building;
   assert.equal(supplyCap(s), TH1_SUPPLY + HOUSE[0].supply);
   house.level = 2;
   assert.equal(supplyCap(s), TH1_SUPPLY + HOUSE[1].supply);
@@ -475,7 +480,7 @@ test('la población máxima suma la del Ayuntamiento y la de cada casa', () => {
 
 test('entrenar cobra, reserva población y la unidad llega al terminar', () => {
   const s = fresh(1000, 1000, 2);
-  const barracks = place(s, 'barracks', 0, 0, T0).building;
+  const barracks = place(s, 'barracks', 0 * 8, 0 * 8, T0).building;
   const gold = s.gold;
   const wood = s.wood;
 
@@ -499,7 +504,7 @@ test('entrenar cobra, reserva población y la unidad llega al terminar', () => {
 
 test('un lote entrena varias unidades a la vez: cobra, reserva población y llegan juntas', () => {
   const s = fresh(2000, 2000, 2);
-  const barracks = place(s, 'barracks', 0, 0, T0).building;
+  const barracks = place(s, 'barracks', 0 * 8, 0 * 8, T0).building;
   const gold = s.gold;
   const wood = s.wood;
 
@@ -523,8 +528,8 @@ test('un lote entrena varias unidades a la vez: cobra, reserva población y lleg
 
 test('el tamaño del lote depende del nivel del edificio, de la población y de los recursos', () => {
   const s = fresh(5000, 5000, 2);
-  for (let i = 0; i < 3; i++) place(s, 'house', i, 3, T0);
-  const b = place(s, 'barracks', 0, 0, T0).building;
+  for (let i = 0; i < 3; i++) place(s, 'house', i * 8, 3 * 8, T0);
+  const b = place(s, 'barracks', 0 * 8, 0 * 8, T0).building;
   assert.equal(batchSizeOf(b), batchLimit(1));
   const before = s.gold;
   assert.equal(startTraining(s, b.id, 'soldier', T0, batchLimit(1) + 1).ok, false, 'más que el tope del nivel');
@@ -544,7 +549,7 @@ test('el tamaño del lote depende del nivel del edificio, de la población y de 
 
 test('un lote que no cabe en la población no se acepta', () => {
   const s = fresh(5000, 5000, 2);
-  const b = place(s, 'barracks', 0, 0, T0).building;
+  const b = place(s, 'barracks', 0 * 8, 0 * 8, T0).building;
   s.army.soldier = supplyCap(s) - 2; // quedan 2 de población
   assert.equal(startTraining(s, b.id, 'soldier', T0, 3).reason, 'Población al máximo: construye casas');
   assert.equal(startTraining(s, b.id, 'soldier', T0, 2).ok, true);
@@ -553,8 +558,9 @@ test('un lote que no cabe en la población no se acepta', () => {
 test('los edificios militares son únicos: solo uno de cada clase', () => {
   const s = fresh(50_000, 50_000, 10);
   for (const type of UNIQUE_BUILDINGS) {
-    assert.equal(place(s, type, UNIQUE_BUILDINGS.indexOf(type), 0, T0).ok, true, `el primero de ${type}`);
-    const again = place(s, type, UNIQUE_BUILDINGS.indexOf(type), 1, T0);
+    const x = UNIQUE_BUILDINGS.indexOf(type) * 6;
+    assert.equal(place(s, type, x, 0, T0).ok, true, `el primero de ${type}`);
+    const again = place(s, type, x, 8, T0);
     assert.equal(again.ok, false, `un segundo ${type}`);
     assert.match(again.reason, /Solo puedes tener un/);
   }
@@ -562,7 +568,7 @@ test('los edificios militares son únicos: solo uno de cada clase', () => {
 
 test('un cuartel entrena de a uno: no acepta otra orden hasta terminar', () => {
   const s = fresh(1000, 1000, 2);
-  const b = place(s, 'barracks', 0, 0, T0).building;
+  const b = place(s, 'barracks', 0 * 8, 0 * 8, T0).building;
   assert.equal(startTraining(s, b.id, 'soldier', T0).ok, true);
   assert.equal(startTraining(s, b.id, 'soldier', T0).reason, 'Ya está entrenando');
   tickAll(s, T0 + 60_000);
@@ -571,7 +577,7 @@ test('un cuartel entrena de a uno: no acepta otra orden hasta terminar', () => {
 
 test('el entrenamiento sigue mientras no juegas', () => {
   const s = fresh(1000, 1000, 2);
-  const b = place(s, 'barracks', 0, 0, T0).building;
+  const b = place(s, 'barracks', 0 * 8, 0 * 8, T0).building;
   startTraining(s, b.id, 'soldier', T0);
   tickAll(s, T0 + 3 * 60 * 60 * 1000); // 3 horas después
   assert.equal(s.army.soldier, 1);
@@ -582,8 +588,8 @@ test('cada edificio militar entrena su unidad y no la de otros', () => {
   const spec = { barracks: 'soldier', archery: 'archer', atelier: 'mage', stable: 'knight' };
   const buildings = {};
   let x = 0;
-  for (const type of Object.keys(spec)) buildings[type] = place(s, type, x++, 0, T0).building;
-  for (let i = 0; i < 8; i++) place(s, 'house', i, 1, T0);
+  for (const type of Object.keys(spec)) buildings[type] = place(s, type, x++ * 8, 0 * 8, T0).building;
+  for (let i = 0; i < 8; i++) place(s, 'house', i * 8, 1 * 8, T0);
   for (const [type, unit] of Object.entries(spec)) {
     assert.deepEqual(trainableUnits(buildings[type]), [unit], type);
     for (const other of Object.values(spec)) {
@@ -595,8 +601,8 @@ test('cada edificio militar entrena su unidad y no la de otros', () => {
 
 test('el taller de asedio entrena catapultas desde el nivel 1 y arietes desde el 5', () => {
   const s = fresh(99999, 99999, 10);
-  for (let i = 0; i < 6; i++) place(s, 'house', i, 1, T0);
-  const siege = place(s, 'siege', 0, 0, T0).building;
+  for (let i = 0; i < 6; i++) place(s, 'house', i * 8, 1 * 8, T0);
+  const siege = place(s, 'siege', 0 * 8, 0 * 8, T0).building;
   assert.deepEqual(trainableUnits(siege), ['catapult']);
   assert.match(startTraining(s, siege.id, 'ram', T0).reason, /nivel 5/);
   siege.level = 5;
@@ -607,7 +613,7 @@ test('el taller de asedio entrena catapultas desde el nivel 1 y arietes desde el
 test('el nivel de las unidades es el de su edificio, y sube su vida y su daño', () => {
   const s = fresh(99999, 99999, 10);
   assert.equal(unitLevel(s, 'archer'), 1, 'sin edificio: nivel 1');
-  const archery = place(s, 'archery', 0, 0, T0).building;
+  const archery = place(s, 'archery', 0 * 8, 0 * 8, T0).building;
   const base = unitCombat(s, 'archer');
   assert.equal(base.hp, UNITS.archer.combat.hp);
   assert.equal(base.dmg, UNITS.archer.combat.dmg);
@@ -624,7 +630,7 @@ test('el nivel de las unidades es el de su edificio, y sube su vida y su daño',
 
 test('la Herrería investiga mejoras: cuestan, tardan, suben un nivel y no pasan del nivel de la herrería', () => {
   const s = fresh(99999, 99999, 10);
-  const forge = place(s, 'forge', 0, 0, T0).building;
+  const forge = place(s, 'forge', 0 * 8, 0 * 8, T0).building;
   assert.deepEqual(trainableUnits(forge), ['weapons', 'armor', 'fortify']);
   const step = researchStep('weapons', 0);
   const gold = s.gold;
@@ -661,16 +667,16 @@ test('las investigaciones mejoran a las unidades', () => {
 
 test('sin población libre no se entrena, y una casa la libera', () => {
   const s = fresh(5000, 5000, 2);
-  const b = place(s, 'barracks', 0, 0, T0).building;
+  const b = place(s, 'barracks', 0 * 8, 0 * 8, T0).building;
   s.army.soldier = TH2_SUPPLY; // población llena
   assert.equal(startTraining(s, b.id, 'soldier', T0).reason, 'Población al máximo: construye casas');
-  place(s, 'house', 1, 0, T0);
+  place(s, 'house', 1 * 8, 0 * 8, T0);
   assert.equal(startTraining(s, b.id, 'soldier', T0).ok, true);
 });
 
 test('faltan recursos: el mensaje dice cuál', () => {
   const s = fresh(1000, 1000, 2);
-  const b = place(s, 'barracks', 0, 0, T0).building;
+  const b = place(s, 'barracks', 0 * 8, 0 * 8, T0).building;
   s.gold = 5;
   assert.equal(startTraining(s, b.id, 'soldier', T0).reason, 'Oro insuficiente');
   s.gold = 1000;
@@ -680,10 +686,10 @@ test('faltan recursos: el mensaje dice cuál', () => {
 
 test('el altar se construye con el Ayuntamiento en nivel 2 y invoca héroes distintos, cada uno una vez', () => {
   const s = fresh(9999, 9999, 1);
-  assert.match(place(s, 'altar', 0, 0, T0).reason, /Altar del héroe: pide Fortaleza/);
+  assert.match(place(s, 'altar', 0 * 8, 0 * 8, T0).reason, /Altar del héroe: pide Fortaleza/);
   townHall(s).level = 2;
-  for (let i = 0; i < 3; i++) place(s, 'house', i, 1, T0);
-  const altar = place(s, 'altar', 0, 0, T0).building;
+  for (let i = 0; i < 3; i++) place(s, 'house', i * 8, 1 * 8, T0);
+  const altar = place(s, 'altar', 0 * 8, 0 * 8, T0).building;
   assert.equal(startTraining(s, altar.id, 'paladin', T0).ok, true);
   assert.equal(supplyUsed(s), HEROES.paladin.supply);
   tickAll(s, T0 + HEROES.paladin.trainSec * 1000);
@@ -722,8 +728,8 @@ test('el nivel máximo de un héroe es el doble del nivel del Ayuntamiento, hast
 
 test('el cuartel no entrena héroes y el altar no entrena soldados', () => {
   const s = fresh(5000, 5000, 2);
-  const barracks = place(s, 'barracks', 0, 0, T0).building;
-  const altar = place(s, 'altar', 1, 0, T0).building;
+  const barracks = place(s, 'barracks', 0 * 8, 0 * 8, T0).building;
+  const altar = place(s, 'altar', 1 * 8, 0 * 8, T0).building;
   assert.equal(startTraining(s, barracks.id, 'paladin', T0).reason, 'Este edificio no entrena eso');
   assert.equal(startTraining(s, altar.id, 'soldier', T0).reason, 'Este edificio no entrena eso');
   assert.equal(startTraining(s, townHall(s).id, 'soldier', T0).reason, 'Este edificio no entrena eso');
@@ -732,7 +738,7 @@ test('el cuartel no entrena héroes y el altar no entrena soldados', () => {
 
 test('mientras entrena no se mejora ni se demuele; mientras mejora no se entrena', () => {
   const s = fresh(5000, 5000, 3);
-  const b = place(s, 'barracks', 0, 0, T0).building;
+  const b = place(s, 'barracks', 0 * 8, 0 * 8, T0).building;
   startTraining(s, b.id, 'soldier', T0);
   assert.equal(startUpgrade(s, b.id, T0).reason, 'Espera a que termine el entrenamiento');
   assert.equal(demolish(s, b.id).reason, 'Espera a que termine el entrenamiento');
@@ -744,7 +750,7 @@ test('mientras entrena no se mejora ni se demuele; mientras mejora no se entrena
 
 test('no se demuele una casa que sostiene al ejército, y sí cuando sobra población', () => {
   const s = fresh(5000, 5000, 1);
-  const house = place(s, 'house', 0, 0, T0).building;
+  const house = place(s, 'house', 0 * 8, 0 * 8, T0).building;
   s.army.soldier = TH1_SUPPLY + 1; // solo cabe gracias a la casa
   assert.equal(demolish(s, house.id).reason, 'Hay demasiadas unidades para demoler esta casa');
   s.army.soldier = 2;
@@ -753,7 +759,7 @@ test('no se demuele una casa que sostiene al ejército, y sí cuando sobra pobla
 
 test('un guardado manipulado no puede dejar un entrenamiento más lejos que su duración', () => {
   const s = fresh(1000, 1000, 2);
-  const b = place(s, 'barracks', 0, 0, T0).building;
+  const b = place(s, 'barracks', 0 * 8, 0 * 8, T0).building;
   startTraining(s, b.id, 'soldier', T0);
   b.training.endsAt = T0 + 1e12;
   tickAll(s, T0 + 5_000);
@@ -762,7 +768,7 @@ test('un guardado manipulado no puede dejar un entrenamiento más lejos que su d
 
 test('un entrenamiento con una unidad desconocida se descarta sin romper nada', () => {
   const s = fresh();
-  const b = place(s, 'barracks', 0, 0, T0).building;
+  const b = place(s, 'barracks', 0 * 8, 0 * 8, T0).building;
   b.training = { unit: 'dragon', endsAt: T0 + 1000 };
   tickAll(s, T0 + 5_000);
   assert.equal(b.training, null);
@@ -772,8 +778,8 @@ test('un entrenamiento con una unidad desconocida se descarta sin romper nada', 
 
 test('un edificio dañado no produce, ni se mejora, ni entrena, hasta repararlo', () => {
   const s = fresh(5000, 5000, 3);
-  const mine = place(s, 'mine', 0, 0, T0).building;
-  const barracks = place(s, 'barracks', 1, 0, T0).building;
+  const mine = place(s, 'mine', 0 * 8, 0 * 8, T0).building;
+  const barracks = place(s, 'barracks', 1 * 8, 0 * 8, T0).building;
   mine.damaged = true;
   barracks.damaged = true;
 
@@ -791,7 +797,7 @@ test('un edificio dañado no produce, ni se mejora, ni entrena, hasta repararlo'
 
 test('reparar cuesta una parte de lo invertido, valida y descuenta', () => {
   const s = fresh(1000, 1000, 5);
-  const b = place(s, 'storage', 0, 0, T0).building; // 100 oro + 30 madera
+  const b = place(s, 'storage', 0 * 8, 0 * 8, T0).building; // 100 oro + 30 madera
   b.level = 3; // + mejoras ya pagadas
   const invested = investedCost(b);
   const cost = repairCost(b);
@@ -812,9 +818,9 @@ test('reparar cuesta una parte de lo invertido, valida y descuenta', () => {
 
 test('reparar todo repara en orden mientras alcance, y avisa si no alcanza', () => {
   const s = fresh(1000, 1000, 3);
-  const a = place(s, 'mine', 0, 0, T0).building;
-  const b = place(s, 'mine', 1, 0, T0).building;
-  const w = place(s, 'wall', 2, 0, T0).building;
+  const a = place(s, 'mine', 0 * 8, 0 * 8, T0).building;
+  const b = place(s, 'mine', 1 * 8, 0 * 8, T0).building;
+  const w = place(s, 'wall', 2 * 8, 0 * 8, T0).building;
   for (const x of [a, b, w]) x.damaged = true;
   assert.equal(repairAllCost(s).gold, repairCost(a).gold + repairCost(b).gold + repairCost(w).gold);
 
@@ -834,7 +840,7 @@ test('reparar todo repara en orden mientras alcance, y avisa si no alcanza', () 
 
 test('un edificio dañado se puede demoler y mover', () => {
   const s = fresh(1000, 1000, 3);
-  const b = place(s, 'mine', 0, 0, T0).building;
+  const b = place(s, 'mine', 0 * 8, 0 * 8, T0).building;
   b.damaged = true;
   assert.equal(moveBuilding(s, b.id, 4, 4).ok, true);
   assert.equal(demolish(s, b.id).ok, true);
@@ -871,4 +877,43 @@ test('formatDuration muestra m:ss y h:mm:ss, redondeando hacia arriba', () => {
   assert.equal(formatDuration(125_000), '2:05');
   assert.equal(formatDuration(3_600_000), '1:00:00');
   assert.equal(formatDuration(-5), '0:00');
+});
+
+/* ---------- tamaño de los edificios ---------- */
+
+test('cada edificio ocupa varios cuadros y los más importantes son los más grandes', async () => {
+  const { sizeOf, rectOf, centerOf, fitsInMap, areaIsFree, buildingsInArea, findFreeSpot } = await import('../src/game/logic.js');
+  const area = (t) => sizeOf(t).w * sizeOf(t).h;
+  assert.deepEqual(sizeOf('mine'), { w: 2, h: 2 });
+  assert.equal(area('wall'), 1);
+  assert.ok(area('mine') < area('storage') && area('storage') < area('barracks') && area('barracks') < area('townhall'), 'el Ayuntamiento es el más grande');
+  assert.equal(Math.max(...Object.keys(BUILDINGS).map(area)), area('townhall'));
+  assert.deepEqual(sizeOf('hall'), sizeOf('townhall'), 'el Ayuntamiento enemigo es como el tuyo');
+
+  const s = fresh(5000, 5000, 3);
+  const hall = townHall(s);
+  assert.deepEqual(rectOf(hall), { x: TOWN_HALL_CELL.x, y: TOWN_HALL_CELL.y, w: 7, h: 7 });
+  assert.deepEqual(centerOf(hall), { x: TOWN_HALL_CELL.x + 3, y: TOWN_HALL_CELL.y + 3 });
+  assert.equal(buildingAt(s, TOWN_HALL_CELL.x + 6, TOWN_HALL_CELL.y + 6), hall, 'cualquiera de sus cuadros');
+  assert.equal(buildingAt(s, TOWN_HALL_CELL.x + 7, TOWN_HALL_CELL.y), null);
+
+  assert.equal(fitsInMap('barracks', 43, 43), true);
+  assert.equal(fitsInMap('barracks', 44, 43), false, 'se sale por la derecha');
+  assert.equal(fitsInMap('wall', 47, 47), true);
+  assert.equal(areaIsFree(s, 'mine', hall.x - 2, hall.y), true);
+  assert.equal(areaIsFree(s, 'mine', hall.x - 1, hall.y), false, 'pisa el borde del Ayuntamiento');
+  assert.equal(buildingsInArea(s, 'storage', hall.x - 3, hall.y - 1)[0], hall);
+
+  const spot = findFreeSpot(s, 'barracks', hall.x, hall.y);
+  assert.ok(areaIsFree(s, 'barracks', spot.x, spot.y), 'encuentra un sitio donde sí cabe');
+});
+
+test('construir comprueba todo el rectángulo del edificio, no solo su esquina', () => {
+  const s = fresh(5000, 5000, 3);
+  assert.equal(place(s, 'barracks', 10, 10, T0).ok, true); // 5×5: ocupa 10–14
+  assert.equal(place(s, 'mine', 14, 14, T0).reason, 'Casilla ocupada', 'su esquina de abajo ya está ocupada');
+  assert.equal(place(s, 'mine', 15, 10, T0).ok, true, 'justo al lado sí');
+  assert.equal(place(s, 'wall', 12, 12, T0).reason, 'Casilla ocupada', 'ni un muro en el centro');
+  assert.equal(place(s, 'storage', 45, 10, T0).reason, 'Fuera del mapa', 'un almacén de 4×3 no cabe en el borde');
+  assert.equal(place(s, 'wall', 47, 10, T0).ok, true, 'un muro (1×1) sí');
 });

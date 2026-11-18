@@ -10,11 +10,12 @@ import { generateMission } from '../src/game/missions.js';
 
 const army = (soldier = 0, mage = 0, knight = 0) => ({ soldier, mage, knight });
 
-/** Misión mínima hecha a mano: edificios y defensores a medida. */
+/** Misión mínima hecha a mano: edificios y defensores a medida. Las posiciones son cuadros del mapa de 48×48; el
+ *  Ayuntamiento (7×7) ocupa x 20–26, y 10–16 (su centro es el cuadro 23, 13). */
 function mini({ buildings = [], defenders = [], hpScale = 1, dmgScale = 1 } = {}) {
   return {
     level: 1, hpScale, dmgScale, defenders,
-    buildings: [{ type: 'hall', x: 12, y: 8, loot: { gold: 100, wood: 50 } }, ...buildings],
+    buildings: [{ type: 'hall', x: 20, y: 10, loot: { gold: 100, wood: 50 } }, ...buildings],
   };
 }
 
@@ -45,8 +46,8 @@ test('el héroe sube de estadísticas con el nivel', () => {
 });
 
 test('la vida y el daño de lo enemigo se escalan con la misión', () => {
-  const easy = createBattle(mini({ buildings: [{ type: 'tower', x: 10, y: 8 }], defenders: [{ kind: 'guard', x: 5, y: 5 }] }), army(1), null);
-  const hard = createBattle(mini({ hpScale: 2, dmgScale: 2, buildings: [{ type: 'tower', x: 10, y: 8 }], defenders: [{ kind: 'guard', x: 5, y: 5 }] }), army(1), null);
+  const easy = createBattle(mini({ buildings: [{ type: 'tower', x: 14, y: 12 }], defenders: [{ kind: 'guard', x: 5, y: 5 }] }), army(1), null);
+  const hard = createBattle(mini({ hpScale: 2, dmgScale: 2, buildings: [{ type: 'tower', x: 14, y: 12 }], defenders: [{ kind: 'guard', x: 5, y: 5 }] }), army(1), null);
   assert.equal(byType(hard, 'tower')[0].hp, byType(easy, 'tower')[0].hp * 2);
   assert.equal(byType(hard, 'tower')[0].dmg, byType(easy, 'tower')[0].dmg * 2);
   assert.equal(defenderUnits(hard)[0].hp, defenderUnits(easy)[0].hp * 2);
@@ -65,7 +66,7 @@ test('un grupo ataca solo y destruye el Ayuntamiento: gana y se lleva el botín'
 });
 
 test('se cuentan los defensores derrotados', () => {
-  const guards = [10, 11, 12].map((x) => ({ kind: 'guard', x, y: 14 }));
+  const guards = [20, 23, 26].map((x) => ({ kind: 'guard', x, y: 24 }));
   const b = createBattle(mini({ defenders: guards }), army(8), null);
   run(b, 120);
   assert.equal(b.result.won, true);
@@ -81,7 +82,7 @@ test('sin tropas la batalla termina enseguida en derrota', () => {
 });
 
 test('una torre mata a las tropas que se acercan y la batalla se pierde', () => {
-  const towers = [[10, 8], [14, 8], [12, 10]].map(([x, y]) => ({ type: 'tower', x, y }));
+  const towers = [[16, 12], [28, 12], [22, 19]].map(([x, y]) => ({ type: 'tower', x, y }));
   const b = createBattle(mini({ buildings: towers, hpScale: 6, dmgScale: 3 }), army(2), null);
   run(b, COMBAT.timeLimitSec);
   assert.equal(b.result.won, false);
@@ -89,7 +90,7 @@ test('una torre mata a las tropas que se acercan y la batalla se pierde', () => 
 });
 
 test('los defensores salen a pelear al ver a los atacantes y vuelven a su puesto después', () => {
-  const guard = { kind: 'guard', x: 12, y: 17 };
+  const guard = { kind: 'guard', x: 23, y: 30 };
   const b = createBattle(mini({ defenders: [guard] }), army(1), null);
   const g = defenderUnits(b)[0];
   const startY = g.y;
@@ -112,9 +113,9 @@ test('los hechiceros atacan desde lejos (disparo) y los soldados cuerpo a cuerpo
 test('un muro cerrado se rodea si hay hueco y se rompe si no lo hay', () => {
   const ring = (gap) => {
     const walls = [];
-    for (let x = 9; x <= 15; x++) for (let y = 5; y <= 11; y++) {
-      if (!(x === 9 || x === 15 || y === 5 || y === 11)) continue;
-      if (gap && y === 11 && x === 12) continue;
+    for (let x = 14; x <= 32; x++) for (let y = 4; y <= 22; y++) {
+      if (!(x === 14 || x === 32 || y === 4 || y === 22)) continue;
+      if (gap && y === 22 && (x === 23 || x === 24)) continue;
       walls.push({ type: 'wall', x, y });
     }
     return walls;
@@ -133,7 +134,7 @@ test('un muro cerrado se rodea si hay hueco y se rompe si no lo hay', () => {
 /* ---------- órdenes ---------- */
 
 test('una orden de atacar hace que el grupo ignore lo demás hasta cumplirla', () => {
-  const far = { type: 'mine', x: 3, y: 5, loot: { gold: 40 } };
+  const far = { type: 'mine', x: 6, y: 10, loot: { gold: 40 } };
   const b = createBattle(mini({ buildings: [far] }), army(4), null);
   const mine = byType(b, 'mine')[0];
   assert.equal(orderAttack(b, unitIdsOfKinds(b), mine.id), true);
@@ -156,7 +157,7 @@ test('no se puede ordenar atacar a un aliado, a un objetivo muerto ni a algo ine
 test('una orden de mover lleva al grupo al punto y luego vuelven al modo automático', () => {
   const b = createBattle(mini(), army(3), null);
   const ids = unitIdsOfKinds(b);
-  orderMove(b, ids, 5, 15);
+  orderMove(b, ids, 10, 30);
 
   // Se mira a cada unidad en el instante exacto en que cumple la orden: debe estar en el punto.
   const arrivedAt = new Map();
@@ -165,11 +166,11 @@ test('una orden de mover lleva al grupo al punto y luego vuelven al modo automá
     for (const u of attackers(b)) if (u.order === null && !arrivedAt.has(u.id)) arrivedAt.set(u.id, { x: u.x, y: u.y });
   }
   assert.equal(arrivedAt.size, ids.length, 'todas cumplieron la orden');
-  for (const p of arrivedAt.values()) assert.ok(Math.hypot(p.x - 5, p.y - 15) < 0.5, `llegó a ${p.x.toFixed(1)},${p.y.toFixed(1)}`);
+  for (const p of arrivedAt.values()) assert.ok(Math.hypot(p.x - 10, p.y - 30) < 1, `llegó a ${p.x.toFixed(1)},${p.y.toFixed(1)}`);
 
   // Y desde ahí siguen solas: se alejan del punto hacia el enemigo.
   run(b, 20);
-  assert.ok(attackers(b).some((u) => Math.hypot(u.x - 5, u.y - 15) > 2), 'volvieron al modo automático');
+  assert.ok(attackers(b).some((u) => Math.hypot(u.x - 10, u.y - 30) > 4), 'volvieron al modo automático');
 });
 
 test('mover a un punto fuera del mapa lo deja dentro', () => {
@@ -194,7 +195,7 @@ test('se puede ordenar solo a un tipo de unidad y quitar las órdenes', () => {
 /* ---------- fin, tiempo y determinismo ---------- */
 
 test('al agotarse el tiempo la batalla se pierde, conservando el botín de lo destruido', () => {
-  const b = createBattle(mini({ buildings: [{ type: 'mine', x: 11, y: 20, loot: { gold: 77 } }], hpScale: 500 }), army(1), null);
+  const b = createBattle(mini({ buildings: [{ type: 'mine', x: 22, y: 30, loot: { gold: 77 } }], hpScale: 500 }), army(1), null);
   const mine = byType(b, 'mine')[0];
   mine.hp = 1; // la mina cae pronto; el Ayuntamiento (hpScale 500) no
   run(b, COMBAT.timeLimitSec + 5);
@@ -205,7 +206,7 @@ test('al agotarse el tiempo la batalla se pierde, conservando el botín de lo de
 });
 
 test('el porcentaje no cuenta los muros', () => {
-  const walls = [[9, 5], [10, 5], [11, 5]].map(([x, y]) => ({ type: 'wall', x, y }));
+  const walls = [[14, 4], [15, 4], [16, 4]].map(([x, y]) => ({ type: 'wall', x, y }));
   const b = createBattle(mini({ buildings: walls }), army(4), null);
   assert.equal(battleStatus(b).percent, 0);
   run(b, 120);
@@ -226,7 +227,7 @@ test('la simulación es determinista y no depende de cómo se parta el tiempo', 
 });
 
 test('retirarse termina la batalla como derrota y salva a las unidades vivas', () => {
-  const b = createBattle(mini({ defenders: [{ kind: 'guard', x: 12, y: 15 }] }), army(5), null);
+  const b = createBattle(mini({ defenders: [{ kind: 'guard', x: 23, y: 30 }] }), army(5), null);
   run(b, 3);
   retreat(b);
   assert.equal(b.over, true);

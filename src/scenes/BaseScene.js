@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 import { ASSET_BASE, IMAGES, SHEETS, SOUNDS } from '../data/assets.js';
-import { ARMY_UNITS, BUILDINGS, CAMERA, ECONOMY, GRID, LAYOUT, RESEARCH, RESOURCES, TOOL_PAGES, UNIQUE_BUILDINGS, UNITS, batchTimeFactor, researchStep } from '../data/config.js';
+import { ARMY_UNITS, BUILDINGS, CAMERA, ECONOMY, GRID, LAYOUT, TERRAIN, RESEARCH, RESOURCES, TOOL_PAGES, UNIQUE_BUILDINGS, UNITS, batchTimeFactor, researchStep } from '../data/config.js';
 import { HEROES, HERO_KEYS, heroXpToNext } from '../data/heroes.js';
 import { generateDecor } from '../game/decor.js';
 import * as logic from '../game/logic.js';
@@ -13,6 +13,11 @@ import {
   resetView,
   screenToTile,
   spriteScale,
+  rectCenter,
+  rectCorners,
+  rotateView,
+  screenToWorld,
+  terrainCenter,
   tileBase,
   tileCenter,
   tileCorners,
@@ -20,7 +25,7 @@ import {
   view,
   zoomAt,
 } from '../game/projection.js';
-import { fitIcon as fitIconArt, placeOnTile as placeOnTileArt } from './artPlace.js';
+import { fitIcon as fitIconArt, missingRotationArt, placeOnTile as placeOnTileArt, viewFrame } from './artPlace.js';
 import { drawCliff, ensureTerrainTextures, grassKey, strokeCell } from './terrainArt.js';
 import { SHEET, unitFrame } from '../game/unitArt.js';
 import { canAttack, nextCampaignLevel } from '../game/campaign.js';
@@ -28,7 +33,7 @@ import { generateMission, missionName } from '../game/missions.js';
 import { raidCountdownMs, raidLevel } from '../game/raids.js';
 import * as quests from '../game/quests.js';
 import * as store from '../game/store.js';
-import { flowerSpots, pathTiles, pondTiles } from '../game/landscape.js';
+import { flowerSpots, occupiedBlocks, pathTiles, pondTiles } from '../game/landscape.js';
 import { createWorker, plannedWorkers, stepWorker, symbolicWorkers, workerPosition } from '../game/workers.js';
 import { claimableCount } from '../game/achievements.js';
 import { openAchievementsPanel } from './achievementsPanel.js';
@@ -148,7 +153,9 @@ export default class BaseScene extends Phaser.Scene {
 
   preload() {
     this.load.setPath(ASSET_BASE);
-    for (const [key, file] of Object.entries(IMAGES)) this.load.image(key, file);
+    // Los dibujos de los giros de cámara (_r1 a _r3) se cargan cuando hacen falta (ver turnView).
+    for (const [key, file] of Object.entries(IMAGES)) if (!/_r[1-3]$/.test(key)) this.load.image(key, file);
+    for (const [key, file] of missingRotationArt(this, view.rot)) this.load.image(key, file);
     for (const [key, file] of Object.entries(SHEETS)) this.load.spritesheet(key, file, { frameWidth: SHEET.frameWidth, frameHeight: SHEET.frameHeight });
     for (const [key, file] of Object.entries(SOUNDS)) this.load.audio(key, file);
   }
@@ -158,6 +165,7 @@ export default class BaseScene extends Phaser.Scene {
     this.input.addPointer(1); // permite pellizcar con dos dedos
     this.cursors = this.input.keyboard?.createCursorKeys();
     this.wasd = this.input.keyboard?.addKeys('W,A,S,D');
+    this.turnKeys = this.input.keyboard?.addKeys('Q,E');
 
     resetView(logic.townHall(store.get()) ?? undefined);
 
@@ -183,6 +191,7 @@ export default class BaseScene extends Phaser.Scene {
     this.ghost = this.add.image(0, 0, iconKey('mine')).setAlpha(0.7).setVisible(false).setDepth(DEPTH.ghost);
     this.ghostCell = this.add.graphics().setVisible(false).setDepth(DEPTH.ghost - 1); // rombo verde/rojo bajo la vista previa
     this.selector = this.add.graphics().setVisible(false).setDepth(DEPTH.selector); // rombo blanco de la selección
+    this.hallGlow = this.add.graphics().setDepth(DEPTH.terrain + 0.9); // halo dorado que late bajo el Ayuntamiento
     this.selectorCell = null;
     this.toast = this.add
       .text(LAYOUT.width / 2, LAYOUT.gridTop + 126, '', {
@@ -259,9 +268,9 @@ export default class BaseScene extends Phaser.Scene {
   /* ---------- creación del mundo ---------- */
 
   createTerrain() {
-    this.terrain = [];
-    for (let y = 0; y < GRID.rows; y++) {
-      for (let x = 0; x < GRID.cols; x++) {
+    this.terrain = []; // bloques de terreno de 2×2 cuadros
+    for (let y = 0; y < TERRAIN.rows; y++) {
+      for (let x = 0; x < TERRAIN.cols; x++) {
         const img = this.add.image(0, 0, grassKey(x, y)).setDepth(DEPTH.terrain);
         this.terrain.push({ x, y, img });
       }
@@ -276,7 +285,7 @@ export default class BaseScene extends Phaser.Scene {
       return {
         ...d,
         kind,
-        img: this.add.image(0, 0, d.key).setDepth(DEPTH.world + depthOf(d.x, d.y)),
+        img: this.add.image(0, 0, d.key).setDepth(DEPTH.world + depthOf(d.x * 2 + 0.5, d.y * 2 + 0.5)),
         shadow: kind ? this.add.image(0, 0, 'fx_shadow').setDepth(DEPTH.shadow).setVisible(false) : null,
       };
     });
@@ -307,35 +316,36 @@ export default class BaseScene extends Phaser.Scene {
     while (this.pathImgs.length < this.pathList.length) this.pathImgs.push(this.add.image(0, 0, 'iso_dirt').setDepth(DEPTH.terrain + 0.4));
   }
 
-  /** Coloca el paisaje según la cámara. */
+  /** Coloca el paisaje según la cámara (todo va en bloques de terreno de 2×2 cuadros). */
   renderLandscape(state) {
     const z = view.zoom;
-    const occupied = new Set(state.buildings.map((b) => `${b.x},${b.y}`));
+    const occupied = occupiedBlocks(state.buildings);
     this.refreshPaths(state);
+    const seen = (x, y) => isTileVisible(x * 2 + 0.5, y * 2 + 0.5, 1);
 
     for (const p of this.ponds) {
-      const hidden = !isTileVisible(p.x, p.y) || occupied.has(`${p.x},${p.y}`);
+      const hidden = !seen(p.x, p.y) || occupied.has(`${p.x},${p.y}`);
       p.sand.setVisible(!hidden);
       p.water.setVisible(!hidden);
       if (hidden) continue;
-      const c = tileCenter(p.x, p.y);
+      const c = terrainCenter(p.x, p.y);
       p.sand.setPosition(c.x, c.y).setScale(z * 1.4);
       p.water.setPosition(c.x, c.y).setScale(z * 1.03);
     }
     this.pathImgs.forEach((img, i) => {
       const t = this.pathList[i];
-      const show = t && isTileVisible(t.x, t.y);
+      const show = t && seen(t.x, t.y);
       img.setVisible(Boolean(show));
       if (show) {
-        const c = tileCenter(t.x, t.y);
+        const c = terrainCenter(t.x, t.y);
         img.setPosition(c.x, c.y).setScale(z * 1.03);
       }
     });
     for (const f of this.flowers) {
       const k = `${f.x},${f.y}`;
-      const show = isTileVisible(f.x, f.y) && !occupied.has(k) && !this.pathSet.has(k);
+      const show = seen(f.x, f.y) && !occupied.has(k) && !this.pathSet.has(k);
       f.img.setVisible(show);
-      if (show) this.placeOnTile(f.img, f.kind === 3 ? 'tuft' : `flower_${f.kind}`, f.x + f.ox - 0.5, f.y + f.oy - 0.5, 0.9);
+      if (show) this.placeOnTile(f.img, f.kind === 3 ? 'tuft' : `flower_${f.kind}`, 2 * (f.x + f.ox - 0.5) + 0.5, 2 * (f.y + f.oy - 0.5) + 0.5, 0.9);
     }
     drawCliff(this.cliff, z);
   }
@@ -653,6 +663,8 @@ export default class BaseScene extends Phaser.Scene {
       resetView(logic.townHall(store.get()) ?? undefined);
       this.viewDirty = true;
     });
+    round(top + 138, 'rotl', () => this.turnView(-1));
+    round(top + 184, 'rotr', () => this.turnView(1));
 
     // Recolectar todo: abajo a la derecha, a mano del pulgar.
     this.collectBtn = ui.button(this, { x: W - 66, y: LAYOUT.barTop - 36, w: 116, h: 46, kind: 'gold', icon: 'coin', iconSize: 22, text: 'Recolectar', size: 12, depth: d, onClick: () => this.doAction(
@@ -660,6 +672,30 @@ export default class BaseScene extends Phaser.Scene {
       (r) => [r.gold > 0 && `+${r.gold} de oro`, r.wood > 0 && `+${r.wood} de madera`].filter(Boolean).join(' · '),
       'collect_all',
     ) });
+  }
+
+  /** Gira la cámara un cuarto de vuelta (−1 a la izquierda, 1 a la derecha). */
+  turnView(quarters) {
+    if (this.turning) return;
+    const next = (((view.rot + quarters) % 4) + 4) % 4;
+    const missing = missingRotationArt(this, next);
+    const apply = () => {
+      this.turning = false;
+      rotateView(quarters);
+      this.viewDirty = true;
+      this.play('select');
+    };
+    if (!missing.length) return apply();
+    // Primero se descargan los dibujos de ese lado (solo la primera vez).
+    this.turning = true;
+    this.showToast('Preparando la vista…', 1500);
+    for (const [key, file] of missing) this.load.image(key, file);
+    this.load.once('complete', apply);
+    this.load.once('loaderror', () => {
+      this.turning = false;
+      this.showToast('No se pudo cargar esa vista: sin conexión', 2200);
+    });
+    this.load.start();
   }
 
   /* ---- ventanas ---- */
@@ -1054,10 +1090,11 @@ export default class BaseScene extends Phaser.Scene {
   ambientTick() {
     const z = view.zoom;
     for (const b of store.get().buildings) {
-      if (!isTileVisible(b.x, b.y, 0)) continue;
-      const c = tileCenter(b.x, b.y);
-      const depth = DEPTH.world + depthOf(b.x, b.y) + 0.5;
-      const roof = (60 + b.level * 2) * z; // altura aproximada del tejado sobre el centro del rombo
+      const v = this.views.get(b.id);
+      if (!v?.sprite.visible) continue;
+      const c = this.centerOnScreen(b);
+      const depth = DEPTH.world + this.depthOfBuilding(b) + 0.5;
+      const roof = Math.max(24 * z, (c.y - this.spriteTop(v.sprite)) * 0.8); // altura aproximada del tejado sobre el centro del rombo
       const spread = (dx) => c.x + (Math.random() - 0.5) * dx * z;
       if (b.damaged) {
         emberPuff(this, spread(30), c.y - 14 * z, depth);
@@ -1129,7 +1166,7 @@ export default class BaseScene extends Phaser.Scene {
       const sign = w.state.phase === 'back' ? -1 : 1;
       const dx = (site.x - home.x) * sign;
       const dy = (site.y - home.y) * sign;
-      const f = pos.moving ? unitFrame('walk', dx, dy, timeMs / 600 + w.id * 0.37) : unitFrame('idle', dx, dy);
+      const f = pos.moving ? viewFrame('walk', dx, dy, timeMs / 600 + w.id * 0.37) : viewFrame('idle', dx, dy);
       this.placeOnTile(w.img, w.key, pos.x, pos.y, WORKER_GROW)
         .setFrame(f.frame)
         .setDepth(DEPTH.world + depthOf(pos.x, pos.y) + 0.06)
@@ -1156,8 +1193,8 @@ export default class BaseScene extends Phaser.Scene {
     const first = (type) => state.buildings.filter((b) => b.type === type).sort((a, b) => a.id - b.id)[0];
     const camp = first('barracks') ?? logic.townHall(state);
     const shrine = first('altar') ?? camp;
-    this.camp = camp ? { x: camp.x, y: camp.y } : null;
-    this.shrine = shrine ? { x: shrine.x, y: shrine.y } : null;
+    this.camp = camp ? logic.rectOf(camp) : null;
+    this.shrine = shrine ? logic.rectOf(shrine) : null;
 
     // Solo una muestra simbólica: como mucho 6 figuras, repartidas entre los tipos que tengas (la lista completa está en la ventana del ejército).
     const want = [];
@@ -1247,7 +1284,7 @@ export default class BaseScene extends Phaser.Scene {
       }
     }
     // Si el puesto cambió (se movió el cuartel), vuelve poco a poco.
-    if (Math.hypot(who.x - home.x, who.y - home.y) > radius * 2.5 + 0.5) {
+    if (Math.hypot(who.x - home.x, who.y - home.y) > radius * 2.5 + 1) {
       who.x += (home.x - who.x) * Math.min(1, dt * 1.5);
       who.y += (home.y - who.y) * Math.min(1, dt * 1.5);
     }
@@ -1260,32 +1297,32 @@ export default class BaseScene extends Phaser.Scene {
     const zoom = view.zoom;
     if (this.camp) {
       for (const a of this.army ?? []) {
-        const col = a.slot % 4;
-        const row = Math.floor(a.slot / 4);
-        const home = { x: this.camp.x + 1.3 + col * 0.75, y: this.camp.y + 0.2 + row * 0.8 };
-        const moving = this.wander(a, home, 0.25, dt, 0.4);
+        const col = a.slot % 3;
+        const row = Math.floor(a.slot / 3);
+        const home = { x: this.camp.x + this.camp.w + 1 + col * 1.7, y: this.camp.y + (this.camp.h - 1) / 2 - 1.5 + row * 1.7 };
+        const moving = this.wander(a, home, 0.5, dt, 0.8);
         if (!isTileVisible(Math.round(a.x), Math.round(a.y))) {
           a.img.setVisible(false);
           a.shadow.setVisible(false);
           continue;
         }
         a.shadow.setVisible(false);
-        const f = moving ? unitFrame('walk', a.dx ?? 1, a.dy ?? 0, a.phase / (Math.PI * 2)) : unitFrame('idle', a.dx ?? 1, a.dy ?? 0);
+        const f = moving ? viewFrame('walk', a.dx ?? 1, a.dy ?? 0, a.phase / (Math.PI * 2)) : viewFrame('idle', a.dx ?? 1, a.dy ?? 0);
         this.placeOnTile(a.img, UNITS[a.type].sprite, a.x, a.y, WORKER_GROW).setFrame(f.frame).setDepth(DEPTH.world + depthOf(a.x, a.y) + 0.06).setVisible(true).setFlipX(f.flipX);
       }
     }
     if (!this.shrine) return;
     for (const [key, h] of this.heroViews) {
       const sprite = HEROES[key].sprite;
-      const home = { x: this.shrine.x + 0.55 + h.slot * 0.7, y: this.shrine.y + 1.25 };
-      const moving = this.wander(h, home, 0.4, dt, 0.4);
+      const home = { x: this.shrine.x + this.shrine.w + 1 + h.slot * 1.8, y: this.shrine.y + (this.shrine.h - 1) / 2 + 2 };
+      const moving = this.wander(h, home, 0.8, dt, 0.8);
       const visible = isTileVisible(Math.round(h.x), Math.round(h.y));
       h.img.setVisible(visible);
       h.label.setVisible(visible);
       if (!visible) h.shadow.setVisible(false);
       if (visible) {
         h.shadow.setVisible(false);
-        const f = moving ? unitFrame('walk', h.dx ?? 1, h.dy ?? 0, h.phase / (Math.PI * 2)) : unitFrame('idle', h.dx ?? 1, h.dy ?? 0);
+        const f = moving ? viewFrame('walk', h.dx ?? 1, h.dy ?? 0, h.phase / (Math.PI * 2)) : viewFrame('idle', h.dx ?? 1, h.dy ?? 0);
         this.placeOnTile(h.img, sprite, h.x, h.y, WORKER_GROW).setFrame(f.frame).setDepth(DEPTH.world + depthOf(h.x, h.y) + 0.06).setFlipX(f.flipX);
         h.label.setPosition(h.img.x, h.img.y - 70 * zoom).setScale(zoom).setDepth(h.img.depth + 0.01);
       }
@@ -1463,7 +1500,7 @@ export default class BaseScene extends Phaser.Scene {
     }
 
     const tile = screenToTile(pointer.x, pointer.y);
-    const target = tile ? logic.buildingAt(store.get(), tile.x, tile.y) : null;
+    const target = this.buildingAtPoint(pointer.x, pointer.y);
     const g = {
       id: pointer.id,
       startX: pointer.x,
@@ -1561,7 +1598,8 @@ export default class BaseScene extends Phaser.Scene {
     const { tile } = g;
 
     if (g.intent === 'place' && tile) {
-      this.doAction(() => logic.place(state, this.tool, tile.x, tile.y, Date.now()), () => null, 'place');
+      const at = this.anchorAt(this.tool, g.startX, g.startY);
+      this.doAction(() => logic.place(state, this.tool, at.x, at.y, Date.now()), () => null, 'place');
     } else if (g.intent === 'demolish' && g.buildingId !== null) {
       this.doAction(() => logic.demolish(state, g.buildingId), () => 'Edificio demolido', 'demolish');
     } else if (g.intent === 'building') {
@@ -1571,9 +1609,9 @@ export default class BaseScene extends Phaser.Scene {
       const r = logic.collect(state, b);
       if (r.ok) {
         store.commit();
-        const c = tileCenter(b.x, b.y);
-        this.floatText(c.x, c.y - tileSize() / 2, `+${r.amount}`, r.resource === 'gold' ? TEXT.gold : TEXT.wood);
-        sparkBurst(this, c.x, c.y - tileSize() * 0.2, DEPTH.ghost - 5, r.resource === 'gold' ? 0xffe08a : 0xe0b070);
+        const c = this.centerOnScreen(b);
+        this.floatText(c.x, c.y - 24 * view.zoom, `+${r.amount}`, r.resource === 'gold' ? TEXT.gold : TEXT.wood);
+        sparkBurst(this, c.x, c.y - 8 * view.zoom, DEPTH.ghost - 5, r.resource === 'gold' ? 0xffe08a : 0xe0b070);
         this.play('collect');
       } else {
         this.play('select');
@@ -1598,14 +1636,12 @@ export default class BaseScene extends Phaser.Scene {
   updateMoveGhost(pointer) {
     const state = store.get();
     const b = state.buildings.find((x) => x.id === this.movingId);
-    const tile = screenToTile(pointer.x, pointer.y);
-    if (!b || !tile) {
+    if (!b || !screenToTile(pointer.x, pointer.y)) {
       this.hideGhost();
       return;
     }
-    const other = logic.buildingAt(state, tile.x, tile.y);
-    const ok = !other || other.id === b.id;
-    this.showGhost(spriteOf(b), tile, ok);
+    const at = this.anchorAt(b.type, pointer.x, pointer.y);
+    this.showGhost(spriteOf(b), at, logic.areaIsFree(state, b.type, at.x, at.y, b.id), b.type);
   }
 
   completeMove(pointer) {
@@ -1613,13 +1649,14 @@ export default class BaseScene extends Phaser.Scene {
     this.movingId = null;
     this.hideGhost();
     this.viewDirty = true;
-    const tile = screenToTile(pointer.x, pointer.y);
-    if (id === null || !tile) return;
+    if (id === null || !screenToTile(pointer.x, pointer.y)) return;
 
     const state = store.get();
     const b = state.buildings.find((x) => x.id === id);
-    if (!b || (b.x === tile.x && b.y === tile.y)) return; // soltó donde estaba
-    this.doAction(() => logic.moveBuilding(state, id, tile.x, tile.y), () => null, 'move');
+    if (!b) return;
+    const at = this.anchorAt(b.type, pointer.x, pointer.y);
+    if (b.x === at.x && b.y === at.y) return; // soltó donde estaba
+    this.doAction(() => logic.moveBuilding(state, id, at.x, at.y), () => null, 'move');
   }
 
   /* ---- pintar muros arrastrando ---- */
@@ -1686,8 +1723,9 @@ export default class BaseScene extends Phaser.Scene {
       if (this.gesture?.mode !== 'move') this.hideGhost();
       return;
     }
-    const ok = logic.placementError(store.get(), this.tool, tile.x, tile.y) === null;
-    this.showGhost(iconKey(this.tool), tile, ok);
+    const at = this.anchorAt(this.tool, pointer.x, pointer.y);
+    const ok = logic.placementError(store.get(), this.tool, at.x, at.y) === null;
+    this.showGhost(iconKey(this.tool), at, ok, this.tool);
   }
 
   hideGhost() {
@@ -1695,11 +1733,61 @@ export default class BaseScene extends Phaser.Scene {
     this.ghostCell.clear().setVisible(false);
   }
 
-  /** Vista previa de un edificio sobre una casilla: el dibujo semitransparente y el rombo verde (cabe) o rojo (no cabe). */
-  showGhost(key, tile, ok) {
-    this.placeOnTile(this.ghost, key, tile.x, tile.y, BUILDING_GROW).setAlpha(0.78).setDepth(DEPTH.ghost).setVisible(true).clearTint();
+  /** Vista previa de un edificio de `type` con su esquina en `at`: el dibujo semitransparente y su rectángulo verde (cabe) o rojo (no cabe). */
+  showGhost(key, at, ok, type) {
+    const { w, h } = logic.sizeOf(type);
+    this.placeOnTile(this.ghost, key, at.x + (w - 1) / 2, at.y + (h - 1) / 2, BUILDING_GROW).setAlpha(0.78).setDepth(DEPTH.ghost).setVisible(true).clearTint();
     this.ghostCell.clear().setVisible(true);
-    strokeCell(this.ghostCell, tile.x, tile.y, ok ? 0x66ee66 : 0xff5a5a, 1, Math.max(2, 3 * view.zoom), 0.4);
+    strokeCell(this.ghostCell, at.x, at.y, ok ? 0x66ee66 : 0xff5a5a, 1, Math.max(2, 3 * view.zoom), 0.4, w, h);
+  }
+
+  /** Esquina de arriba del edificio `type` para que su centro quede bajo el punto de pantalla (px, py). */
+  anchorAt(type, px, py) {
+    const { w, h } = logic.sizeOf(type);
+    const p = screenToWorld(px, py);
+    return { x: Math.round(p.x - w / 2), y: Math.round(p.y - h / 2) };
+  }
+
+  /** Centro en pantalla del rectángulo de un edificio (donde se apoya su dibujo). */
+  centerOnScreen(b) {
+    const r = logic.rectOf(b);
+    return rectCenter(r.x, r.y, r.w, r.h);
+  }
+
+  /** Capa de un edificio: la de su cuadro más cercano a la cámara, así las unidades que están detrás quedan tapadas. */
+  depthOfBuilding(b) {
+    const r = logic.rectOf(b);
+    return Math.max(depthOf(r.x, r.y), depthOf(r.x + r.w - 1, r.y), depthOf(r.x, r.y + r.h - 1), depthOf(r.x + r.w - 1, r.y + r.h - 1));
+  }
+
+  /** Y de pantalla del borde de arriba de un dibujo. */
+  spriteTop(img) {
+    return img.y - img.displayHeight * img.originY;
+  }
+
+  /**
+   * Edificio bajo un punto de pantalla: primero por lo que se ve (se puede tocar el tejado de uno alto: gana el
+   * más cercano a la cámara) y, si no, por los cuadros que ocupa.
+   */
+  buildingAtPoint(px, py) {
+    const state = store.get();
+    let best = null;
+    let bestDepth = -Infinity;
+    for (const b of state.buildings) {
+      const img = this.views.get(b.id)?.sprite;
+      if (!img?.visible || !img.width) continue;
+      const lx = (px - img.x) / img.scaleX + img.originX * img.width;
+      const ly = (py - img.y) / img.scaleY + img.originY * img.height;
+      if (lx < 0 || ly < 0 || lx >= img.width || ly >= img.height) continue;
+      if (this.textures.getPixelAlpha(Math.floor(lx), Math.floor(ly), img.texture.key) < 40) continue;
+      if (img.depth > bestDepth) {
+        best = b;
+        bestDepth = img.depth;
+      }
+    }
+    if (best) return best;
+    const cell = screenToTile(px, py);
+    return cell ? logic.buildingAt(state, cell.x, cell.y) : null;
   }
 
   /* ---------- acciones, avisos y sonido ---------- */
@@ -1735,9 +1823,9 @@ export default class BaseScene extends Phaser.Scene {
         out.push(`${logic.displayName(e.building, e.level)}: ¡mejora completada! Nivel ${e.level}`);
         finished = true;
         const done = store.get().buildings.find((x) => x.id === e.id);
-        if (done && isTileVisible(done.x, done.y, 0)) {
-          const c = tileCenter(done.x, done.y);
-          sparkBurst(this, c.x, c.y - tileSize() * 0.2, DEPTH.ghost - 5, 0x9fd8ff, 14);
+        if (done && this.views.get(done.id)?.sprite.visible) {
+          const c = this.centerOnScreen(done);
+          sparkBurst(this, c.x, c.y - 8 * view.zoom, DEPTH.ghost - 5, 0x9fd8ff, 14);
         }
       } else if (e.type === 'raid') {
         if (e.report.live && e.report.replay) this.startDefense(e.report); // llegó mientras jugabas: se ve la pelea
@@ -1776,8 +1864,15 @@ export default class BaseScene extends Phaser.Scene {
 
     for (const b of state.buildings) {
       if (this.views.has(b.id)) continue;
-      const depth = DEPTH.world + depthOf(b.x, b.y);
+      const depth = DEPTH.world + this.depthOfBuilding(b);
       const sprite = this.add.image(0, 0, spriteOf(b)).setDepth(depth);
+      const rect = logic.rectOf(b);
+      if (rect.w * rect.h <= 1) {
+        // Muros y puertas: puede haber cientos, así que solo llevan su dibujo (sin etiquetas ni barras).
+        this.views.set(b.id, { type: b.type, thin: true, objects: [sprite], sprite, depth });
+        if (!this.firstBuild) this.pop.set(b.id, this.time.now);
+        continue;
+      }
       const crate = this.add.image(0, 0, 'crate').setDepth(depth + 0.2).setVisible(false);
       const badge = this.add.circle(0, 0, 8, 0x1a2a1a, 0.9).setStrokeStyle(1, 0xffffff, 0.8).setDepth(depth + 0.3);
       const level = this.add
@@ -1796,7 +1891,7 @@ export default class BaseScene extends Phaser.Scene {
       if (!this.firstBuild) {
         // Un edificio nuevo «salta» al aparecer y levanta polvo.
         this.pop.set(b.id, this.time.now);
-        const c = tileCenter(b.x, b.y);
+        const c = this.centerOnScreen(b);
         this.dust(c.x, c.y);
       }
     }
@@ -1832,22 +1927,24 @@ export default class BaseScene extends Phaser.Scene {
     const zoom = view.zoom;
 
     for (const t of this.terrain) {
-      const visible = isTileVisible(t.x, t.y, 0);
+      const visible = isTileVisible(t.x * 2 + 0.5, t.y * 2 + 0.5, 0.5);
       t.img.setVisible(visible);
       if (!visible) continue;
-      const c = tileCenter(t.x, t.y);
-      t.img.setPosition(c.x, c.y).setScale(zoom * 1.015); // un poco más grande: evita rendijas entre casillas
+      const c = terrainCenter(t.x, t.y);
+      t.img.setPosition(c.x, c.y).setScale(zoom * 1.015); // un poco más grande: evita rendijas entre bloques
     }
 
     this.renderLandscape(state);
 
-    const occupied = new Set(state.buildings.map((b) => `${b.x},${b.y}`));
+    const occupied = occupiedBlocks(state.buildings);
     for (const d of this.decor) {
-      const visible = isTileVisible(d.x, d.y) && !occupied.has(`${d.x},${d.y}`);
+      const cx = d.x * 2 + 0.5;
+      const cy = d.y * 2 + 0.5;
+      const visible = isTileVisible(cx, cy) && !occupied.has(`${d.x},${d.y}`);
       d.img.setVisible(visible);
-      if (visible) this.placeOnTile(d.img, d.key, d.x, d.y, DECOR_GROW);
+      if (visible) this.placeOnTile(d.img, d.key, cx, cy, DECOR_GROW).setDepth(DEPTH.world + depthOf(cx, cy));
       if (d.shadow) {
-        if (visible) this.putShadow(d.shadow, d.x, d.y, d.kind);
+        if (visible) this.putShadow(d.shadow, cx, cy, d.kind);
         else d.shadow.setVisible(false);
       }
     }
@@ -1855,22 +1952,25 @@ export default class BaseScene extends Phaser.Scene {
     for (const b of state.buildings) {
       const v = this.views.get(b.id);
       if (!v) continue;
-      const visible = isTileVisible(b.x, b.y);
+      const rect = logic.rectOf(b);
+      const visible = isTileVisible(rect.x + (rect.w - 1) / 2, rect.y + (rect.h - 1) / 2, 0.8 + (rect.w + rect.h) / 8);
       for (const obj of v.objects) obj.setVisible(visible);
       if (!visible) continue;
 
       const stats = logic.statsOf(b.type, b.level);
       const upgrading = logic.isUpgrading(b);
-      const c = tileCenter(b.x, b.y);
+      const c = this.centerOnScreen(b);
 
-      // La capa depende de la casilla: se recalcula si el edificio se movió (y solo entonces, porque reordena).
-      const depth = DEPTH.world + depthOf(b.x, b.y);
+      // La capa depende de los cuadros que ocupa: se recalcula si el edificio se movió (y solo entonces, porque reordena).
+      const depth = DEPTH.world + this.depthOfBuilding(b);
       if (v.depth !== depth) {
         v.depth = depth;
         v.sprite.setDepth(depth);
-        v.crate.setDepth(depth + 0.2);
-        v.badge.setDepth(depth + 0.3);
-        for (const o of [v.level, v.sub, v.bar]) o.setDepth(depth + 0.4);
+        if (!v.thin) {
+          v.crate.setDepth(depth + 0.2);
+          v.badge.setDepth(depth + 0.3);
+          for (const o of [v.level, v.sub, v.bar]) o.setDepth(depth + 0.4);
+        }
       }
 
       // Animación de «pop» al construir: crece con un pequeño rebote.
@@ -1881,25 +1981,38 @@ export default class BaseScene extends Phaser.Scene {
         if (k >= 1) this.pop.delete(b.id);
         else grow *= 0.55 + 0.45 * (1 - (1 - k) ** 3) + 0.14 * Math.sin(k * Math.PI);
       }
-      this.placeOnTile(v.sprite, stats.sprite, b.x, b.y, grow);
-      this.putShadow(v.shadow, b.x, b.y, 'building', b.type === 'wall' || b.type === 'gate' ? 0.8 : 1, this.movingId === b.id ? 0.4 : 1);
+      const mid = logic.centerOf(b);
+      this.placeOnTile(v.sprite, stats.sprite, mid.x, mid.y, grow);
       if (b.damaged) v.sprite.setTint(DAMAGED_TINT); // dañado: oscuro y chamuscado
       else if (stats.tint) v.sprite.setTint(stats.tint); // los niveles 4 y 5 se ven dorados
       else v.sprite.clearTint();
       v.sprite.setAlpha(this.movingId === b.id ? 0.35 : upgrading ? 0.35 : 1);
-      this.placeOnTile(v.crate, 'crate', b.x, b.y, 0.8).setVisible(upgrading);
+      if (v.thin) continue; // un muro o una puerta no lleva nada más
+      this.putShadow(v.shadow, mid.x, mid.y, 'building', 1, this.movingId === b.id ? 0.4 : 1);
+      this.placeOnTile(v.crate, 'crate', mid.x, mid.y, 0.8).setVisible(upgrading);
       // Mientras se mejora, un martillo golpea sobre el edificio.
       const swing = Math.abs(Math.sin(this.time.now / 170));
-      v.hammer.setVisible(upgrading).setPosition(c.x + 10 * zoom, c.y - 74 * zoom - swing * 6 * zoom).setDisplaySize(24 * zoom, 24 * zoom).setAngle(-35 + swing * 55).setDepth(v.depth + 0.6);
+      const top = this.spriteTop(v.sprite);
+      v.hammer.setVisible(upgrading).setPosition(c.x + 10 * zoom, top + 26 * zoom - swing * 6 * zoom).setDisplaySize(24 * zoom, 24 * zoom).setAngle(-35 + swing * 55).setDepth(v.depth + 0.6);
 
-      // Nivel (en el vértice derecho del rombo), texto y barra bajo el edificio.
-      v.badge.setPosition(c.x + 40 * zoom, c.y + 2 * zoom).setScale(zoom);
+      // El Ayuntamiento lleva su nombre encima, en dorado: es lo primero que se ve de la base.
+      if (b.type === 'townhall') {
+        if (!v.title) {
+          v.title = this.add.text(0, 0, '', { fontFamily: FONT, fontSize: '15px', color: '#ffe08a', fontStyle: 'bold', stroke: '#2a1a05', strokeThickness: 4 }).setOrigin(0.5, 1);
+          v.objects.push(v.title);
+        }
+        v.title.setText(`${logic.displayName('townhall', b.level)} · nv. ${b.level}`).setPosition(c.x, top - 2 * zoom).setScale(zoom).setDepth(v.depth + 0.5).setVisible(true);
+      }
+
+      // Nivel (en el vértice derecho del terreno que ocupa), y el texto y la barra delante, bajo el vértice de abajo.
+      const { right: rightV, bottom: frontV } = rectCorners(rect.x, rect.y, rect.w, rect.h);
+      v.badge.setPosition(rightV.x - 6 * zoom, rightV.y).setScale(zoom);
       v.level.setPosition(v.badge.x, v.badge.y).setScale(zoom).setText(String(b.level));
-      v.sub.setPosition(c.x, c.y + 31 * zoom).setScale(zoom);
+      v.sub.setPosition(frontV.x, frontV.y + 14 * zoom).setScale(zoom);
 
-      const bw = 50 * zoom;
-      const bx = c.x - bw / 2;
-      const by = c.y + 17 * zoom;
+      const bw = Math.min(70, 30 + rect.w * 6) * zoom;
+      const bx = frontV.x - bw / 2;
+      const by = frontV.y + 2 * zoom;
       const bh = 5 * zoom;
       v.bar.clear();
       v.bar.fillStyle(0x000000, 0.5).fillRect(bx, by, bw, bh);
@@ -1929,16 +2042,34 @@ export default class BaseScene extends Phaser.Scene {
 
     const selected = this.selectedId !== null && state.buildings.find((b) => b.id === this.selectedId);
     if (selected) {
-      this.selector.clear().setVisible(isTileVisible(selected.x, selected.y, 0));
-      strokeCell(this.selector, selected.x, selected.y, 0xffffff, 1, Math.max(2, 3 * zoom), 0.18);
+      const sel = logic.rectOf(selected);
+      this.selector.clear().setVisible(true);
+      strokeCell(this.selector, sel.x, sel.y, 0xffffff, 1, Math.max(2, 3 * zoom), 0.18, sel.w, sel.h);
     } else {
       this.selector.setVisible(false);
+    }
+  }
+
+  /** Un halo dorado late bajo el Ayuntamiento para que destaque entre el resto de edificios. */
+  pulseHall(timeMs) {
+    const g = this.hallGlow;
+    g.clear();
+    const hall = logic.townHall(store.get());
+    const v = hall && this.views.get(hall.id);
+    if (!hall || !v?.sprite.visible) return;
+    const r = logic.rectOf(hall);
+    const k = 0.5 + 0.5 * Math.sin(timeMs / 520);
+    const zoom = view.zoom;
+    for (const [grow, alpha, width] of [[1.6, 0.16 + 0.12 * k, 9], [0.7, 0.3 + 0.25 * k, 4]]) {
+      strokeCell(g, r.x - grow, r.y - grow, 0xffd24d, alpha, width * zoom, 0, r.w + 2 * grow, r.h + 2 * grow);
     }
   }
 
   /* ---------- bucle: teclado y cámara ---------- */
 
   update(_time, delta) {
+    if (this.turnKeys && Phaser.Input.Keyboard.JustDown(this.turnKeys.Q)) this.turnView(-1);
+    if (this.turnKeys && Phaser.Input.Keyboard.JustDown(this.turnKeys.E)) this.turnView(1);
     let dx = 0;
     let dy = 0;
     const k = this.cursors;
@@ -1972,6 +2103,7 @@ export default class BaseScene extends Phaser.Scene {
       }
     }
 
+    this.pulseHall(this.time.now);
     this.animateWorkers(Math.min(delta, 250) / 1000, this.time.now);
     this.animateArmy(this.time.now, Math.min(delta, 250) / 1000);
     stepClouds(this.clouds, Math.min(delta, 250) / 1000);

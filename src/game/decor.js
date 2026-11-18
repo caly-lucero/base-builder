@@ -1,7 +1,7 @@
 // Decoración del mapa (árboles, rocas, arbustos). Es puramente visual y NO se guarda:
 // sale siempre igual porque se genera con una semilla fija. Los edificios la tapan
 // al construirse y reaparece si se demuelen.
-import { GRID } from '../data/config.js';
+import { TERRAIN } from '../data/config.js';
 
 export const DECOR_SEED = 20261115;
 
@@ -24,16 +24,16 @@ export function mulberry32(seed) {
   };
 }
 
-/** Devuelve [{ x, y, key }]. Hay más decoración hacia los bordes y el centro queda despejado. */
+/** Devuelve [{ x, y, key }] (x, y = bloque de terreno de 2×2 cuadros). Hay más decoración hacia los bordes y el centro queda despejado. */
 export function generateDecor(seed = DECOR_SEED) {
   const rand = mulberry32(seed);
-  const cx = (GRID.cols - 1) / 2;
-  const cy = (GRID.rows - 1) / 2;
+  const cx = (TERRAIN.cols - 1) / 2;
+  const cy = (TERRAIN.rows - 1) / 2;
   const maxDist = Math.hypot(cx, cy);
   const items = [];
 
-  for (let y = 0; y < GRID.rows; y++) {
-    for (let x = 0; x < GRID.cols; x++) {
+  for (let y = 0; y < TERRAIN.rows; y++) {
+    for (let x = 0; x < TERRAIN.cols; x++) {
       const d = Math.hypot(x - cx, y - cy) / maxDist; // 0 en el centro, 1 en las esquinas
       const chance = 0.05 + 0.5 * d * d;
       const roll = rand();

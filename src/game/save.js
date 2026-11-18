@@ -8,21 +8,22 @@ import { ACHIEVEMENTS, ARMY_UNITS, BUILDINGS, ECONOMY, GRID, QUESTS, RESEARCH_KE
 import { HERO_MAX_LEVEL, SQUAD_SIZE, isHeroKey } from '../data/heroes.js';
 import {
   MAX_BUILDINGS,
-  TOWN_HALL_CELL,
   costOf,
   createBuilding,
   emptyAchievements,
   emptyArmy,
   emptyResearch,
   findFreeCell,
+  findFreeSpot,
   investedCost,
   isBuildingType,
+  sizeOf,
   supplyCap,
   supplyUsed,
 } from './logic.js';
 
-export const SAVE_VERSION = 10;
-export const MAX_SAVE_BYTES = 200_000;
+export const SAVE_VERSION = 11;
+export const MAX_SAVE_BYTES = 900_000; // con muros de a un cuadro una base grande llega a miles de edificios
 
 const KEY = 'basebuilder.save';
 const BACKUP_KEY = 'basebuilder.save.bak';
@@ -133,7 +134,53 @@ function migrate(data, version) {
   // v9 → v10: los edificios militares pasaron a ser únicos (uno de cada) y se entrena por lotes.
   if (version < 10) d = migrateV9toV10(d);
 
+  // v10 → v11: el mapa pasó de 24×24 casillas a 48×48 cuadros y cada edificio ocupa varios.
+  if (version < 11) d = migrateV10toV11(d);
+
   return d;
+}
+
+/**
+ * v10 → v11: cada casilla vieja pasa a ser un bloque de 2×2 cuadros. Los edificios conservan su centro (los
+ * grandes se acomodan al sitio libre más cercano) y cada muro o puerta se convierte en 4 piezas (2×2) para
+ * que las murallas sigan cerradas. Si un muro cae donde ahora hay un edificio grande, se pierde esa pieza.
+ */
+function migrateV10toV11(d) {
+  if (!Array.isArray(d.buildings) || !Number.isInteger(d.nextId)) return d;
+  const ok = d.buildings.every((b) => isPlainObject(b) && isBuildingType(b.type) && Number.isInteger(b.x) && Number.isInteger(b.y));
+  if (!ok) return d; // la validación lo rechazará
+
+  const area = (b) => sizeOf(b.type).w * sizeOf(b.type).h;
+  const thin = (b) => area(b) === 1; // muros y puertas
+  const order = [...d.buildings].sort((a, b) => Number(thin(a)) - Number(thin(b)) || area(b) - area(a) || a.id - b.id);
+
+  const placed = { buildings: [] };
+  let nextId = d.nextId;
+  for (const b of order) {
+    const { w, h } = sizeOf(b.type);
+    if (thin(b)) {
+      const cells = [[0, 0], [1, 0], [0, 1], [1, 1]];
+      cells.forEach(([dx, dy], i) => {
+        const x = b.x * 2 + dx;
+        const y = b.y * 2 + dy;
+        if (x >= GRID.cols || y >= GRID.rows || placed.buildings.some((o) => o.x === x && o.y === y)) return;
+        const covered = placed.buildings.some((o) => {
+          const r = sizeOf(o.type);
+          return x >= o.x && x < o.x + r.w && y >= o.y && y < o.y + r.h;
+        });
+        if (!covered) placed.buildings.push({ ...b, id: i === 0 ? b.id : nextId++, x, y });
+      });
+      continue;
+    }
+    const ideal = {
+      x: Math.min(GRID.cols - w, Math.max(0, Math.round(b.x * 2 + 0.5 - (w - 1) / 2))),
+      y: Math.min(GRID.rows - h, Math.max(0, Math.round(b.y * 2 + 0.5 - (h - 1) / 2))),
+    };
+    const spot = findFreeSpot(placed, b.type, ideal.x, ideal.y);
+    if (spot) placed.buildings.push({ ...b, x: spot.x, y: spot.y });
+  }
+  placed.buildings.sort((a, b) => a.id - b.id);
+  return { ...d, nextId, buildings: placed.buildings };
 }
 
 /**
@@ -213,6 +260,8 @@ function migrateV7toV8(d) {
 // Las constantes son las de aquella época a propósito: describen cómo eran las partidas v2,
 // no cómo es el juego hoy.
 const V2_TO_V3_SHIFT = 6; // (24 − 12) / 2: la base antigua queda centrada en el mapa nuevo
+const V3_GRID = 24; // el mapa de aquella época: 24×24 casillas
+const V3_HALL_CELL = { x: 11, y: 11 }; // y su Ayuntamiento, en el centro
 const V3_WOOD_GIFT = 60;
 
 function migrateV2toV3(data) {
@@ -228,7 +277,7 @@ function migrateV2toV3(data) {
 
   // El Ayuntamiento nace en el centro (o en la casilla libre más cercana) y con el nivel
   // mínimo que permita que lo que el jugador ya tenía siga siendo legal.
-  const cell = findFreeCell(new Set(valid.map((b) => `${b.x},${b.y}`)), TOWN_HALL_CELL.x, TOWN_HALL_CELL.y);
+  const cell = findFreeCell(new Set(valid.map((b) => `${b.x},${b.y}`)), V3_HALL_CELL.x, V3_HALL_CELL.y, V3_GRID, V3_GRID);
   if (!cell) return { ...d, buildings };
 
   const counts = {};
@@ -334,7 +383,8 @@ export function validateState(d) {
     if (!isPlainObject(b)) bad('Edificio inválido');
     if (!isBuildingType(b.type)) bad('Tipo de edificio desconocido');
     if (!isInt(b.id, 1, 10_000_000) || b.id >= d.nextId) bad('Id de edificio inválido');
-    if (!isInt(b.x, 0, GRID.cols - 1) || !isInt(b.y, 0, GRID.rows - 1)) bad('Posición inválida');
+    const size = BUILDINGS[b.type].size;
+    if (!isInt(b.x, 0, GRID.cols - size.w) || !isInt(b.y, 0, GRID.rows - size.h)) bad('Posición inválida');
 
     const levels = BUILDINGS[b.type].levels;
     if (!isInt(b.level, 1, levels.length)) bad('Nivel inválido');
@@ -366,11 +416,15 @@ export function validateState(d) {
 
     if (b.type === 'townhall') townHalls++;
 
-    const cell = b.x + ',' + b.y;
     if (ids.has(b.id)) bad('Id repetido');
-    if (cells.has(cell)) bad('Dos edificios en la misma casilla');
     ids.add(b.id);
-    cells.add(cell);
+    for (let cy = b.y; cy < b.y + size.h; cy++) {
+      for (let cx = b.x; cx < b.x + size.w; cx++) {
+        const cell = cx + ',' + cy;
+        if (cells.has(cell)) bad('Dos edificios en la misma casilla');
+        cells.add(cell);
+      }
+    }
     return {
       id: b.id,
       type: b.type,
