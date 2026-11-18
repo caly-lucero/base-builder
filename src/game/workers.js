@@ -23,6 +23,25 @@ export function plannedWorkers(state) {
   return out;
 }
 
+export const MAX_VISIBLE_WORKERS = 3;
+
+/**
+ * Solo unos pocos aldeanos se dibujan, como adorno (uno por edificio llenaba el mapa de gente yendo y viniendo).
+ * Se eligen los productores más antiguos, alternando oro y madera, así no cambian al construir más.
+ */
+export function symbolicWorkers(planned, max = MAX_VISIBLE_WORKERS) {
+  const byId = (a, b) => a.buildingId - b.buildingId;
+  const queues = { gold: planned.filter((p) => p.resource === 'gold').sort(byId), wood: planned.filter((p) => p.resource === 'wood').sort(byId) };
+  const out = [];
+  for (let round = 0; out.length < max && (queues.gold.length || queues.wood.length); round++) {
+    for (const r of ['gold', 'wood']) {
+      const next = queues[r].shift();
+      if (next && out.length < max) out.push(next);
+    }
+  }
+  return out;
+}
+
 /** Un aldeano nuevo. Cada uno arranca desfasado según su edificio para que no marchen todos a la vez. */
 export function createWorker(buildingId) {
   return { phase: 'out', t: (buildingId * 0.37) % 1, wait: 0 };

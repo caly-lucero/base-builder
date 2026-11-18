@@ -34,7 +34,7 @@ export function fitLayout(screenW, screenH) {
 export const CAMERA = {
   minZoom: 0.25, // con 0.25 casi todo el mapa (un rombo de 24×24 casillas) cabe en la ventana
   maxZoom: 1.6,
-  startZoom: 0.72,
+  startZoom: 1.0, // zoom al abrir la base (más cerca: en el celular se ve grande y se toca bien)
   holdToMoveMs: 380, // con el dedo, tiempo que hay que mantener pulsado un edificio antes de poder arrastrarlo
   dragThreshold: 8, // píxeles que hay que mover antes de que un toque sea un arrastre
   keyPanSpeed: 420, // píxeles por segundo con las flechas
@@ -94,12 +94,13 @@ const LIMITS = {
   tower: [2, 4, 6, 8, 10, 12, 14, 16, 18, 20],
   wall: [20, 50, 100, 150, 220, 260, 300, 340, 380, 420],
   gate: [4, 10, 20, 30, 45, 55, 65, 75, 85, 95],
-  barracks: [0, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+  // Edificios militares: solo UNO de cada clase (su nivel y su lote de entrenamiento crecen al mejorarlo).
+  barracks: [0, 1, 1, 1, 1, 1, 1, 1, 1, 1],
   altar: [0, 1, 1, 1, 1, 1, 1, 1, 1, 1],
-  forge: [0, 0, 1, 1, 1, 2, 2, 2, 3, 3],
-  archery: [0, 0, 0, 1, 2, 3, 4, 5, 6, 7],
-  atelier: [0, 0, 0, 0, 0, 1, 2, 3, 4, 5],
-  stable: [0, 0, 0, 0, 0, 0, 0, 1, 2, 3],
+  forge: [0, 0, 1, 1, 1, 1, 1, 1, 1, 1],
+  archery: [0, 0, 0, 1, 1, 1, 1, 1, 1, 1],
+  atelier: [0, 0, 0, 0, 0, 1, 1, 1, 1, 1],
+  stable: [0, 0, 0, 0, 0, 0, 0, 1, 1, 1],
   siege: [0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
 };
 const limitsAt = (level) => Object.fromEntries(Object.entries(LIMITS).map(([type, list]) => [type, list[level - 1]]));
@@ -356,6 +357,15 @@ export const UNITS = {
     siege: { vsUnits: 0.1 },
   },
 };
+
+// Entrenamiento por lotes: un edificio entrena varias unidades iguales a la vez. Cuántas, según su nivel;
+// el lote entero tarda un poco más que una sola unidad (`extraPerUnit` por cada unidad de más).
+export const BATCH = { base: 3, perLevel: 2, extraPerUnit: 0.1 };
+export const batchLimit = (level) => BATCH.base + BATCH.perLevel * level;
+export const batchTimeFactor = (qty) => 1 + BATCH.extraPerUnit * (Math.max(1, qty) - 1);
+
+// Los edificios militares únicos (uno de cada): sirven para unificar partidas antiguas con varios.
+export const UNIQUE_BUILDINGS = ['barracks', 'archery', 'atelier', 'stable', 'siege', 'forge', 'altar'];
 
 /** Unidades del ejército (los héroes van aparte: ver heroes.js). */
 export const ARMY_UNITS = Object.keys(UNITS);

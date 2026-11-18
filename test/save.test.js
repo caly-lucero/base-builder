@@ -220,7 +220,45 @@ test('el ejército, los héroes, las investigaciones y un entrenamiento en curso
   assert.deepEqual(r.state.research, { weapons: 2, armor: 0, fortify: 3 });
   assert.deepEqual(r.state.campaign, { cleared: 4, stars: { 1: 3, 2: 2, 3: 1, 4: 1 } }, 'conserva las estrellas');
   assert.deepEqual([r.state.achievements.builder, r.state.achievements.conquer], [2, 1], 'conserva los logros reclamados');
-  assert.deepEqual(r.state.buildings.find((b) => b.type === 'barracks').training, { unit: 'soldier', endsAt: T0 + 15_000 });
+  assert.deepEqual(r.state.buildings.find((b) => b.type === 'barracks').training, { unit: 'soldier', endsAt: T0 + 15_000, qty: 1 });
+});
+
+test('un lote en entrenamiento se guarda con su cantidad; una cantidad imposible se rechaza', () => {
+  const s = sampleState();
+  s.gold = 500;
+  s.wood = 500;
+  const barracks = place(s, 'barracks', 8, 8, T0).building;
+  s.gold = 500;
+  s.wood = 500;
+  assert.equal(startTraining(s, barracks.id, 'soldier', T0, 3).ok, true);
+  const r = parseSave(serialize(s));
+  assert.equal(r.ok, true, r.error);
+  assert.deepEqual(r.state.buildings.find((b) => b.type === 'barracks').training.qty, 3);
+
+  const bad = JSON.parse(serialize(s));
+  bad.data.buildings.find((b) => b.type === 'barracks').training.qty = 0;
+  bad.sum = checksum(bad.data);
+  assert.equal(parseSave(JSON.stringify(bad)).ok, false);
+});
+
+test('migración v9 → v10: varios cuarteles se unifican en el mejor y se devuelve lo invertido', () => {
+  const s = sampleState();
+  townHall(s).level = 3;
+  s.gold = 100;
+  s.wood = 100;
+  const data = JSON.parse(JSON.stringify(s));
+  const b = (id, type, x, y, level, extra = {}) => ({ id, type, level, upgradeEndsAt: null, training: null, damaged: false, x, y, stored: 0, lastTick: T0, ...extra });
+  data.nextId = 20;
+  data.buildings.push(b(10, 'barracks', 9, 9, 1), b(11, 'barracks', 10, 9, 3), b(12, 'barracks', 11, 9, 2, { training: { unit: 'soldier', endsAt: T0 + 9000 } }));
+  const r = parseSave(JSON.stringify({ v: 9, sum: checksum(data), data }));
+  assert.equal(r.ok, true, r.error);
+  const barracks = r.state.buildings.filter((x) => x.type === 'barracks');
+  assert.equal(barracks.length, 1, 'solo queda uno');
+  assert.equal(barracks[0].id, 11, 'el de más nivel');
+  assert.ok(r.state.gold > 100 && r.state.wood > 100, 'se devolvió lo invertido');
+  assert.match(r.notice, /un edificio militar de cada clase/);
+  // Un guardado ya migrado no vuelve a avisar.
+  assert.equal(parseSave(serialize(r.state)).notice, undefined);
 });
 
 test('los edificios dañados y el calendario de ataques se guardan y se recuperan', () => {
@@ -436,7 +474,7 @@ test('migración v7 → v8: granjas pasan a casas, el héroe pasa a ser el palad
   assert.deepEqual(types, ['townhall', 'house', 'barracks', 'altar', 'house']);
   assert.equal(r.state.buildings[1].level, 2, 'la casa conserva el nivel de la granja');
   assert.equal(r.state.buildings[4].damaged, true, 'y su daño');
-  assert.deepEqual(r.state.buildings[3].training, { unit: 'paladin', endsAt: T0 + 20_000 }, 'el héroe en camino pasa a ser el paladín');
+  assert.deepEqual(r.state.buildings[3].training, { unit: 'paladin', endsAt: T0 + 20_000, qty: 1 }, 'el héroe en camino pasa a ser el paladín');
   assert.deepEqual(r.state.heroes, { paladin: { level: 4, xp: 55 } });
   assert.deepEqual(r.state.squad, ['paladin']);
   assert.deepEqual(r.state.research, { weapons: 0, armor: 0, fortify: 0 });

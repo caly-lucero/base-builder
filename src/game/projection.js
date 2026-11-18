@@ -87,8 +87,8 @@ export function centerOnTile(x, y) {
 }
 
 /** Vista inicial: zoom por defecto y centrada en `cell` (por defecto, el Ayuntamiento de una partida nueva). */
-export function resetView(cell = TOWN_HALL_CELL) {
-  view.zoom = CAMERA.startZoom;
+export function resetView(cell = TOWN_HALL_CELL, zoom = CAMERA.startZoom) {
+  view.zoom = zoom;
   centerOnTile(cell.x, cell.y);
 }
 

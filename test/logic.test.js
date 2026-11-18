@@ -1,11 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { BUILDINGS, ECONOMY, MAX_LEVEL, RESEARCH, UNITS, researchStep } from '../src/data/config.js';
+import { BUILDINGS, ECONOMY, MAX_LEVEL, RESEARCH, UNIQUE_BUILDINGS, UNITS, batchLimit, batchTimeFactor, researchStep } from '../src/data/config.js';
 import { HEROES } from '../src/data/heroes.js';
 import {
   TOWN_HALL_CELL,
   armyCount,
+  batchSizeOf,
   busyBuilders,
+  maxTrainable,
   buildingAt,
   collect,
   collectAll,
@@ -490,9 +492,72 @@ test('entrenar cobra, reserva población y la unidad llega al terminar', () => {
   tickAll(s, T0 + UNITS.soldier.trainSec * 1000, events);
   assert.equal(s.army.soldier, 1);
   assert.equal(barracks.training, null);
-  assert.deepEqual(events, [{ type: 'trained', id: barracks.id, unit: 'soldier' }]);
+  assert.deepEqual(events, [{ type: 'trained', id: barracks.id, unit: 'soldier', qty: 1 }]);
   assert.equal(supplyUsed(s), UNITS.soldier.supply, 'ahora cuenta como ejército, no se cobra dos veces');
   assert.equal(armyCount(s), 1);
+});
+
+test('un lote entrena varias unidades a la vez: cobra, reserva población y llegan juntas', () => {
+  const s = fresh(2000, 2000, 2);
+  const barracks = place(s, 'barracks', 0, 0, T0).building;
+  const gold = s.gold;
+  const wood = s.wood;
+
+  const r = startTraining(s, barracks.id, 'soldier', T0, 4);
+  assert.equal(r.ok, true);
+  assert.equal(s.gold, gold - UNITS.soldier.cost.gold * 4);
+  assert.equal(s.wood, wood - UNITS.soldier.cost.wood * 4);
+  assert.equal(supplyUsed(s), UNITS.soldier.supply * 4);
+  const total = UNITS.soldier.trainSec * batchTimeFactor(4) * 1000;
+  assert.equal(r.endsAt, T0 + Math.round(total), 'el lote tarda un poco más que una sola unidad');
+  assert.ok(total > UNITS.soldier.trainSec * 1000 && total < UNITS.soldier.trainSec * 4 * 1000, 'pero mucho menos que de a una');
+
+  const events = [];
+  tickAll(s, T0 + Math.round(total) - 1000, events);
+  assert.equal(s.army.soldier, 0);
+  tickAll(s, T0 + Math.round(total), events);
+  assert.equal(s.army.soldier, 4);
+  assert.deepEqual(events, [{ type: 'trained', id: barracks.id, unit: 'soldier', qty: 4 }]);
+  assert.equal(supplyUsed(s), UNITS.soldier.supply * 4);
+});
+
+test('el tamaño del lote depende del nivel del edificio, de la población y de los recursos', () => {
+  const s = fresh(5000, 5000, 2);
+  for (let i = 0; i < 3; i++) place(s, 'house', i, 3, T0);
+  const b = place(s, 'barracks', 0, 0, T0).building;
+  assert.equal(batchSizeOf(b), batchLimit(1));
+  const before = s.gold;
+  assert.equal(startTraining(s, b.id, 'soldier', T0, batchLimit(1) + 1).ok, false, 'más que el tope del nivel');
+  assert.equal(startTraining(s, b.id, 'soldier', T0, 0).ok, false);
+  assert.equal(startTraining(s, b.id, 'soldier', T0, 1.5).ok, false);
+  assert.equal(s.gold, before, 'una orden rechazada no cobra');
+
+  b.level = 3;
+  assert.ok(batchSizeOf(b) > batchLimit(1), 'un edificio de más nivel entrena lotes más grandes');
+  assert.equal(maxTrainable(s, b, 'soldier'), batchSizeOf(b));
+  s.gold = UNITS.soldier.cost.gold * 2 + 5;
+  assert.equal(maxTrainable(s, b, 'soldier'), 2, 'el dinero limita el lote');
+  s.gold = 5000;
+  assert.equal(startTraining(s, b.id, 'soldier', T0, batchSizeOf(b)).ok, true);
+  assert.equal(supplyUsed(s), UNITS.soldier.supply * batchSizeOf(b));
+});
+
+test('un lote que no cabe en la población no se acepta', () => {
+  const s = fresh(5000, 5000, 2);
+  const b = place(s, 'barracks', 0, 0, T0).building;
+  s.army.soldier = supplyCap(s) - 2; // quedan 2 de población
+  assert.equal(startTraining(s, b.id, 'soldier', T0, 3).reason, 'Población al máximo: construye casas');
+  assert.equal(startTraining(s, b.id, 'soldier', T0, 2).ok, true);
+});
+
+test('los edificios militares son únicos: solo uno de cada clase', () => {
+  const s = fresh(50_000, 50_000, 10);
+  for (const type of UNIQUE_BUILDINGS) {
+    assert.equal(place(s, type, UNIQUE_BUILDINGS.indexOf(type), 0, T0).ok, true, `el primero de ${type}`);
+    const again = place(s, type, UNIQUE_BUILDINGS.indexOf(type), 1, T0);
+    assert.equal(again.ok, false, `un segundo ${type}`);
+    assert.match(again.reason, /Solo puedes tener un/);
+  }
 });
 
 test('un cuartel entrena de a uno: no acepta otra orden hasta terminar', () => {
@@ -572,7 +637,7 @@ test('la Herrería investiga mejoras: cuestan, tardan, suben un nivel y no pasan
   const events = [];
   tickAll(s, T0 + step.sec * 1000, events);
   assert.equal(s.research.weapons, 1);
-  assert.deepEqual(events, [{ type: 'trained', id: forge.id, unit: 'weapons' }]);
+  assert.deepEqual(events, [{ type: 'trained', id: forge.id, unit: 'weapons', qty: 1 }]);
   assert.equal(researchBonus(s, 'weapons'), RESEARCH.weapons.perLevel);
 
   // Con la herrería en nivel 1 no se pasa del nivel 1; al mejorarla, sí.

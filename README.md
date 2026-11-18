@@ -17,7 +17,9 @@ Cada vez que se sube algo a la rama `main`, GitHub corre las pruebas, compila y 
   - **qué edificios militares se desbloquean**: Cuartel (nivel 2), Arquería (4), Atelier (6), Caballeriza (8) y Taller de asedio (10);
   - el **nivel máximo de tus héroes: el doble** (hasta 20).
 - **Casas** (antes «granjas»): dan población. El Ayuntamiento da algo de población propia; cada unidad y cada héroe ocupan la suya desde que empiezan a entrenarse. Sin espacio libre no se entrena, y no se demuele una casa que sostiene al ejército.
-- **Cinco edificios militares, cada uno con su unidad.** Su **nivel es el de sus unidades**: a más nivel, más vida y daño (+15 % por nivel) y, desde el nivel 4, entrena más rápido.
+- **Cinco edificios militares, cada uno con su unidad.** Solo puedes tener **uno de cada clase** (también Herrería y Altar). Su **nivel es el de sus unidades**: a más nivel, más vida y daño (+15 % por nivel) y, desde el nivel 4, entrena más rápido.
+- **Entrenar por lotes**: en un edificio militar eliges la cantidad (− / + / **Máx**) y entrenas varias unidades iguales **a la vez**. El tope del lote crece con el nivel del edificio (3 + 2 por nivel: 5 en el nivel 1, 23 en el 10), el lote entero tarda solo un 10 % más por cada unidad extra, y también lo limitan la población libre y tus recursos.
+- **Mi ejército**: toca la **población** del HUD (o *Ver mi ejército* al atacar) para ver cuántas tropas tienes de cada tipo, su nivel y fuerza, las que están en camino y tus héroes. En la base solo se dibujan unas pocas figuras de muestra.
   | Edificio | Unidad | Papel |
   |---|---|---|
   | Cuartel | Soldado | barato y resistente; vence a los caballeros |
@@ -48,7 +50,7 @@ Cada vez que se sube algo a la rama `main`, GitHub corre las pruebas, compila y 
 - **Mover edificios** arrastrándolos (gratis; con el dedo hay que mantenerlos pulsados un momento, así arrastrar sobre ellos desplaza el mapa). **Demoler** devuelve el 50 % de lo invertido.
 - La producción, las mejoras, el entrenamiento y las investigaciones **siguen mientras no juegas** (máximo 8 h de producción); al volver, el juego avisa qué terminó.
 - **Animación de verdad**: cada personaje tiene cuadros de **caminar, atacar, quieto y caído**, mirando en las cuatro diagonales. En la base, tus tropas y héroes **pasean** alrededor de su puesto; en la batalla caminan, **golpean con su arma** hacia el objetivo y caen al morir. Mientras un edificio se mejora, un **martillo** lo golpea y levanta polvo; la fragua echa brasas, el altar brilla, la mina destella y el aserradero suelta astillas.
-- **Vida**: un **aldeano** por cada mina y aserradero camina entre el Ayuntamiento y su edificio llevando la carga (es adorno). Al recolectar suben números flotantes y chispas; al construir, el edificio «salta» con una nube de polvo; los árboles se mecen con el viento.
+- **Vida**: unos pocos **aldeanos** (3 como máximo, alternando oro y madera) caminan entre el Ayuntamiento y una mina o aserradero llevando la carga (es adorno). Al recolectar suben números flotantes y chispas; al construir, el edificio «salta» con una nube de polvo; los árboles se mecen con el viento.
 - **Arte** (concepto del **Reino**: piedra clara, tejados azul pizarra y detalles dorados; la Horda enemiga va en rojo oscuro): edificios de 3 etapas compuestos con piezas de los kits 3D de Kenney (CC0), personajes de Mini Characters con **armas, escudos, capas, sombreros y aureolas modelados para el proyecto**, todo dibujado con la herramienta `tools/iso`. Hay 15 efectos de sonido y un botón de sonido en el Menú.
 - Guardado automático, exportar/importar partida y funcionamiento sin conexión.
 
@@ -58,7 +60,8 @@ Cada vez que se sube algo a la rama `main`, GitHub corre las pruebas, compila y 
 | Construir | botón **Construir** → elegir edificio → tocar una casilla | igual |
 | Muros | elegir **Muro** en la hoja y arrastrar | igual |
 | Seleccionar / recolectar | tocar un edificio (abre su panel) | igual |
-| Entrenar | elegir un cuartel o el altar y tocar la tarjeta de la unidad | igual |
+| Entrenar | elegir un cuartel (o el altar), ajustar la cantidad y tocar la tarjeta de la unidad | igual |
+| Ver mi ejército | tocar la población (arriba) | igual |
 | Atacar | botón ⚔ y «Atacar» | igual |
 | Logros y Héroes | botones de la barra de abajo | igual |
 | Menú (sonido, exportar, importar, nueva partida) | botón **Menú** | igual |
@@ -105,7 +108,7 @@ En Windows PowerShell, si `npm` da error de «ejecución de scripts deshabilitad
 - `src/game/raids.js` — ataques enemigos a tu base: fuerza y generación de oleadas, calendario, daño, robo y reparación del informe.
 - `src/game/campaign.js` — aplica el resultado de una batalla (bajas, botín, campaña, experiencia del héroe).
 - `src/scenes/BattleScene.js` — escena de la batalla (tuya o la defensa de tu base): dibujo, selección, órdenes, habilidades y resultado.
-- `src/scenes/heroPanel.js`, `src/scenes/achievementsPanel.js` — las ventanas de héroes y de logros.
+- `src/scenes/heroPanel.js`, `src/scenes/achievementsPanel.js`, `src/scenes/armyPanel.js` — las ventanas de héroes, de logros y del ejército.
 - `src/scenes/ui.js` — el kit de interfaz: paleta, iconos dibujados por código, paneles y botones redondeados, ventanas.
 - `src/game/menu.js` — puente entre el menú del juego y los botones de la página.
 - `src/scenes/look.js` — aspecto: texturas generadas por código, sombras, viñeta, nubes, humo y brillo de la interfaz.
@@ -138,14 +141,14 @@ Modelos 3D y sonido de [Kenney](https://kenney.nl) (Castle Kit, Fantasy Town Kit
 - Las pruebas de PWA se hicieron a mano (instalación, sin conexión); falta pasar **Lighthouse**.
 - El pellizco con dos dedos, el recuadro de selección y los botones de habilidad **no se han probado en un móvil real** (solo con ratón y teclado).
 - Las mejoras usan la hora del sistema: adelantar el reloj las termina antes. El juego limita el daño (una mejora nunca puede quedar más lejos que su duración total), pero no puede impedirlo del todo; es aceptable sin ranking.
-- Si cambia el formato del guardado, subir `SAVE_VERSION` y añadir el paso en `migrate()` de `save.js`. Ejemplos: v1→v2 (niveles), v2→v3 (mapa 12×12 → 24×24, madera y Ayuntamiento), v3→v4 (misiones), v4→v5 (ejército, héroe y entrenamiento), v5→v6 (campaña y experiencia), v6→v7 (ataques enemigos y edificios dañados) y v7→v8 (casas, nuevas unidades, 5 héroes con escuadra, herrería y logros). Una base avanzada que se migra tendrá varias misiones ya cumplidas y podrá reclamarlas.
+- Si cambia el formato del guardado, subir `SAVE_VERSION` y añadir el paso en `migrate()` de `save.js`. Ejemplos: v1→v2 (niveles), v2→v3 (mapa 12×12 → 24×24, madera y Ayuntamiento), v3→v4 (misiones), v4→v5 (ejército, héroe y entrenamiento), v5→v6 (campaña y experiencia), v6→v7 (ataques enemigos y edificios dañados) v7→v8 (casas, nuevas unidades, 5 héroes con escuadra, herrería y logros) y v9→v10 (edificios militares únicos y entrenamiento por lotes). Una base avanzada que se migra tendrá varias misiones ya cumplidas y podrá reclamarlas.
 - Los sonidos son `.ogg`: algunos navegadores antiguos de Apple no los reproducen (el juego funciona igual, sin sonido).
 - El lienzo es de 432 px de ancho (el alto se adapta a la pantalla al arrancar) y se escala; en pantallas grandes los dibujos se ven algo suavizados. Si giras el celular hay que recargar.
 - Los niveles 4 a 10 reutilizan el dibujo de la etapa 3 con un tinte; no tienen arte propio.
 - El arte nuevo se probó en un navegador de escritorio con tamaño de móvil; falta probarlo en un móvil real.
 - Los personajes miran en 4 diagonales (2 dibujadas y 2 volteadas): no giran con suavidad. Las máquinas de asedio solo se balancean al moverse y atacar.
 - Los muros son bloques sueltos que no se unen entre sí con piezas de esquina.
-- Los edificios entrenan de a una unidad por vez; no hay cola de entrenamiento. Solo cuenta el edificio de mayor nivel de cada tipo para el nivel de las unidades; tener varios solo ayuda a entrenar más a la vez.
+- Cada edificio entrena un solo lote por vez (de unidades iguales); no hay cola. Las partidas antiguas con varios cuarteles (u otros militares) se unifican al abrirlas: se queda el de más nivel y se devuelve todo lo invertido en los demás (migración v9 → v10).
 - Una batalla en curso no se guarda: si cierras la página, no cuenta (tus tropas siguen intactas).
 - Las unidades no chocan entre sí (se superponen).
 - Las oleadas usan la hora del sistema y no se pueden aplazar; el equilibrio (fuerza, robo, costo de reparar y de las mejoras de nivel alto) es una primera aproximación. Un ejército de nivel alto aplasta las primeras campañas.

@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createNewState, place, startUpgrade, townHall } from '../src/game/logic.js';
-import { REST_TIME, WORKER_SPEED, WORK_TIME, createWorker, plannedWorkers, stepWorker, workerPosition } from '../src/game/workers.js';
+import { MAX_VISIBLE_WORKERS, REST_TIME, WORKER_SPEED, WORK_TIME, createWorker, plannedWorkers, stepWorker, symbolicWorkers, workerPosition } from '../src/game/workers.js';
 
 const T0 = 1_700_000_000_000;
 const HOME = { x: 0, y: 0 };
@@ -17,6 +17,21 @@ function fresh() {
 }
 
 const w0 = () => ({ phase: 'out', t: 0, wait: 0 });
+
+test('solo se dibujan unos pocos aldeanos, alternando oro y madera y siempre los mismos', () => {
+  const s = fresh();
+  for (let i = 0; i < 3; i++) place(s, 'mine', i, 5, T0);
+  for (let i = 0; i < 3; i++) place(s, 'sawmill', i, 8, T0);
+  const planned = plannedWorkers(s);
+  assert.equal(planned.length, 6);
+  const shown = symbolicWorkers(planned);
+  assert.equal(shown.length, MAX_VISIBLE_WORKERS);
+  assert.deepEqual(shown.map((p) => p.resource), ['gold', 'wood', 'gold']);
+  assert.deepEqual(shown.map((p) => p.buildingId), symbolicWorkers([...planned].reverse()).map((p) => p.buildingId), 'no depende del orden');
+  place(s, 'mine', 5, 5, T0);
+  assert.deepEqual(symbolicWorkers(plannedWorkers(s)).map((p) => p.buildingId), shown.map((p) => p.buildingId), 'construir más no cambia a quién se ve');
+  assert.deepEqual(symbolicWorkers([]), []);
+});
 
 test('una partida nueva no tiene aldeanos; hay uno por cada edificio productor', () => {
   const s = fresh();

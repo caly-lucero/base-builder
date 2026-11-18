@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 import { ASSET_BASE, IMAGES, SHEETS, SOUNDS } from '../data/assets.js';
-import { ARMY_UNITS, BUILDINGS, CAMERA, ECONOMY, GRID, LAYOUT, RESEARCH, TOOL_PAGES, UNITS, researchStep } from '../data/config.js';
+import { ARMY_UNITS, BUILDINGS, CAMERA, ECONOMY, GRID, LAYOUT, RESEARCH, RESOURCES, TOOL_PAGES, UNIQUE_BUILDINGS, UNITS, batchTimeFactor, researchStep } from '../data/config.js';
 import { HEROES, HERO_KEYS, heroXpToNext } from '../data/heroes.js';
 import { generateDecor } from '../game/decor.js';
 import * as logic from '../game/logic.js';
@@ -29,11 +29,12 @@ import { raidCountdownMs, raidLevel } from '../game/raids.js';
 import * as quests from '../game/quests.js';
 import * as store from '../game/store.js';
 import { flowerSpots, pathTiles, pondTiles } from '../game/landscape.js';
-import { createWorker, plannedWorkers, stepWorker, workerPosition } from '../game/workers.js';
+import { createWorker, plannedWorkers, stepWorker, symbolicWorkers, workerPosition } from '../game/workers.js';
 import { claimableCount } from '../game/achievements.js';
 import { openAchievementsPanel } from './achievementsPanel.js';
 import { isSoundOn, onNotice, runMenu } from '../game/menu.js';
 import { openHeroPanel } from './heroPanel.js';
+import { openArmyPanel } from './armyPanel.js';
 import * as ui from './ui.js';
 import { addGloss, addVignette, createClouds, emberPuff, ensureTextures, smokePuff, sparkBurst, stepClouds } from './look.js';
 
@@ -62,6 +63,8 @@ const WORKER_GROW = 1;
 const POP_MS = 320; // duración de la animación al construir
 
 const joinParts = (parts) => parts.filter(Boolean).join(' · ');
+
+const MAX_ARMY_FIGURES = 6; // figuras de tropas que se dibujan en la base (solo de muestra)
 
 /** «5 soldados · 2 arqueros · Paladín nv. 3, Cazadora nv. 1» */
 function armyText(state) {
@@ -99,6 +102,8 @@ const spriteOf = (b) => logic.statsOf(b.type, b.level).sprite;
 
 /** Nombre a mostrar de lo que se entrena en un edificio: unidad, héroe o investigación. */
 const trainName = (key) => UNITS[key]?.name ?? HEROES[key]?.name ?? RESEARCH[key]?.name ?? key;
+/** «5 soldados» (o «Soldado» si es uno solo y no es una unidad). */
+const qtyName = (key, qty) => (UNITS[key] && qty > 1 ? `${qty} ${UNITS[key].name.toLowerCase()}s` : trainName(key));
 const iconKey = (tool) => BUILDINGS[tool].levels[0].sprite;
 
 export default class BaseScene extends Phaser.Scene {
@@ -386,6 +391,16 @@ export default class BaseScene extends Phaser.Scene {
     this.hudWood = block(152, 'wood');
     this.hudPop = block(296, 'pop');
     this.buildersText = ui.label(this, W - 8, 47, '', { size: 10, color: ui.TXT.blue, origin: [1, 0.5], depth: d + 2 });
+
+    // Tocar la población abre la ventana del ejército (qué tropas tienes).
+    this.add
+      .rectangle(296 + 62, 26, 128, 46, 0x000000, 0.001)
+      .setDepth(d + 4)
+      .setInteractive({ useHandCursor: true })
+      .on('pointerdown', () => {
+        ui.haptic();
+        openArmyPanel(this);
+      });
   }
 
   /** Actualiza las cifras y barritas del HUD. */
@@ -528,7 +543,7 @@ export default class BaseScene extends Phaser.Scene {
           this.showToast(need ? `${def.name}: pide ${logic.displayName('townhall', need)} (nivel ${need})` : `Aún no puedes construir ${def.name}`);
           this.play('error');
         } else if (full) {
-          this.showToast(`Límite de ${def.name}: ${limit}. Mejora el Ayuntamiento`);
+          this.showToast(UNIQUE_BUILDINGS.includes(tool) ? `Solo puedes tener un ${def.name}: mejóralo para entrenar más a la vez` : `Límite de ${def.name}: ${limit}. Mejora el Ayuntamiento`);
           this.play('error');
         } else {
           this.play('select');
@@ -670,8 +685,8 @@ export default class BaseScene extends Phaser.Scene {
       icon: 'swords',
       lines,
       buttons: ready
-        ? [{ text: 'Atacar', kind: 'red', onClick: () => this.startBattle(level), close: false }, { text: 'Cancelar', kind: 'dark2' }]
-        : [{ text: 'Cerrar', kind: 'dark2' }],
+        ? [{ text: 'Atacar', kind: 'red', onClick: () => this.startBattle(level), close: false }, { text: 'Ver mi ejército', kind: 'blue', onClick: () => openArmyPanel(this) }, { text: 'Cancelar', kind: 'dark2' }]
+        : [{ text: 'Ver mi ejército', kind: 'blue', onClick: () => openArmyPanel(this) }, { text: 'Cerrar', kind: 'dark2' }],
     });
   }
 
@@ -882,6 +897,29 @@ export default class BaseScene extends Phaser.Scene {
       for (const p of card.parts) p.setVisible(false);
       return card;
     });
+
+    // Selector de cantidad (entrenar varias unidades a la vez): − 5 + Máx, sobre las tarjetas.
+    const sy = this.panel.top - cardH - 6 - 22;
+    const bar = [ui.panel(this, W / 2, sy, W - 12, 34, 'dark', d)];
+    const title = ui.label(this, 18, sy, 'Entrenar a la vez', { size: 12, bold: true, color: ui.TXT.dim, origin: [0, 0.5], depth: d + 1 });
+    const value = ui.label(this, W - 142, sy, '1', { size: 15, bold: true, color: ui.TXT.gold, origin: [0.5, 0.5], align: 'center', depth: d + 1 });
+    const minus = ui.button(this, { x: W - 185, y: sy, w: 38, h: 28, kind: 'dark2', text: '−', size: 18, depth: d + 1, onClick: () => this.changeTrainQty(-1) });
+    const plus = ui.button(this, { x: W - 99, y: sy, w: 38, h: 28, kind: 'dark2', text: '+', size: 18, depth: d + 1, onClick: () => this.changeTrainQty(1) });
+    const max = ui.button(this, { x: W - 44, y: sy, w: 62, h: 28, kind: 'blue', text: 'Máx', size: 12, depth: d + 1, onClick: () => this.changeTrainQty(Infinity) });
+    this.qtyBar = { parts: [...bar, title, value, ...minus.objs, ...plus.objs, ...max.objs], value, minus, plus, max };
+    for (const p of this.qtyBar.parts) p.setVisible(false);
+    this.trainQty = 1;
+  }
+
+  /** Cambia la cantidad a entrenar (±1 o `Infinity` = el máximo que se puede ahora). */
+  changeTrainQty(delta) {
+    const state = store.get();
+    const b = state.buildings.find((x) => x.id === this.selectedId);
+    const key = b && (BUILDINGS[b.type].trains ?? []).find((k) => UNITS[k]);
+    if (!b || !key) return;
+    const top = logic.batchSizeOf(b);
+    this.trainQty = delta === Infinity ? Math.max(1, Math.min(top, logic.maxTrainable(state, b, key))) : Math.min(top, Math.max(1, this.trainQty + delta));
+    this.updatePanel();
   }
 
   /** Muestra lo que entrena el edificio elegido (o esconde las tarjetas si no entrena nada). */
@@ -889,6 +927,22 @@ export default class BaseScene extends Phaser.Scene {
     const state = store.get();
     const keys = !b ? [] : b.type === 'altar' ? ['__heroes'] : (BUILDINGS[b.type].trains ?? []);
     const pct = (v) => `${Math.round(v * 100)} %`;
+
+    // El selector de cantidad solo se ve en edificios que entrenan unidades.
+    const batch = Boolean(b) && keys.some((k) => UNITS[k]);
+    const qty = batch ? Math.min(logic.batchSizeOf(b), Math.max(1, this.trainQty ?? 1)) : 1;
+    this.trainQty = qty;
+    for (const p of this.qtyBar.parts) p.setVisible(batch);
+    if (batch) {
+      const top = logic.batchSizeOf(b);
+      const busyNow = logic.isTraining(b) || logic.isUpgrading(b) || b.damaged;
+      this.qtyBar.value.setText(`${qty}/${top}`);
+      this.qtyBar.minus.setEnabled(!busyNow && qty > 1);
+      this.qtyBar.plus.setEnabled(!busyNow && qty < top);
+      this.qtyBar.max.setEnabled(!busyNow);
+    }
+    const compact = (cost) => RESOURCES.filter((r) => (cost[r] ?? 0) > 0).map((r) => `${this.fmt(cost[r])} ${r === 'gold' ? 'oro' : 'mad.'}`).join(' · ');
+
     this.trainCards.forEach((card, i) => {
       const key = keys[i];
       card.unit = key ?? null;
@@ -909,13 +963,14 @@ export default class BaseScene extends Phaser.Scene {
       } else if (UNITS[key]) {
         const u = UNITS[key];
         const locked = b.level < u.minLevel;
-        const affordable = logic.canAfford(state, u.cost) && logic.supplyUsed(state) + u.supply <= logic.supplyCap(state);
+        const cost = logic.batchCost(key, qty);
+        const affordable = logic.canAfford(state, cost) && logic.supplyUsed(state) + u.supply * qty <= logic.supplyCap(state);
         usable = !locked && !busy && affordable;
         const c = logic.unitCombat(state, key);
         this.fitIcon(card.icon, u.sprite, card.ix, card.iy, 34);
         card.name.setText(`${u.name} nv. ${logic.unitLevel(state, key)}`);
-        card.cost.setText(locked ? `Pide nivel ${u.minLevel}` : logic.formatCost(u.cost));
-        card.info.setText(`${logic.formatDuration(u.trainSec * factor * 1000)} · Población ${u.supply}`);
+        card.cost.setText(locked ? `Pide nivel ${u.minLevel}` : compact(cost));
+        card.info.setText(`${logic.formatDuration(u.trainSec * batchTimeFactor(qty) * factor * 1000)} · ×${qty}`);
         card.stats.setText(`Vida ${c.hp} · Daño ${c.dmg}`);
       } else if (RESEARCH[key]) {
         const r = RESEARCH[key];
@@ -941,9 +996,10 @@ export default class BaseScene extends Phaser.Scene {
       openHeroPanel(this, id);
       return;
     }
+    const qty = UNITS[key] ? this.trainQty ?? 1 : 1;
     this.doAction(
-      () => logic.startTraining(store.get(), id, key, Date.now()),
-      (r) => `${RESEARCH[key] ? 'Investigando' : 'Entrenando'} ${trainName(key)}: ${logic.formatDuration(r.endsAt - Date.now())}`,
+      () => logic.startTraining(store.get(), id, key, Date.now(), qty),
+      (r) => `${RESEARCH[key] ? 'Investigando' : 'Entrenando'} ${qtyName(key, r.qty ?? 1)}: ${logic.formatDuration(r.endsAt - Date.now())}`,
       'upgrade_start',
     );
     this.updatePanel();
@@ -1023,9 +1079,9 @@ export default class BaseScene extends Phaser.Scene {
 
   /* ---------- aldeanos ---------- */
 
-  /** Crea o quita aldeanos para que haya uno por edificio productor, y actualiza su ruta. */
+  /** Crea o quita aldeanos: solo unos pocos, de adorno (ver symbolicWorkers), y actualiza su ruta. */
   syncWorkers() {
-    const plan = new Map(plannedWorkers(store.get()).map((p) => [p.buildingId, p]));
+    const plan = new Map(symbolicWorkers(plannedWorkers(store.get())).map((p) => [p.buildingId, p]));
     for (const [id, w] of this.workers) {
       if (plan.has(id)) continue;
       w.img.destroy();
@@ -1097,9 +1153,17 @@ export default class BaseScene extends Phaser.Scene {
     this.camp = camp ? { x: camp.x, y: camp.y } : null;
     this.shrine = shrine ? { x: shrine.x, y: shrine.y } : null;
 
-    // Se muestran como mucho 12 unidades para no saturar la pantalla (las armas de asedio, aparte).
+    // Solo una muestra simbólica: como mucho 6 figuras, repartidas entre los tipos que tengas (la lista completa está en la ventana del ejército).
     const want = [];
-    for (const u of ARMY_UNITS) for (let i = 0; i < (state.army[u] ?? 0) && want.length < 12; i++) want.push(u);
+    const left = Object.fromEntries(ARMY_UNITS.map((u) => [u, state.army[u] ?? 0]));
+    while (want.length < MAX_ARMY_FIGURES && ARMY_UNITS.some((u) => left[u] > 0)) {
+      for (const u of ARMY_UNITS) {
+        if (left[u] > 0 && want.length < MAX_ARMY_FIGURES) {
+          want.push(u);
+          left[u]--;
+        }
+      }
+    }
     const signature = want.join(',');
     if (signature !== this.armySignature) {
       this.armySignature = signature;
@@ -1269,7 +1333,7 @@ export default class BaseScene extends Phaser.Scene {
     if (unitKinds.length) {
       const c = logic.unitCombat(state, unitKinds[0]);
       const faster = stats.trainFactor ? ` · ${Math.round((1 - stats.trainFactor) * 100)} % más rápido` : '';
-      own = `Unidades nivel ${logic.unitLevel(state, unitKinds[0])}: vida ${c.hp}, daño ${c.dmg}${faster}`;
+      own = `Unidades nv. ${logic.unitLevel(state, unitKinds[0])}: vida ${c.hp}, daño ${c.dmg} · entrena hasta ${logic.batchSizeOf(b)} a la vez${faster}`;
     } else if (b.type === 'forge') {
       const r = (k, label) => `${label} ${logic.researchLevel(state, k)}`;
       own = `${r('weapons', 'Armas')} · ${r('armor', 'Armaduras')} · ${r('fortify', 'Fortif.')} (máx. nv. ${b.level})`;
@@ -1325,7 +1389,7 @@ export default class BaseScene extends Phaser.Scene {
     }
     if (logic.isTraining(b)) {
       const verb = RESEARCH[b.training.unit] ? 'Investigando' : HEROES[b.training.unit] ? 'Invocando a' : 'Entrenando';
-      detail.setText(`${verb} ${trainName(b.training.unit)}…\nTermina en ${logic.formatDuration(b.training.endsAt - Date.now())}`);
+      detail.setText(`${verb} ${qtyName(b.training.unit, b.training.qty ?? 1)}…\nTermina en ${logic.formatDuration(b.training.endsAt - Date.now())}`);
       hideButton();
       return;
     }
@@ -1678,7 +1742,7 @@ export default class BaseScene extends Phaser.Scene {
             ? `¡${HEROES[e.unit].name} ha llegado!`
             : RESEARCH[e.unit]
               ? `Investigación completada: ${RESEARCH[e.unit].name}`
-              : `${trainName(e.unit)} listo para el combate`,
+              : `${qtyName(e.unit, e.qty ?? 1)} ${(e.qty ?? 1) > 1 ? 'listos' : 'listo'} para el combate`,
         );
         finished = true;
       }
@@ -1843,7 +1907,7 @@ export default class BaseScene extends Phaser.Scene {
         v.bar.fillStyle(COLORS.progress, 1).fillRect(bx, by, bw * (1 - remaining / total), bh);
         v.sub.setText(logic.formatDuration(remaining));
       } else if (logic.isTraining(b)) {
-        const total = (logic.trainSecOf(state, b.training.unit) ?? 1) * 1000 * (stats.trainFactor ?? 1);
+        const total = logic.trainingTotalMs(state, b);
         const remaining = Math.max(0, b.training.endsAt - Date.now());
         v.bar.fillStyle(0xffb86b, 1).fillRect(bx, by, bw * (1 - remaining / total), bh);
         v.sub.setText(logic.formatDuration(remaining));

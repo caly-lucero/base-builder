@@ -1,6 +1,6 @@
 // Lógica pura del juego: no toca el DOM, Phaser ni localStorage.
 // Todas las funciones reciben el estado y el tiempo (`now`) para poder probarlas.
-import { ACHIEVEMENTS, ARMY_UNITS, BUILDINGS, ECONOMY, GRID, MAX_LEVEL, RAID, RESEARCH, RESEARCH_KEYS, RESOURCES, RESOURCE_NAMES, UNITS, researchStep } from '../data/config.js';
+import { ACHIEVEMENTS, ARMY_UNITS, BUILDINGS, ECONOMY, GRID, MAX_LEVEL, RAID, RESEARCH, RESEARCH_KEYS, RESOURCES, RESOURCE_NAMES, UNIQUE_BUILDINGS, UNITS, batchLimit, batchTimeFactor, researchStep } from '../data/config.js';
 import { HEROES, SQUAD_SIZE, heroCap, isHeroKey } from '../data/heroes.js';
 
 export const MAX_BUILDINGS = GRID.cols * GRID.rows;
@@ -137,8 +137,33 @@ export function supplyUsed(state) {
   let used = 0;
   for (const u of ARMY_UNITS) used += (state.army[u] ?? 0) * UNITS[u].supply;
   for (const key of Object.keys(state.heroes)) used += HEROES[key]?.supply ?? 0;
-  for (const b of state.buildings) if (b.training) used += supplyOf(b.training.unit);
+  for (const b of state.buildings) if (b.training) used += supplyOf(b.training.unit) * (b.training.qty ?? 1);
   return used;
+}
+
+/** Cuántas unidades caben en un lote de este edificio (según su nivel). */
+export const batchSizeOf = (b) => batchLimit(b.level);
+
+/** Costo de entrenar `qty` unidades de `key` (el de una, multiplicado). */
+export function batchCost(key, qty) {
+  const unit = UNITS[key];
+  return Object.fromEntries(RESOURCES.map((r) => [r, costOf(unit.cost, r) * qty]));
+}
+
+/** Cuántas unidades se pueden pedir ya: tope del lote, población libre y recursos. */
+export function maxTrainable(state, b, key) {
+  const unit = UNITS[key];
+  if (!unit) return 1; // héroes e investigaciones: siempre de uno en uno
+  const freeSupply = Math.floor((supplyCap(state) - supplyUsed(state)) / unit.supply);
+  let n = Math.min(batchSizeOf(b), freeSupply);
+  for (const r of RESOURCES) if (costOf(unit.cost, r) > 0) n = Math.min(n, Math.floor(state[r] / costOf(unit.cost, r)));
+  return Math.max(0, n);
+}
+
+/** Cuánto dura en total lo que entrena un edificio (con el lote y el factor de su nivel), en milisegundos. */
+export function trainingTotalMs(state, b) {
+  const factor = statsOf(b.type, b.level).trainFactor ?? 1;
+  return (trainSecOf(state, b.training.unit) ?? 1) * batchTimeFactor(b.training.qty ?? 1) * factor * 1000;
 }
 
 export const armyCount = (state) => ARMY_UNITS.reduce((n, u) => n + (state.army[u] ?? 0), 0);
@@ -321,7 +346,8 @@ function tickTraining(state, b, now, events) {
     return;
   }
   // Igual que las mejoras: nunca queda más lejos que la duración completa.
-  b.training.endsAt = Math.min(b.training.endsAt, now + sec * 1000);
+  const qty = b.training.qty ?? 1;
+  b.training.endsAt = Math.min(b.training.endsAt, now + sec * batchTimeFactor(qty) * 1000);
   if (now < b.training.endsAt) return;
 
   b.training = null;
@@ -331,9 +357,9 @@ function tickTraining(state, b, now, events) {
   } else if (RESEARCH[key]) {
     state.research[key] = Math.min(MAX_LEVEL, researchLevel(state, key) + 1);
   } else {
-    state.army[key] = (state.army[key] ?? 0) + 1;
+    state.army[key] = (state.army[key] ?? 0) + qty;
   }
-  events?.push({ type: 'trained', id: b.id, unit: key });
+  events?.push({ type: 'trained', id: b.id, unit: key, qty });
 }
 
 /** Avanza el tiempo de todos los edificios. Devuelve lo generado: { gold, wood }. */
@@ -365,6 +391,7 @@ export function placementError(state, type, x, y) {
       const need = unlockLevel(type);
       return need ? `${def.name}: pide ${displayName('townhall', need)} (nivel ${need})` : `Aún no puedes construir ${def.name}`;
     }
+    if (UNIQUE_BUILDINGS.includes(type)) return `Solo puedes tener un ${def.name}: mejóralo para entrenar más a la vez`;
     return `Límite de ${def.name}: ${limit}. Mejora el Ayuntamiento`;
   }
   const missing = missingResource(state, def.cost);
@@ -406,7 +433,7 @@ export function startUpgrade(state, id, now) {
  * (altar) o una investigación (herrería). Se paga y se reserva la población al empezar; llega cuando termina
  * el tiempo (también sin conexión).
  */
-export function startTraining(state, id, key, now) {
+export function startTraining(state, id, key, now, qty = 1) {
   const b = state.buildings.find((x) => x.id === id);
   if (!b) return fail('No existe ese edificio');
   const def = BUILDINGS[b.type];
@@ -424,7 +451,7 @@ export function startTraining(state, id, key, now) {
     const missing = missingResource(state, step.cost);
     if (missing) return fail(insufficient(missing));
     spend(state, step.cost);
-    b.training = { unit: key, endsAt: now + Math.round(step.sec * 1000 * factor) };
+    b.training = { unit: key, endsAt: now + Math.round(step.sec * 1000 * factor), qty: 1 };
     return { ok: true, endsAt: b.training.endsAt };
   }
 
@@ -432,13 +459,18 @@ export function startTraining(state, id, key, now) {
   const need = requiredLevel(b.type, key);
   if (b.level < need) return fail(`Pide ${def.name} nivel ${need}`);
   if (HEROES[key] && (state.heroes[key] || state.buildings.some((x) => x.training?.unit === key))) return fail('Ya tienes a ese héroe');
-  if (supplyUsed(state) + unit.supply > supplyCap(state)) return fail('Población al máximo: construye casas');
-  const missing = missingResource(state, unit.cost);
+  // Los héroes se invocan de uno en uno; las unidades, por lotes (hasta lo que permita el nivel del edificio).
+  const count = HEROES[key] ? 1 : qty;
+  if (!Number.isInteger(count) || count < 1) return fail('Cantidad inválida');
+  if (count > batchSizeOf(b)) return fail(`Este edificio entrena como mucho ${batchSizeOf(b)} a la vez: mejóralo para más`);
+  if (supplyUsed(state) + unit.supply * count > supplyCap(state)) return fail('Población al máximo: construye casas');
+  const cost = HEROES[key] ? unit.cost : batchCost(key, count);
+  const missing = missingResource(state, cost);
   if (missing) return fail(insufficient(missing));
 
-  spend(state, unit.cost);
-  b.training = { unit: key, endsAt: now + Math.round(unit.trainSec * 1000 * factor) };
-  return { ok: true, endsAt: b.training.endsAt };
+  spend(state, cost);
+  b.training = { unit: key, endsAt: now + Math.round(unit.trainSec * batchTimeFactor(count) * 1000 * factor), qty: count };
+  return { ok: true, endsAt: b.training.endsAt, qty: count };
 }
 
 export function demolish(state, id) {

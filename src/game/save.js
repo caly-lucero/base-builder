@@ -4,22 +4,24 @@
 // Nota de seguridad: el checksum NO impide hacer trampa (el código está en el
 // navegador y cualquiera puede recalcularlo). Solo detecta archivos dañados o
 // editados a mano sin querer. En un juego de un jugador está bien así.
-import { ACHIEVEMENTS, ARMY_UNITS, BUILDINGS, ECONOMY, GRID, QUESTS, RESEARCH_KEYS } from '../data/config.js';
+import { ACHIEVEMENTS, ARMY_UNITS, BUILDINGS, ECONOMY, GRID, QUESTS, RESEARCH_KEYS, UNIQUE_BUILDINGS, UNITS, researchStep } from '../data/config.js';
 import { HERO_MAX_LEVEL, SQUAD_SIZE, isHeroKey } from '../data/heroes.js';
 import {
   MAX_BUILDINGS,
   TOWN_HALL_CELL,
+  costOf,
   createBuilding,
   emptyAchievements,
   emptyArmy,
   emptyResearch,
   findFreeCell,
+  investedCost,
   isBuildingType,
   supplyCap,
   supplyUsed,
 } from './logic.js';
 
-export const SAVE_VERSION = 9;
+export const SAVE_VERSION = 10;
 export const MAX_SAVE_BYTES = 200_000;
 
 const KEY = 'basebuilder.save';
@@ -66,8 +68,8 @@ export function parseSave(text) {
     if (typeof env.sum !== 'string' || !isPlainObject(env.data)) return err('Formato inválido');
     if (env.sum !== checksum(env.data)) return err('La partida está dañada o fue modificada');
 
-    const migrated = migrate(env.data, env.v);
-    return { ok: true, state: validateState(migrated) };
+    const { _notice: notice, ...migrated } = migrate(env.data, env.v);
+    return { ok: true, state: validateState(migrated), notice };
   } catch (e) {
     return err(e instanceof ValidationError ? e.message : 'No se pudo leer la partida');
   }
@@ -128,7 +130,54 @@ function migrate(data, version) {
   // v8 → v9: aparecieron las estrellas de campaña (cada nivel ya superado cuenta como 1 estrella) y el logro de estrellas.
   if (version < 9) d = migrateV8toV9(d);
 
+  // v9 → v10: los edificios militares pasaron a ser únicos (uno de cada) y se entrena por lotes.
+  if (version < 10) d = migrateV9toV10(d);
+
   return d;
+}
+
+/**
+ * v9 → v10: si había varios cuarteles (u otro edificio militar), se queda el de mayor nivel y los demás se
+ * demuelen devolviendo TODO lo invertido (y lo que estaban entrenando). Deja un aviso en `_notice`.
+ */
+function migrateV9toV10(d) {
+  if (!Array.isArray(d.buildings)) return d;
+  const score = (b) => (Number.isInteger(b.level) ? b.level : 1) * 10 + (isPlainObject(b.training) ? 4 : 0) + (b.damaged ? 0 : 2);
+  const removed = [];
+  const buildings = [...d.buildings];
+  for (const type of UNIQUE_BUILDINGS) {
+    const same = buildings.filter((b) => isPlainObject(b) && b.type === type);
+    if (same.length <= 1) continue;
+    same.sort((a, b) => score(b) - score(a) || (a.id ?? 0) - (b.id ?? 0));
+    removed.push(...same.slice(1));
+  }
+  if (!removed.length) return d;
+
+  const refund = { gold: 0, wood: 0 };
+  for (const b of removed) {
+    if (!isInt(b.level, 1, BUILDINGS[b.type].levels.length)) continue;
+    const paid = investedCost(b);
+    const next = BUILDINGS[b.type].levels[b.level];
+    if (b.upgradeEndsAt != null && next) for (const r of Object.keys(refund)) paid[r] += costOf(next.upgradeCost, r);
+    const key = isPlainObject(b.training) ? b.training.unit : null;
+    if (UNITS[key]) for (const r of Object.keys(refund)) paid[r] += costOf(UNITS[key].cost, r);
+    else if (RESEARCH_KEYS.includes(key)) {
+      const step = researchStep(key, isPlainObject(d.research) && isInt(d.research[key], 0, 10) ? d.research[key] : 0);
+      for (const r of Object.keys(refund)) paid[r] += costOf(step.cost, r);
+    }
+    for (const r of Object.keys(refund)) refund[r] += paid[r];
+  }
+
+  const gone = new Set(removed);
+  const names = [...new Set(removed.map((b) => BUILDINGS[b.type].name))].join(', ');
+  const back = [refund.gold > 0 && `${refund.gold} de oro`, refund.wood > 0 && `${refund.wood} de madera`].filter(Boolean).join(' y ');
+  return {
+    ...d,
+    gold: (Number.isInteger(d.gold) ? d.gold : 0) + refund.gold,
+    wood: (Number.isInteger(d.wood) ? d.wood : 0) + refund.wood,
+    buildings: buildings.filter((b) => !gone.has(b)),
+    _notice: `Ahora solo hay un edificio militar de cada clase (${names}): se unificaron ${removed.length} y se te devolvió ${back || 'lo invertido'}. Mejóralo para entrenar más unidades a la vez.`,
+  };
 }
 
 function migrateV8toV9(d) {
@@ -306,7 +355,10 @@ export function validateState(d) {
       if (typeof b.training.unit !== 'string' || !trains.includes(b.training.unit)) bad('Unidad de entrenamiento inválida');
       if (!isNum(b.training.endsAt, 0, MAX_TIME)) bad('Fecha de entrenamiento inválida');
       if (b.upgradeEndsAt !== null) bad('No puede mejorar y entrenar a la vez');
-      training = { unit: b.training.unit, endsAt: b.training.endsAt };
+      const qty = b.training.qty === undefined ? 1 : b.training.qty; // las partidas anteriores entrenaban de una en una
+      if (!isInt(qty, 1, 99)) bad('Cantidad de entrenamiento inválida');
+      if (qty > 1 && !UNITS[b.training.unit]) bad('Solo las unidades se entrenan por lotes');
+      training = { unit: b.training.unit, endsAt: b.training.endsAt, qty };
     }
 
     if (typeof b.damaged !== 'boolean') bad('Estado de daño inválido');
@@ -377,13 +429,13 @@ export function loadGame() {
   if (main === null) return { state: null, source: 'none' };
 
   const r = parseSave(main);
-  if (r.ok) return { state: r.state, source: 'main' };
+  if (r.ok) return { state: r.state, source: 'main', warning: r.notice };
 
   const bak = read(BACKUP_KEY);
   if (bak !== null) {
     const rb = parseSave(bak);
     if (rb.ok) {
-      return { state: rb.state, source: 'backup', warning: 'La partida principal estaba dañada; se recuperó la copia de respaldo.' };
+      return { state: rb.state, source: 'backup', warning: ['La partida principal estaba dañada; se recuperó la copia de respaldo.', rb.notice].filter(Boolean).join(' ') };
     }
   }
   return { state: null, source: 'none', warning: 'La partida guardada estaba dañada y no se pudo recuperar. Empezaste de cero.' };
