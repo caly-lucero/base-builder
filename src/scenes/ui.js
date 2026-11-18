@@ -609,7 +609,7 @@ export function dialog(scene, o) {
   const d = 600;
   const w = Math.min(o.width ?? 380, W - 24);
   const lines = o.lines ?? [];
-  const buttons = o.buttons ?? [];
+  const buttons = (o.buttons ?? []).filter(Boolean);
   const textH = lines.length ? Math.max(40, lines.length * 24 + 8) : 0;
   const vertical = o.vertical ?? buttons.length > 2;
   const btnH = 46;
@@ -647,11 +647,29 @@ export function dialog(scene, o) {
       if (b.close !== false) scene.closeModal();
       b.onClick?.();
     } });
+    if (b.disabled) btn.setEnabled(false);
     btn.objs.forEach(add);
   });
   scene.modal = parts;
   scene.play?.(o.tone === 'bad' ? 'lose' : 'select');
   return parts;
+}
+
+/**
+ * Otra pestaña abrió el juego: esta deja de guardar para no pisarle la partida. Avisa y ofrece tomar el control aquí
+ * (recargar). Se llama una vez por escena; devuelve la función para dejar de escuchar.
+ */
+export function watchOtherTab(scene, onSuperseded) {
+  return onSuperseded(() => {
+    dialog(scene, {
+      title: 'Juego abierto en otra pestaña',
+      icon: 'warning',
+      tone: 'bad',
+      lines: ['Abriste Base Builder en otra pestaña.', 'Esta quedó en pausa y no guarda.'],
+      vertical: true,
+      buttons: [{ text: 'Usar esta pestaña', kind: 'green', close: false, onClick: () => window.location.reload() }],
+    });
+  });
 }
 
 /** Mezcla dos colores (0-1). */

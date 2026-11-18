@@ -1,8 +1,9 @@
 import Phaser from 'phaser';
 import { ARMY_UNITS, CAMERA, LAYOUT, RAID, STARS, TERRAIN } from '../data/config.js';
 import { HEROES } from '../data/heroes.js';
-import { abilityStatus, advanceBattle, attackers, battleStatus, castHeroAbility, clearOrders, createBattle, defenderUnits, orderAttack, orderMove, retreat, unitIdsOfKinds } from '../game/battle.js';
+import { abilityStatus, advanceBattle, attackers, battleStatus, castHeroAbility, clearOrders, createBattle, defenderUnits, orderAttack, orderMove, restoreBattle, retreat, unitIdsOfKinds } from '../game/battle.js';
 import { applyBattleResult } from '../game/campaign.js';
+import { clearBattle, saveBattle } from '../game/battleSave.js';
 import * as logic from '../game/logic.js';
 import { formatDuration, squadHeroes, statsOf, unitCombat } from '../game/logic.js';
 import { generateMission, missionName } from '../game/missions.js';
@@ -59,6 +60,7 @@ export default class BattleScene extends Phaser.Scene {
     // `report` (con su `replay`) = defensa de tu base contra un ataque enemigo; si no, un ataque tuyo.
     this.raid = data?.report?.replay ? data.report : null;
     this.level = this.raid ? this.raid.level : (data?.level ?? 1);
+    this.resume = data?.resume ?? null; // una batalla guardada que se retoma
     this.entries = new Map(); // id -> { ent, img, rubble, baseTint, lastX }
     this.selection = new Set();
     this.activeChip = null;
@@ -97,7 +99,7 @@ export default class BattleScene extends Phaser.Scene {
     } else {
       this.mission = generateMission(this.level);
       const stats = Object.fromEntries(ARMY_UNITS.map((k) => [k, unitCombat(state, k)])); // nivel de los edificios + investigaciones
-      this.battle = createBattle(this.mission, state.army, squadHeroes(state), stats);
+      this.battle = this.resume ? restoreBattle(this.resume) : createBattle(this.mission, state.army, squadHeroes(state), stats);
     }
 
     resetView(this.raid ? RAID_CENTER : START_CENTER);
@@ -126,14 +128,34 @@ export default class BattleScene extends Phaser.Scene {
       .setDepth(900);
     this.boxRect = null;
 
+    this.events.once('shutdown', ui.watchOtherTab(this, store.onSuperseded));
     this.input.on('pointerdown', this.onPointerDown, this);
     this.input.on('pointermove', this.onPointerMove, this);
     this.input.on('pointerup', this.onPointerUp, this);
     this.input.on('pointerupoutside', this.onPointerUp, this);
     this.input.on('wheel', this.onWheel, this);
 
-    this.showToast(this.raid ? `¡Ataque enemigo! Fuerza ${this.level}: tus defensas pelean solas` : `${missionName(this.level)}: destruye el Ayuntamiento enemigo`, 2600);
+    if (!this.raid) this.watchPageLeave();
+    this.showToast(this.resume ? `Batalla retomada: ${missionName(this.level)}` : this.raid ? `¡Ataque enemigo! Fuerza ${this.level}: tus defensas pelean solas` : `${missionName(this.level)}: destruye el Ayuntamiento enemigo`, 2600);
     if (this.raid) this.play('boom'); // la alarma
+  }
+
+  /** Guarda la batalla en curso si se cierra o se esconde la página (y cada pocos segundos, por si el sistema la mata). */
+  watchPageLeave() {
+    const save = () => {
+      if (!this.finished) saveBattle(this.battle);
+    };
+    const onHide = () => {
+      if (document.visibilityState === 'hidden') save();
+    };
+    document.addEventListener('visibilitychange', onHide);
+    window.addEventListener('pagehide', save);
+    this.time.addEvent({ delay: 4000, loop: true, callback: save });
+    this.events.once('shutdown', () => {
+      document.removeEventListener('visibilitychange', onHide);
+      window.removeEventListener('pagehide', save);
+    });
+    save();
   }
 
   /* ---------- utilidades de dibujo ---------- */
@@ -773,6 +795,7 @@ export default class BattleScene extends Phaser.Scene {
     this.finished = true;
     this.gesture = null;
     this.selection.clear();
+    clearBattle(); // terminó: ya no hay nada que retomar
     store.tick();
     this.report = applyBattleResult(store.get(), this.battle.result);
     store.commit();

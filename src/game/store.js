@@ -6,6 +6,51 @@ import { clearSave, loadGame, saveGame } from './save.js';
 
 let state = null;
 const changeListeners = new Set();
+
+/* ---------- una sola pestaña a la vez ----------
+ * Dos pestañas con el juego abierto se pisarían el guardado. La última que se abre se queda con el "turno"
+ * (una marca en localStorage); la otra se entera por el evento `storage`, deja de guardar y avisa. */
+const LOCK_KEY = 'basebuilder.tab';
+const TAB_ID = Math.random().toString(36).slice(2, 10);
+let superseded = false;
+const supersededListeners = new Set();
+
+/** ¿Esa marca guardada es de OTRA pestaña? (lógica pura, para probarla) */
+export function lockIsForeign(raw, tabId) {
+  if (!raw) return false;
+  try {
+    const id = JSON.parse(raw)?.id;
+    return typeof id === 'string' && id !== tabId;
+  } catch {
+    return false;
+  }
+}
+
+/** Esta pestaña toma el turno. */
+function takeLock() {
+  try {
+    localStorage.setItem(LOCK_KEY, JSON.stringify({ id: TAB_ID, t: Date.now() }));
+  } catch {
+    /* sin almacenamiento: no hay forma de coordinarse */
+  }
+}
+
+/** Avisa cuando otra pestaña abre el juego (esta ya no guarda). */
+export function onSuperseded(fn) {
+  supersededListeners.add(fn);
+  if (superseded) fn();
+  return () => supersededListeners.delete(fn);
+}
+
+export const isSuperseded = () => superseded;
+
+if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+  window.addEventListener('storage', (e) => {
+    if (e.key !== LOCK_KEY || superseded || !lockIsForeign(e.newValue, TAB_ID)) return;
+    superseded = true;
+    for (const fn of supersededListeners) fn();
+  });
+}
 let statusHandler = () => {};
 let saveFailedNotified = false;
 const pendingEvents = []; // mejoras terminadas, etc., que la escena aún no ha mostrado
@@ -62,6 +107,7 @@ export function drainEvents() {
 /** Carga la partida y aplica lo ocurrido mientras estuviste fuera. */
 export function init(now = Date.now()) {
   const loaded = loadGame();
+  takeLock();
   state = loaded.state ?? createNewState(now);
 
   // Si el reloj del sistema retrocedió, no dejamos edificios "en el futuro".
@@ -78,7 +124,7 @@ export function init(now = Date.now()) {
 
 /** Guarda sin avisar a la UI (autoguardado). */
 export function persist(now = Date.now()) {
-  if (!state) return false;
+  if (!state || superseded) return false; // otra pestaña tomó el turno: no se le pisa el guardado
   tick(now);
   state.savedAt = now;
   const ok = saveGame(state, now);

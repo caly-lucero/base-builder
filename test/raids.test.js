@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { DEFENSE, RAID, UNITS } from '../src/data/config.js';
 import { advanceBattle, attackers, createRaidBattle, defenderUnits, defenseHp } from '../src/game/battle.js';
 import { createBuilding, createNewState, townHall } from '../src/game/logic.js';
-import { applyRaidResult, generateRaid, raidCountdownMs, raidDue, raidLevel, resolveRaid, simulateRaid } from '../src/game/raids.js';
+import { applyRaidResult, generateRaid, postponeBlocked, postponeCost, postponeRaid, raidCountdownMs, raidDue, raidLevel, resolveRaid, simulateRaid } from '../src/game/raids.js';
 
 const T0 = 1_700_000_000_000;
 
@@ -208,7 +208,7 @@ test('un ataque programado llega a su hora, y «sin programar» (0) nunca está 
   assert.equal(raidDue(s, T0 + 1e12), false);
 });
 
-test('una partida nueva tiene el primer ataque a los 10 minutos', () => {
+test('una partida nueva tiene el primer ataque a los 20 minutos', () => {
   const s = createNewState(T0);
   assert.equal(s.raid.nextAt, T0 + RAID.firstDelaySec * 1000);
   assert.equal(s.raid.count, 0);
@@ -287,4 +287,59 @@ test('las armas de asedio no defienden la base', () => {
   const s = base([['siege', 10, 6]], { thLevel: 10, army: { catapult: 2, soldier: 1 } });
   const b = createRaidBattle(s, generateRaid(1));
   assert.deepEqual(defenderUnits(b).map((u) => u.type), ['soldier']);
+});
+
+test('el primer ataque de la partida es un aviso suave: 2 guardias y más flojos', () => {
+  const first = generateRaid(1, 1);
+  const second = generateRaid(1, 2);
+  assert.equal(first.attackers.length, 2);
+  assert.ok(first.hpScale < second.hpScale && first.dmgScale < second.dmgScale);
+  assert.ok(second.attackers.length > first.attackers.length);
+});
+
+test('lo que está mejorando o entrenando no queda dañado: lo protegen las vallas', () => {
+  const s = base([['mine', 6, 6], ['sawmill', 12, 6], ['barracks', 6, 12]]);
+  const [, mine, sawmill, barracks] = s.buildings;
+  mine.upgradeEndsAt = T0 + 60_000;
+  barracks.training = { unit: 'soldier', endsAt: T0 + 60_000, qty: 2 };
+  const report = applyRaidResult(s, result({ destroyedIds: [mine.id, sawmill.id, barracks.id] }));
+  assert.equal(report.damaged, 1);
+  assert.equal(report.protected, 2);
+  assert.equal(mine.damaged, false);
+  assert.equal(barracks.damaged, false);
+  assert.equal(sawmill.damaged, true);
+});
+
+test('aplazar el ataque: cuesta oro por nivel, retrasa 8 minutos, tiene tope y no vale en el último minuto', () => {
+  const s = base([], { thLevel: 2 });
+  s.gold = 1000;
+  s.raid.nextAt = T0 + 10 * 60_000;
+  assert.deepEqual(postponeCost(s), { gold: 2 * RAID.postponeGoldPerLevel, wood: 0 });
+  assert.equal(postponeBlocked(s, T0), null);
+
+  const r = postponeRaid(s, T0);
+  assert.equal(r.ok, true);
+  assert.equal(s.raid.nextAt, T0 + 10 * 60_000 + RAID.postponeSec * 1000);
+  assert.equal(s.gold, 1000 - 2 * RAID.postponeGoldPerLevel);
+  assert.equal(s.raid.postponed, 1);
+
+  assert.equal(postponeRaid(s, T0).ok, true);
+  const third = postponeRaid(s, T0);
+  assert.equal(third.ok, false, 'solo se puede aplazar RAID.maxPostpones veces');
+  assert.match(third.reason, /máximo/);
+
+  // Al llegar el ataque el contador de aplazos vuelve a cero.
+  s.raid.nextAt = T0;
+  resolveRaid(s, T0 + 1000);
+  assert.equal(s.raid.postponed, 0);
+
+  const late = base();
+  late.gold = 1000;
+  late.raid.nextAt = T0 + 30_000;
+  assert.match(postponeBlocked(late, T0), /tarde/);
+  const poor = base();
+  poor.gold = 5;
+  poor.raid.nextAt = T0 + 10 * 60_000;
+  assert.match(postponeBlocked(poor, T0), /Faltan/);
+  assert.equal(poor.gold, 5);
 });

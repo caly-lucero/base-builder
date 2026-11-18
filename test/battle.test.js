@@ -246,3 +246,23 @@ test('una batalla terminada no avanza más', () => {
   advanceBattle(b, 10);
   assert.equal(b.time, t);
 });
+
+/* ---------- separación ---------- */
+
+test('las unidades amontonadas en un mismo punto se separan sin entrar en edificios ni salir del mapa', () => {
+  const b = createBattle(mini(), army(40), null);
+  for (const u of attackers(b)) {
+    u.x = 10;
+    u.y = 30; // las 40 en el mismo punto
+  }
+  const hall = b.buildings.find((e) => e.id === b.hallId);
+  for (let i = 0; i < 60; i++) advanceBattle(b, 0.1);
+  const a = attackers(b);
+  let nearest = Infinity;
+  for (let i = 0; i < a.length; i++) for (let j = i + 1; j < a.length; j++) nearest = Math.min(nearest, Math.hypot(a[i].x - a[j].x, a[i].y - a[j].y));
+  assert.ok(nearest > 0.12, `siguen encimadas: ${nearest.toFixed(2)}`);
+  for (const u of a) {
+    assert.ok(u.x >= 0 && u.x <= GRID.cols - 1 && u.y >= 0 && u.y <= GRID.rows - 1);
+    assert.ok(!(u.x > hall.x && u.x < hall.x + hall.w - 1 && u.y > hall.y && u.y < hall.y + hall.h - 1), 'dentro del Ayuntamiento');
+  }
+});

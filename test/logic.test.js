@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { BUILDINGS, ECONOMY, MAX_LEVEL, RESEARCH, UNIQUE_BUILDINGS, UNITS, batchLimit, batchTimeFactor, researchStep } from '../src/data/config.js';
+import { BUILDINGS, ECONOMY, MAX_LEVEL, RESEARCH, UNIQUE_BUILDINGS, UNITS, batchLimit, batchTimeFactor, researchStep, trainQueueLimit } from '../src/data/config.js';
 import { HEROES } from '../src/data/heroes.js';
 import {
   TOWN_HALL_CELL,
@@ -31,6 +31,8 @@ import {
   repairCost,
   startTraining,
   startUpgrade,
+  queueUpgrade,
+  cancelQueuedUpgrade,
   supplyCap,
   supplyUsed,
   heroLevelCap,
@@ -566,11 +568,13 @@ test('los edificios militares son únicos: solo uno de cada clase', () => {
   }
 });
 
-test('un cuartel entrena de a uno: no acepta otra orden hasta terminar', () => {
+test('un cuartel entrena un lote por vez: la siguiente orden queda en cola hasta que termine', () => {
   const s = fresh(1000, 1000, 2);
   const b = place(s, 'barracks', 0 * 8, 0 * 8, T0).building;
   assert.equal(startTraining(s, b.id, 'soldier', T0).ok, true);
-  assert.equal(startTraining(s, b.id, 'soldier', T0).reason, 'Ya está entrenando');
+  const q = startTraining(s, b.id, 'soldier', T0);
+  assert.equal(q.ok, true);
+  assert.equal(q.queued, true);
   tickAll(s, T0 + 60_000);
   assert.equal(startTraining(s, b.id, 'soldier', T0 + 60_000).ok, true);
 });
@@ -936,4 +940,119 @@ test('los árboles y rocas se pueden quitar de uno en uno, todos a la vez y devo
   assert.equal(restoreDecor(s).ok, true);
   assert.deepEqual(s.cleared, []);
   assert.equal(restoreDecor(s).reason, 'No hay adornos quitados');
+});
+
+/* ---------- colas ---------- */
+
+test('la cola de entrenamiento: se paga y reserva población al encargar, tiene tope por nivel y los lotes se encadenan', () => {
+  const s = fresh(5000, 5000, 4);
+  const b = place(s, 'barracks', 0, 0, T0).building;
+  const gold0 = s.gold;
+  assert.equal(startTraining(s, b.id, 'soldier', T0, 2).ok, true);
+  const used1 = supplyUsed(s);
+  const q = startTraining(s, b.id, 'soldier', T0, 3);
+  assert.deepEqual([q.ok, q.queued, q.position], [true, true, 1]);
+  assert.equal(supplyUsed(s), used1 + 3, 'la población del lote en cola ya está reservada');
+  assert.equal(s.gold, gold0 - 40 * 5, 'los dos lotes ya están pagados');
+  assert.equal(trainQueueLimit(1), 1);
+  assert.equal(startTraining(s, b.id, 'soldier', T0, 1).reason, 'La cola de este edificio está llena');
+
+  // Termina el primer lote y arranca el segundo justo a esa hora; luego termina también.
+  const first = b.training.endsAt;
+  tickAll(s, first + 1000);
+  assert.equal(s.army.soldier, 2);
+  assert.deepEqual([b.training.unit, b.training.qty, b.queue.length], ['soldier', 3, 0]);
+  assert.equal(b.training.endsAt, first + Math.round(UNITS.soldier.trainSec * batchTimeFactor(3) * 1000));
+  tickAll(s, b.training.endsAt + 1);
+  assert.equal(s.army.soldier, 5);
+  assert.equal(b.training, null);
+});
+
+test('la cola avanza también mientras no juegas: varias tandas terminan de golpe al volver', () => {
+  const s = fresh(5000, 5000, 7); // nivel 7: caben 3 lotes en cola
+  const b = place(s, 'barracks', 0, 0, T0).building;
+  b.level = 7;
+  assert.equal(trainQueueLimit(7), 3);
+  for (let i = 0; i < 4; i++) assert.equal(startTraining(s, b.id, 'soldier', T0, 2).ok, true);
+  tickAll(s, T0 + 6 * 60 * 60 * 1000);
+  assert.equal(s.army.soldier, 8);
+  assert.equal(b.training, null);
+  assert.deepEqual(b.queue, []);
+});
+
+test('héroes e investigaciones no se encolan, ni una unidad tras un héroe; sin población no se encola', () => {
+  const s = fresh(5000, 5000, 5);
+  const forge = place(s, 'forge', 0, 0, T0).building;
+  forge.level = 3;
+  assert.equal(startTraining(s, forge.id, 'weapons', T0).ok, true);
+  assert.equal(startTraining(s, forge.id, 'armor', T0).reason, 'Ya está investigando');
+  const barracks = place(s, 'barracks', 8, 0, T0).building;
+  const room = supplyCap(s) - supplyUsed(s);
+  assert.equal(startTraining(s, barracks.id, 'soldier', T0, Math.min(batchSizeOf(barracks), room)).ok, true);
+  s.buildings.push({ ...barracks, id: 99, x: 30, y: 2, training: null, queue: [] }); // otro cuartel (solo para probar el límite)
+  const full = fresh(5000, 5000, 2);
+  const bk = place(full, 'barracks', 0, 0, T0).building;
+  bk.level = 5;
+  full.army.soldier = supplyCap(full) - 1;
+  assert.equal(startTraining(full, bk.id, 'soldier', T0, 1).ok, true);
+  assert.equal(startTraining(full, bk.id, 'soldier', T0, 1).reason, 'Población al máximo: construye casas');
+});
+
+test('cola de obras: con los obreros ocupados se encarga una mejora (se paga ya) y empieza sola al liberarse uno', () => {
+  const s = fresh(9000, 9000, 3);
+  const ids = [0, 1, 2].map((x) => place(s, 'mine', x * 8, 0, T0).building.id);
+  assert.equal(queueUpgrade(s, ids[2]).reason, 'Hay un obrero libre: mejóralo directamente');
+  assert.equal(startUpgrade(s, ids[0], T0).ok, true);
+  assert.equal(startUpgrade(s, ids[1], T0).ok, true);
+  const gold0 = s.gold;
+  const r = queueUpgrade(s, ids[2]);
+  assert.deepEqual([r.ok, r.position], [true, 1]);
+  assert.equal(s.gold, gold0 - MINE[1].upgradeCost.gold, 'ya está pagada');
+  assert.equal(queueUpgrade(s, ids[2]).reason, 'Ya está en la cola de obras');
+  assert.equal(startUpgrade(s, ids[2], T0).reason, 'Ya está en la cola de obras');
+
+  // Termina la primera obra: la mejora en cola empieza en ese mismo instante.
+  const freedAt = s.buildings.find((b) => b.id === ids[0]).upgradeEndsAt;
+  tickAll(s, freedAt + 1000);
+  const third = s.buildings.find((b) => b.id === ids[2]);
+  assert.equal(third.upgradeEndsAt, freedAt + MINE[1].upgradeSec * 1000);
+  assert.deepEqual(s.upgradeQueue, []);
+  tickAll(s, third.upgradeEndsAt + 1);
+  assert.equal(third.level, 2);
+});
+
+test('cola de obras: cancelar devuelve todo, demoler también, y una mejora que ya no puede empezar se reembolsa', () => {
+  const s = fresh(9000, 9000, 3);
+  const ids = [0, 1, 2, 3].map((x) => place(s, 'mine', x * 8, 0, T0).building.id);
+  startUpgrade(s, ids[0], T0);
+  startUpgrade(s, ids[1], T0);
+  s.gold = 400; // dentro del tope de recursos (los reembolsos nunca lo pasan)
+  const gold0 = s.gold;
+  queueUpgrade(s, ids[2]);
+  queueUpgrade(s, ids[3]);
+  assert.equal(cancelQueuedUpgrade(s, ids[2]).ok, true);
+  assert.equal(s.gold, gold0 - MINE[1].upgradeCost.gold, 'queda pagada solo la que sigue en cola');
+  assert.equal(cancelQueuedUpgrade(s, ids[2]).reason, 'No está en la cola');
+  assert.equal(demolish(s, ids[3]).ok, true);
+  assert.deepEqual(s.upgradeQueue, []);
+
+  // Una mejora encargada cuyo edificio queda dañado antes de empezar: se devuelve lo pagado.
+  const t = place(s, 'mine', 40, 0, T0).building.id;
+  const before = s.gold;
+  queueUpgrade(s, t);
+  s.buildings.find((b) => b.id === t).damaged = true;
+  const events = [];
+  tickAll(s, s.buildings.find((b) => b.id === ids[0]).upgradeEndsAt + 1, events);
+  assert.ok(events.some((e) => e.type === 'upgrade_cancelled'));
+  assert.equal(s.gold, before, 'el dinero vuelve');
+  assert.deepEqual(s.upgradeQueue, []);
+});
+
+test('la cola de obras tiene un tope', () => {
+  const s = fresh(90000, 90000, 5);
+  const ids = [0, 1, 2, 3, 4, 5, 6].map((i) => place(s, 'mine', i * 6, (i % 2) * 8, T0).building.id);
+  startUpgrade(s, ids[0], T0);
+  startUpgrade(s, ids[1], T0);
+  for (const id of ids.slice(2, 5)) assert.equal(queueUpgrade(s, id).ok, true);
+  assert.equal(queueUpgrade(s, ids[5]).reason, 'La cola de obras está llena');
 });

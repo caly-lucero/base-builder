@@ -12,7 +12,7 @@ export const ART_SIZE = 64;
 // casi 1 px lógico = 1 px real); el alto se adapta a la pantalla con fitLayout() al arrancar.
 export const LAYOUT = {
   width: 432,
-  hudHeight: 56,
+  hudHeight: 68,
   viewHeight: 640, // alto de la ventana por la que se ve el mapa
   barHeight: 64,
   get gridTop() {
@@ -381,6 +381,19 @@ export const BATCH = { base: 3, perLevel: 2, extraPerUnit: 0.1 };
 export const batchLimit = (level) => BATCH.base + BATCH.perLevel * level;
 export const batchTimeFactor = (qty) => 1 + BATCH.extraPerUnit * (Math.max(1, qty) - 1);
 
+// Colas: un edificio militar guarda lotes de espera (ya pagados) tras el que entrena; más lotes cuanto más nivel tenga.
+// Las mejoras esperan por un obrero libre: se pueden dejar encargadas hasta UPGRADE_QUEUE_MAX.
+export const trainQueueLimit = (level) => 1 + Math.floor(level / 3);
+export const UPGRADE_QUEUE_MAX = 3;
+
+// Premio diario por conectarse: 7 días seguidos (si faltas un día, vuelve a empezar). Crece con el Ayuntamiento.
+export const DAILY = {
+  days: 7,
+  base: { gold: 80, wood: 40 },
+  perHallLevel: 0.6, // +60 % por cada nivel del Ayuntamiento sobre el 1
+  multipliers: [1, 1.25, 1.5, 1.75, 2, 2.5, 4], // el día 7 es el gordo
+};
+
 // Los edificios militares únicos (uno de cada): sirven para unificar partidas antiguas con varios.
 export const UNIQUE_BUILDINGS = ['barracks', 'archery', 'atelier', 'stable', 'siege', 'forge', 'altar'];
 
@@ -454,7 +467,11 @@ export const DEFENSE = {
 
 // Ataques enemigos periódicos (con aviso). Tiempos en segundos de reloj real.
 export const RAID = {
-  firstDelaySec: 10 * 60, // el primer ataque llega 10 min después de empezar
+  firstDelaySec: 20 * 60, // el primer ataque llega 20 min después de empezar (y es suave)
+  postponeSec: 8 * 60, // aplazar un ataque lo retrasa tanto...
+  postponeGoldPerLevel: 40, // ...cuesta esto de oro por nivel del Ayuntamiento...
+  maxPostpones: 2, // ...se puede hacer hasta esta cantidad de veces por ataque...
+  noPostponeSec: 60, // ...y no en el último minuto.
   intervalSec: 12 * 60, // y luego uno cada 12 min (si no estás, se resuelve uno solo al volver)
   timeLimitSec: 120, // si tu defensa aguanta este tiempo, el ataque fracasa
   maxDamaged: (townHallLevel) => 2 + townHallLevel, // el enemigo se retira tras destruir tantos edificios (sin contar muros)

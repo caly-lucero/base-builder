@@ -13,6 +13,17 @@ const RING = 6; // cuadros libres entre el Ayuntamiento y el anillo de muros
 export const missionName = (level) => `Campaña ${level}`;
 
 /**
+ * Cuántos defensores tiene el enemigo del nivel `lvl`. Un ejército crece más o menos al doble por cada nivel
+ * del Ayuntamiento (y el Ayuntamiento sube ~1 nivel cada 4 de campaña), así que la guarnición crece igual de
+ * rápido: lenta al principio (2 guardias en el nivel 1) y cada vez más numerosa. Calibrado con tools/balance.mjs.
+ */
+export const garrisonSize = (lvl) => Math.min(MAX_GARRISON, Math.round(2 + 0.9 * lvl + 0.06 * lvl * lvl + 0.0035 * lvl ** 3));
+const MAX_GARRISON = 200; // más no cabe en el mapa ni en la simulación: de ahí en adelante crece la dureza, no la cantidad
+
+/** Dureza de los defensores: sube parejo hasta el nivel 30 y, ya con la guarnición al tope, más rápido todavía. */
+const scaleOf = (lvl, perLevel) => 1 + perLevel * (Math.min(lvl, 30) - 1) + perLevel * 2 * Math.max(0, lvl - 30);
+
+/**
  * Genera la base enemiga del nivel `level` (1, 2, 3…). Devuelve:
  * { level, boss, hpScale, dmgScale, buildings: [{ type, x, y, loot }], defenders: [{ kind, x, y }] }
  * (x, y de los edificios = su cuadro de arriba a la izquierda).
@@ -93,23 +104,26 @@ export function generateMission(level) {
     }
     return { x: centerX, y: bottom - 1 };
   };
-  // Una guarnición variada: guardias en general, arqueros desde el nivel 3, chamanes desde el 6 y brutos desde el 4.
-  const total = Math.min(2 + lvl, 10);
-  const bowmen = lvl >= 3 ? Math.min(1 + Math.floor((lvl - 3) / 3), 4) : 0;
-  const shamans = lvl >= 6 ? Math.min(1 + Math.floor((lvl - 6) / 4), 3) : 0;
-  const guards = Math.max(2, total - bowmen - shamans);
-  for (let i = 0; i < guards; i++) defenders.push({ kind: 'guard', ...near() });
-  for (let i = 0; i < bowmen; i++) defenders.push({ kind: 'bowman', ...near() });
-  for (let i = 0; i < shamans; i++) defenders.push({ kind: 'shaman', ...near() });
-  for (let i = 0; i < Math.max(0, Math.floor((lvl - 2) / 2)); i++) defenders.push({ kind: 'brute', ...near() });
+  // Una guarnición variada que crece con el nivel al ritmo con que crece un ejército de verdad (ver garrisonSize):
+  // guardias en general, arqueros desde el nivel 3, brutos desde el 4, chamanes desde el 6 y arañas desde el 8.
+  const total = garrisonSize(lvl);
+  const share = (from, fraction) => (lvl >= from ? Math.max(1, Math.round(total * fraction)) : 0);
+  const bowmen = share(3, 0.18);
+  const brutes = share(4, Math.min(0.32, 0.1 + lvl * 0.01));
+  const shamans = share(6, 0.1);
+  const spiders = share(8, 0.1);
+  const guards = Math.max(2, total - bowmen - brutes - shamans - spiders);
+  for (const [kind, n] of [['guard', guards], ['bowman', bowmen], ['brute', brutes], ['shaman', shamans], ['spider', spiders]]) {
+    for (let i = 0; i < n; i++) defenders.push({ kind, ...near() });
+  }
 
   // El último enemigo de cada mapa (cada 10 niveles) es un jefe: más guarnición, más duro y con más botín.
   const boss = lvl % 10 === 0;
   if (boss) {
-    for (let i = 0; i < 3; i++) defenders.push({ kind: 'brute', ...near() });
+    for (let i = 0; i < Math.max(3, Math.round(total * 0.2)); i++) defenders.push({ kind: 'brute', ...near() });
     const heart = buildings.find((b) => b.type === 'hall');
     heart.loot = { gold: heart.loot.gold * 2, wood: heart.loot.wood * 2 };
   }
 
-  return { level: lvl, boss, hpScale: (1 + 0.12 * (lvl - 1)) * (boss ? 1.25 : 1), dmgScale: (1 + 0.08 * (lvl - 1)) * (boss ? 1.15 : 1), buildings, defenders };
+  return { level: lvl, boss, hpScale: scaleOf(lvl, 0.12) * (boss ? 1.25 : 1), dmgScale: scaleOf(lvl, 0.08) * (boss ? 1.15 : 1), buildings, defenders };
 }

@@ -269,7 +269,7 @@ test('los edificios dañados y el calendario de ataques se guardan y se recupera
   assert.equal(r.ok, true);
   assert.equal(r.state.buildings[MINE].damaged, true);
   assert.equal(r.state.buildings[HALL].damaged, false);
-  assert.deepEqual(r.state.raid, { nextAt: T0 + 123_456, count: 4 });
+  assert.deepEqual(r.state.raid, { nextAt: T0 + 123_456, count: 4, postponed: 0 });
 });
 
 test('migración v6 → v7: nada queda dañado y el calendario queda «sin programar»', () => {
@@ -291,7 +291,7 @@ test('migración v6 → v7: nada queda dañado y el calendario queda «sin progr
   const r = parseSave(JSON.stringify({ v: 6, sum: checksum(data), data }));
   assert.equal(r.ok, true);
   assert.ok(r.state.buildings.every((b) => b.damaged === false));
-  assert.deepEqual(r.state.raid, { nextAt: 0, count: 0 });
+  assert.deepEqual(r.state.raid, { nextAt: 0, count: 0, postponed: 0 });
   assert.deepEqual(r.state.campaign, { cleared: 2, stars: { 1: 1, 2: 1 } }, 'conserva la campaña; cada nivel superado cuenta como 1 estrella');
   assert.equal(r.state.buildings.length, 6, 'el muro viejo pasa a ser un bloque de 2×2 muros (4 piezas) + Ayuntamiento + mina');
 });
@@ -484,7 +484,7 @@ test('migración v7 → v8: granjas pasan a casas, el héroe pasa a ser el palad
   assert.ok(Object.values(r.state.achievements).every((n) => n === 0), 'sin logros reclamados');
   assert.deepEqual(r.state.army, { soldier: 2, archer: 0, mage: 1, knight: 0, catapult: 0, ram: 0 });
   assert.equal(r.state.hero, undefined);
-  assert.deepEqual(r.state.raid, { nextAt: T0 + 5000, count: 1 });
+  assert.deepEqual(r.state.raid, { nextAt: T0 + 5000, count: 1, postponed: 0 });
 });
 
 test('migración v7 → v8 sin héroe: queda sin héroes ni escuadra', () => {
@@ -587,4 +587,64 @@ test('los adornos quitados se guardan; los que ya no existen o se repiten se des
   bad.data.cleared = 'todos';
   bad.sum = checksum(bad.data);
   assert.equal(parseSave(JSON.stringify(bad)).ok, false);
+});
+
+test('las colas y el premio diario se guardan; una partida v12 se abre con todo vacío', async () => {
+  const { queueUpgrade } = await import('../src/game/logic.js');
+  const s = sampleState();
+  s.gold = 500;
+  s.wood = 500;
+  townHall(s).level = 4;
+  const b = place(s, 'barracks', 12, 2, T0).building;
+  assert.equal(startTraining(s, b.id, 'soldier', T0, 2).ok, true);
+  assert.equal(startTraining(s, b.id, 'soldier', T0, 3).ok, true);
+  s.daily = { day: 20_500, streak: 4 };
+  let r = parseSave(serialize(s));
+  assert.equal(r.ok, true, r.error);
+  assert.deepEqual(r.state.buildings.find((x) => x.id === b.id).queue, [{ unit: 'soldier', qty: 3 }]);
+  assert.deepEqual(r.state.daily, { day: 20_500, streak: 4 });
+  assert.equal(r.state.army.soldier, 0);
+
+  // Una mejora en cola (con los dos obreros ocupados) también se conserva.
+  const t = createNewState(T0);
+  t.gold = 2000;
+  t.wood = 2000;
+  townHall(t).level = 3;
+  const ids = [0, 1, 2].map((i) => place(t, 'mine', 2 + i * 6, 2, T0).building.id);
+  startUpgrade(t, ids[0], T0);
+  startUpgrade(t, ids[1], T0);
+  t.gold = 400;
+  assert.equal(queueUpgrade(t, ids[2]).ok, true);
+  r = parseSave(serialize(t));
+  assert.equal(r.ok, true, r.error);
+  assert.deepEqual(r.state.upgradeQueue, [ids[2]]);
+
+  // Una partida v12 (sin colas ni premio diario) se migra con todo vacío.
+  const old = JSON.parse(serialize(sampleState()));
+  delete old.data.daily;
+  delete old.data.upgradeQueue;
+  for (const x of old.data.buildings) delete x.queue;
+  old.v = 12;
+  old.sum = checksum(old.data);
+  const migrated = parseSave(JSON.stringify(old));
+  assert.equal(migrated.ok, true, migrated.error);
+  assert.deepEqual(migrated.state.daily, { day: 0, streak: 0 });
+  assert.deepEqual(migrated.state.upgradeQueue, []);
+  assert.ok(migrated.state.buildings.every((x) => Array.isArray(x.queue) && x.queue.length === 0));
+});
+
+test('colas y premio diario inválidos se rechazan', () => {
+  const s = sampleState();
+  const bad = (mutate) => {
+    const env = JSON.parse(serialize(s));
+    mutate(env.data);
+    env.sum = checksum(env.data);
+    return parseSave(JSON.stringify(env));
+  };
+  assert.equal(bad((d) => (d.daily = { day: -1, streak: 0 })).ok, false);
+  assert.equal(bad((d) => (d.daily = { day: 5, streak: 99 })).ok, false);
+  assert.equal(bad((d) => (d.upgradeQueue = [9999])).ok, false, 'un id que no existe');
+  assert.equal(bad((d) => (d.upgradeQueue = [d.buildings[1].id, d.buildings[1].id])).ok, false, 'repetido');
+  assert.equal(bad((d) => (d.buildings[2].queue = [{ unit: 'soldier', qty: 2 }])).ok, false, 'cola sin entrenamiento (y la torre no entrena)');
+  assert.equal(bad((d) => (d.buildings[1].queue = 'x')).ok, false);
 });

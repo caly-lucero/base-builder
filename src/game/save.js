@@ -4,7 +4,7 @@
 // Nota de seguridad: el checksum NO impide hacer trampa (el código está en el
 // navegador y cualquiera puede recalcularlo). Solo detecta archivos dañados o
 // editados a mano sin querer. En un juego de un jugador está bien así.
-import { ACHIEVEMENTS, ARMY_UNITS, BUILDINGS, ECONOMY, GRID, QUESTS, RESEARCH_KEYS, UNIQUE_BUILDINGS, UNITS, researchStep } from '../data/config.js';
+import { ACHIEVEMENTS, ARMY_UNITS, BUILDINGS, DAILY, ECONOMY, GRID, QUESTS, RESEARCH_KEYS, UNIQUE_BUILDINGS, UNITS, UPGRADE_QUEUE_MAX, researchStep } from '../data/config.js';
 import { HERO_MAX_LEVEL, SQUAD_SIZE, isHeroKey } from '../data/heroes.js';
 import {
   MAX_BUILDINGS,
@@ -23,7 +23,7 @@ import {
   supplyUsed,
 } from './logic.js';
 
-export const SAVE_VERSION = 12;
+export const SAVE_VERSION = 13;
 export const MAX_SAVE_BYTES = 900_000; // con muros de a un cuadro una base grande llega a miles de edificios
 
 const KEY = 'basebuilder.save';
@@ -120,7 +120,7 @@ function migrate(data, version) {
   if (version < 7) {
     d = {
       ...d,
-      raid: { nextAt: 0, count: 0 },
+      raid: { nextAt: 0, count: 0, postponed: 0 },
       buildings: Array.isArray(d.buildings) ? d.buildings.map((b) => (isPlainObject(b) ? { ...b, damaged: false } : b)) : d.buildings,
     };
   }
@@ -140,6 +140,16 @@ function migrate(data, version) {
 
   // v11 → v12: aparecieron los adornos que se pueden quitar (empiezan todos puestos).
   if (version < 12) d = { ...d, cleared: [] };
+
+  // v12 → v13: llegaron las colas (de entrenamiento y de obras) y el premio diario.
+  if (version < 13) {
+    d = {
+      ...d,
+      upgradeQueue: [],
+      daily: { day: 0, streak: 0 },
+      buildings: Array.isArray(d.buildings) ? d.buildings.map((b) => (isPlainObject(b) ? { ...b, queue: [] } : b)) : d.buildings,
+    };
+  }
 
   return d;
 }
@@ -382,7 +392,13 @@ export function validateState(d) {
   const cleared = [...new Set(d.cleared.filter((k) => typeof k === 'string' && known.has(k)))];
 
   if (!isPlainObject(d.raid) || !isNum(d.raid.nextAt, 0, MAX_TIME) || !isInt(d.raid.count, 0, 1_000_000)) bad('Calendario de ataques inválido');
-  const raid = { nextAt: d.raid.nextAt, count: d.raid.count };
+  const postponed = d.raid.postponed === undefined ? 0 : d.raid.postponed;
+  if (!isInt(postponed, 0, 100)) bad('Calendario de ataques inválido');
+  const raid = { nextAt: d.raid.nextAt, count: d.raid.count, postponed };
+
+  // Premio diario: el día (número de día del calendario) en que se reclamó el último y los días seguidos.
+  if (!isPlainObject(d.daily) || !isInt(d.daily.day, 0, 1_000_000) || !isInt(d.daily.streak, 0, DAILY.days)) bad('Premio diario inválido');
+  const daily = { day: d.daily.day, streak: d.daily.streak };
 
   const ids = new Set();
   const cells = new Set();
@@ -420,6 +436,18 @@ export function validateState(d) {
       training = { unit: b.training.unit, endsAt: b.training.endsAt, qty };
     }
 
+    // Lotes en espera (ya pagados): solo si hay un entrenamiento en curso y son unidades de este edificio.
+    const queue = [];
+    if (b.queue !== undefined) {
+      if (!Array.isArray(b.queue) || b.queue.length > 12) bad('Cola de entrenamiento inválida');
+      if (b.queue.length && !training) bad('Hay cola pero no se está entrenando');
+      const trains = BUILDINGS[b.type].trains ?? [];
+      for (const q of b.queue) {
+        if (!isPlainObject(q) || !UNITS[q.unit] || !trains.includes(q.unit) || !isInt(q.qty, 1, 99)) bad('Cola de entrenamiento inválida');
+        queue.push({ unit: q.unit, qty: q.qty });
+      }
+    }
+
     if (typeof b.damaged !== 'boolean') bad('Estado de daño inválido');
     if (b.damaged && b.type === 'townhall') bad('El Ayuntamiento no puede estar dañado');
 
@@ -440,6 +468,7 @@ export function validateState(d) {
       level: b.level,
       upgradeEndsAt: b.upgradeEndsAt,
       training,
+      queue,
       damaged: b.damaged,
       x: b.x,
       y: b.y,
@@ -449,6 +478,15 @@ export function validateState(d) {
   });
 
   if (townHalls !== 1) bad('Debe haber exactamente un Ayuntamiento');
+
+  // Mejoras encargadas: edificios que existen, sin repetir, a los que les queda un nivel por subir.
+  if (!Array.isArray(d.upgradeQueue) || d.upgradeQueue.length > UPGRADE_QUEUE_MAX) bad('Cola de obras inválida');
+  const queued = new Set();
+  for (const id of d.upgradeQueue) {
+    const target = buildings.find((x) => x.id === id);
+    if (!target || queued.has(id) || target.level >= BUILDINGS[target.type].levels.length) bad('Cola de obras inválida');
+    queued.add(id);
+  }
 
   let cap = ECONOMY.baseCap;
   for (const b of buildings) cap += BUILDINGS[b.type].levels[b.level - 1].capBonus ?? 0;
@@ -466,6 +504,8 @@ export function validateState(d) {
     achievements,
     campaign,
     cleared,
+    upgradeQueue: [...queued],
+    daily,
     raid,
     buildings,
   };

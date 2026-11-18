@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 import { ASSET_BASE, IMAGES, SHEETS, SOUNDS } from '../data/assets.js';
-import { ARMY_UNITS, BUILDINGS, CAMERA, ECONOMY, GRID, LAYOUT, TERRAIN, RESEARCH, RESOURCES, TOOL_PAGES, UNIQUE_BUILDINGS, UNITS, batchTimeFactor, researchStep } from '../data/config.js';
+import { ARMY_UNITS, BUILDINGS, CAMERA, ECONOMY, DAILY, GRID, LAYOUT, RAID, TERRAIN, RESEARCH, RESOURCES, TOOL_PAGES, UNIQUE_BUILDINGS, UNITS, UPGRADE_QUEUE_MAX, batchTimeFactor, researchStep, trainQueueLimit } from '../data/config.js';
 import { HEROES, HERO_KEYS, heroXpToNext } from '../data/heroes.js';
 import { decorKey, generateDecor, generateOuterDecor } from '../game/decor.js';
 import * as logic from '../game/logic.js';
@@ -29,8 +29,10 @@ import { fitIcon as fitIconArt, missingRotationArt, placeOnTile as placeOnTileAr
 import { ensureTerrainTextures, grassKey, strokeCell } from './terrainArt.js';
 import { SHEET, unitFrame } from '../game/unitArt.js';
 import { canAttack, nextCampaignLevel } from '../game/campaign.js';
+import { clearBattle } from '../game/battleSave.js';
+import { claimDaily, dailyAvailable, dailyDay, dailyReward } from '../game/daily.js';
 import { generateMission, missionName } from '../game/missions.js';
-import { raidCountdownMs, raidLevel } from '../game/raids.js';
+import { postponeBlocked, postponeCost, postponeRaid, raidCountdownMs, raidLevel } from '../game/raids.js';
 import * as quests from '../game/quests.js';
 import * as store from '../game/store.js';
 import { flowerSpots, occupiedBlocks, pathTiles, pondTiles } from '../game/landscape.js';
@@ -207,6 +209,7 @@ export default class BaseScene extends Phaser.Scene {
       .setOrigin(0.5, 0)
       .setAlpha(0)
       .setDepth(DEPTH.toast);
+    this.events.once('shutdown', ui.watchOtherTab(this, store.onSuperseded));
     // Los avisos de la página (exportar, importar…) también salen aquí.
     const off = onNotice((text) => this.showToast(text, 2400));
     this.events.once('shutdown', off);
@@ -240,6 +243,8 @@ export default class BaseScene extends Phaser.Scene {
       );
     }
     this.rebuildViews();
+    // Al abrir el juego: pantalla de inicio (Continuar / Nueva partida / Cómo se juega). La primera vez, directo al tutorial.
+    if (data?.title) this.time.delayedCall(200, () => (data.fresh ? this.showTutorial(0) : this.showTitle(data.pending)));
     // De vuelta de ver la defensa: el informe del ataque.
     if (data?.raidReport) this.time.delayedCall(350, () => this.openRaidReport(data.raidReport));
   }
@@ -402,7 +407,9 @@ export default class BaseScene extends Phaser.Scene {
     this.hudGold = block(8, 'coin');
     this.hudWood = block(152, 'wood');
     this.hudPop = block(296, 'pop');
-    this.buildersText = ui.label(this, W - 8, 47, '', { size: 10, color: ui.TXT.blue, origin: [1, 0.5], depth: d + 2 });
+    // Segunda fila, más grande: obreros ocupados y nivel del Ayuntamiento.
+    this.buildersText = ui.label(this, 10, 56, '', { size: 13, bold: true, color: ui.TXT.blue, origin: [0, 0.5], depth: d + 2 });
+    this.hallText = ui.label(this, W - 10, 56, '', { size: 13, bold: true, color: ui.TXT.gold, origin: [1, 0.5], depth: d + 2 });
 
     // Tocar la población abre la ventana del ejército (qué tropas tienes).
     this.add
@@ -434,7 +441,11 @@ export default class BaseScene extends Phaser.Scene {
     this.hudGold.amount.setColor(state.gold >= cap ? ui.TXT.bad : ui.TXT.gold);
     this.hudWood.amount.setColor(state.wood >= cap ? ui.TXT.bad : ui.TXT.wood);
     this.hudPop.amount.setColor(used >= supply ? ui.TXT.bad : ui.TXT.light);
-    this.buildersText.setText(`Obreros ${logic.busyBuilders(state)}/${ECONOMY.builders} · Ayunt. ${logic.townHallLevel(state)}`);
+    const busy = logic.busyBuilders(state);
+    const waiting = state.upgradeQueue.length;
+    this.buildersText.setText(`Obreros ${busy}/${ECONOMY.builders}${waiting ? ` · cola ${waiting}` : ''}`);
+    this.buildersText.setColor(busy >= ECONOMY.builders ? ui.TXT.bad : ui.TXT.blue);
+    this.hallText.setText(`Ayuntamiento nivel ${logic.townHallLevel(state)}`);
   }
 
   /** Barra de abajo: cinco botones grandes. Construir abre la hoja de edificios. */
@@ -544,9 +555,11 @@ export default class BaseScene extends Phaser.Scene {
       add(ui.label(this, x + cw / 2 - 8, y - cardH / 2 + 8, locked ? '' : `${count}/${limit}`, { size: 11, bold: true, origin: [1, 0], depth: d + 2, color: full ? ui.TXT.bad : ui.TXT.dim }));
       if (locked) {
         const need = logic.unlockLevel(tool);
-        add(this.add.rectangle(x, y, cw - 4, cardH - 4, 0x000000, 0.55).setDepth(d + 3));
-        add(ui.icon(this, x, y - 14, 'lock', 24, d + 4));
-        add(ui.label(this, x, y + 12, need ? `Ayuntamiento ${need}` : '—', { size: 11, bold: true, origin: [0.5, 0.5], depth: d + 4, color: ui.TXT.gold }));
+        add(this.add.rectangle(x, y, cw - 4, cardH - 4, 0x000000, 0.62).setDepth(d + 3));
+        // El nombre real del edificio sigue legible encima del velo, y debajo qué hace falta para abrirlo.
+        add(ui.label(this, x, y - 36, def.shortName ?? def.name, { size: 13, bold: true, origin: [0.5, 0.5], align: 'center', depth: d + 4, color: ui.TXT.light }));
+        add(ui.icon(this, x, y - 8, 'lock', 24, d + 4));
+        add(ui.label(this, x, y + 18, need ? `Pide Ayuntamiento\nnivel ${need}` : 'Aún no disponible', { size: 11, bold: true, origin: [0.5, 0.5], align: 'center', depth: d + 4, color: ui.TXT.gold }));
       } else if (full || !can) card.setAlpha(0.8);
       card.on('pointerdown', () => {
         ui.haptic();
@@ -638,6 +651,10 @@ export default class BaseScene extends Phaser.Scene {
         return upgradeLabel;
       },
       setAlpha() {
+        return upgradeLabel;
+      },
+      setColor(c) {
+        up.text?.setColor(c);
         return upgradeLabel;
       },
     };
@@ -744,6 +761,9 @@ export default class BaseScene extends Phaser.Scene {
         store.get().cleared.length < logic.allDecorKeys().length
           ? { text: 'Quitar todos los adornos', kind: 'dark2', onClick: () => this.doAction(() => logic.clearAllDecor(store.get()), () => 'Mapa limpio: sin árboles ni rocas', 'demolish') }
           : { text: 'Devolver los adornos', kind: 'dark2', onClick: () => this.doAction(() => logic.restoreDecor(store.get()), () => 'Árboles y rocas de vuelta', 'place') },
+        dailyAvailable(store.get())
+          ? { text: 'Premio diario: ¡reclamar!', kind: 'gold', onClick: () => this.showDaily() }
+          : { text: `Premio diario: mañana día ${dailyDay(store.get()) % DAILY.days + 1}`, kind: 'dark2', onClick: () => this.showToast('Ya reclamaste el premio de hoy. ¡Vuelve mañana!') },
         { text: 'Exportar partida', kind: 'blue', onClick: () => runMenu('export') },
         { text: 'Importar partida', kind: 'blue', onClick: () => runMenu('import') },
         { text: 'Nueva partida', kind: 'red', onClick: () => runMenu('reset') },
@@ -765,6 +785,13 @@ export default class BaseScene extends Phaser.Scene {
     this.closeModal();
     this.closeBuildSheet();
     this.scene.start('BattleScene', { report });
+  }
+
+  /** Vuelve al campo de batalla que quedó a medias. */
+  resumeBattle(pending) {
+    store.persist();
+    this.closeModal();
+    this.scene.start('BattleScene', { level: pending.level, resume: pending.snapshot });
   }
 
   startBattle(level) {
@@ -838,6 +865,113 @@ export default class BaseScene extends Phaser.Scene {
     );
   }
 
+  /* ---------- pantalla de inicio y minitutorial ---------- */
+
+  /** Pantalla de inicio al abrir el juego: sigue con tu base, empieza de cero o repasa cómo se juega. */
+  showTitle(pending = null) {
+    const state = store.get();
+    const wonMaps = Math.floor(state.campaign.cleared / 10);
+    this.dialog({
+      title: 'Base Builder',
+      icon: 'crown',
+      lines: [
+        `Ayuntamiento nivel ${logic.townHallLevel(state)} · ${state.buildings.length} edificios`,
+        `Campaña: ${state.campaign.cleared} ${state.campaign.cleared === 1 ? 'enemigo vencido' : 'enemigos vencidos'}${wonMaps ? ` · ${wonMaps} ${wonMaps === 1 ? 'mapa completo' : 'mapas completos'}` : ''}`,
+      ],
+      vertical: true,
+      buttons: [
+        pending
+          ? { text: `Retomar la batalla (${missionName(pending.level)})`, kind: 'red', icon: 'swords', onClick: () => this.resumeBattle(pending) }
+          : null,
+        {
+          text: pending ? 'Ir a mi base (descartar la batalla)' : 'Continuar',
+          kind: 'green',
+          icon: 'flag',
+          onClick: () => {
+            clearBattle();
+            this.maybeDaily();
+          },
+        },
+        { text: 'Cómo se juega', kind: 'blue', onClick: () => this.showTutorial(0, true) },
+        {
+          text: 'Nueva partida',
+          kind: 'dark2',
+          onClick: () =>
+            this.dialog({
+              title: '¿Empezar de cero?',
+              icon: 'warning',
+              tone: 'bad',
+              lines: ['Se borrará tu partida actual.', 'Antes puedes guardarla con Exportar (Menú).'],
+              buttons: [
+                { text: 'Cancelar', kind: 'dark2', onClick: () => this.showTitle() },
+                {
+                  text: 'Sí, borrar',
+                  kind: 'red',
+                  onClick: () => {
+                    clearBattle();
+                    store.reset();
+                    this.showTutorial(0);
+                  },
+                },
+              ],
+            }),
+        },
+      ],
+    });
+  }
+
+  /** Minitutorial de 4 pantallas. `fromTitle` hace que «Saltar» vuelva a la pantalla de inicio. */
+  showTutorial(page = 0, fromTitle = false) {
+    const pages = [
+      { title: 'Recursos', icon: 'coin', lines: ['Las minas dan oro y los aserraderos madera.', 'Toca un edificio para mejorarlo.', 'Más obreros libres = más mejoras a la vez.'] },
+      { title: 'Construir', icon: 'hammer', lines: ['Botón Construir: elige un edificio y tócalo en el mapa.', 'Mantén pulsado para moverlo.', 'Dos dedos = zoom · flechas de giro = otra vista.'] },
+      { title: 'Ejército y héroes', icon: 'swords', lines: ['El Cuartel y demás edificios entrenan tropas.', 'Toca la población (arriba) para ver tu ejército.', 'Con un Altar invocas héroes.'] },
+      { title: 'Ataques y campaña', icon: 'warning', lines: ['Cada pocos minutos llega un ataque (cartel «Ataque en»).', 'Torres, muros y tropas defienden solos.', 'Atacar: mapa con 10 enemigos y estrellas.'] },
+    ];
+    const p = pages[page];
+    const last = page === pages.length - 1;
+    this.dialog({
+      title: `${page + 1}/${pages.length} · ${p.title}`,
+      icon: p.icon,
+      lines: p.lines,
+      vertical: false,
+      buttons: [
+        { text: fromTitle ? 'Volver' : 'Saltar', kind: 'dark2', onClick: () => (fromTitle ? this.showTitle() : this.maybeDaily()) },
+        { text: last ? '¡A jugar!' : 'Siguiente', kind: 'green', close: true, onClick: () => (last ? (fromTitle ? this.showTitle() : this.maybeDaily()) : this.showTutorial(page + 1, fromTitle)) },
+      ],
+    });
+  }
+
+  /* ---------- premio diario ---------- */
+
+  /** Al abrir el juego: si hoy aún no reclamaste el premio, lo ofrece. */
+  maybeDaily() {
+    if (dailyAvailable(store.get())) this.time.delayedCall(150, () => this.showDaily());
+  }
+
+  showDaily() {
+    const state = store.get();
+    const day = dailyDay(state);
+    const give = dailyReward(state, day);
+    this.dialog({
+      title: `Premio diario · día ${day}/${DAILY.days}`,
+      icon: 'star',
+      tone: 'good',
+      lines: [
+        `+${give.gold} de oro · +${give.wood} de madera`,
+        day === DAILY.days ? '¡El premio grande de la semana!' : `Mañana, día ${day + 1}: todavía más`,
+        'Entra cada día para no perder la racha.',
+      ],
+      buttons: [
+        {
+          text: '¡Reclamar!',
+          kind: 'green',
+          onClick: () => this.doAction(() => claimDaily(store.get()), (r) => `Premio diario: +${r.reward.gold} oro · +${r.reward.wood} madera`, 'upgrade_done'),
+        },
+      ],
+    });
+  }
+
   /* ---------- ataques enemigos: aviso, reparación e informe ---------- */
 
   /** A la derecha de la misión: cuenta regresiva del próximo ataque y, si hay, lo dañado (se toca para reparar). */
@@ -847,19 +981,23 @@ export default class BaseScene extends Phaser.Scene {
     const x = W - 6 - w;
     const y = LAYOUT.gridTop + 6;
     const d = DEPTH.zoomButtons;
-    const bg = ui.panel(this, x + w / 2, y + 20, w, 40, 'card', d).setInteractive({ useHandCursor: true });
-    const ic = ui.icon(this, x + 18, y + 20, 'warning', 22, d + 1);
-    const line1 = ui.label(this, x + 33, y + 20, '', { size: 14, bold: true, color: ui.TXT.bad, origin: [0, 0.5], depth: d + 1 });
-    const fix = ui.panel(this, x + w / 2, y + 62, w, 30, 'card', d).setInteractive({ useHandCursor: true });
-    const fixIc = ui.icon(this, x + 18, y + 62, 'wrench', 18, d + 1);
-    const fixText = ui.label(this, x + 32, y + 62, '', { size: 12, bold: true, color: '#ffcf8a', origin: [0, 0.5], depth: d + 1 });
+    const bg = ui.panel(this, x + w / 2, y + 24, w, 48, 'card', d).setInteractive({ useHandCursor: true });
+    const ic = ui.icon(this, x + 18, y + 26, 'warning', 22, d + 1);
+    const caption = ui.label(this, x + 33, y + 12, 'ATAQUE EN', { size: 9, bold: true, color: ui.TXT.dim, origin: [0, 0.5], depth: d + 1 });
+    const line1 = ui.label(this, x + 33, y + 31, '', { size: 15, bold: true, color: ui.TXT.bad, origin: [0, 0.5], depth: d + 1 });
+    const fix = ui.panel(this, x + w / 2, y + 70, w, 30, 'card', d).setInteractive({ useHandCursor: true });
+    const fixIc = ui.icon(this, x + 18, y + 70, 'wrench', 18, d + 1);
+    const fixText = ui.label(this, x + 32, y + 70, '', { size: 12, bold: true, color: '#ffcf8a', origin: [0, 0.5], depth: d + 1 });
     const click = () => {
       ui.haptic();
       this.onRaidBannerClick();
     };
-    bg.on('pointerdown', click);
+    bg.on('pointerdown', () => {
+      ui.haptic();
+      this.onRaidInfo();
+    });
     fix.on('pointerdown', click);
-    this.raidBanner = { bg, line1, ic, fix, fixIc, fixText };
+    this.raidBanner = { bg, line1, ic, fix, fixIc, fixText, caption };
   }
 
   updateRaidBanner() {
@@ -867,14 +1005,45 @@ export default class BaseScene extends Phaser.Scene {
     const ms = raidCountdownMs(state, Date.now());
     const imminent = ms <= 60_000;
     const damaged = logic.damagedBuildings(state);
-    const { bg, line1, ic, fix, fixIc, fixText } = this.raidBanner;
+    const { bg, line1, ic, fix, fixIc, fixText, caption } = this.raidBanner;
     line1.setText(logic.formatDuration(ms));
+    caption.setText(imminent ? '¡YA LLEGAN!' : 'ATAQUE EN');
     line1.setColor(imminent ? '#ffe08a' : ui.TXT.bad);
     bg.setTint(imminent ? 0xffe9a0 : 0xffffff);
     ic.setTint(imminent ? 0xffd24d : 0xffffff);
     const anyDamage = damaged.length > 0;
     for (const p of [fix, fixIc, fixText]) p.setVisible(anyDamage);
     if (anyDamage) fixText.setText(`${damaged.length} · reparar`);
+  }
+
+  /** Tocar el cartel del ataque: cuándo llega, qué fuerza trae y, si quieres, aplazarlo. */
+  onRaidInfo() {
+    const state = store.get();
+    const now = Date.now();
+    const why = postponeBlocked(state, now);
+    const cost = postponeCost(state);
+    const left = RAID.maxPostpones - (state.raid.postponed ?? 0);
+    this.dialog({
+      title: 'Próximo ataque enemigo',
+      icon: 'warning',
+      tone: 'bad',
+      lines: [
+        `Llega en ${logic.formatDuration(raidCountdownMs(state, now))} · fuerza ${raidLevel(state)}`,
+        'Tus defensas pelean solas.',
+        'Lo que está en obras no se daña.',
+        why ?? `Puedes aplazarlo ${left} ${left === 1 ? 'vez' : 'veces'} más`,
+      ],
+      vertical: true,
+      buttons: [
+        {
+          text: `Aplazar ${RAID.postponeSec / 60} min · ${logic.formatCost(cost)}`,
+          kind: 'gold',
+          onClick: () => this.doAction(() => postponeRaid(store.get(), Date.now()), () => `Ataque aplazado ${RAID.postponeSec / 60} min`, 'upgrade_start'),
+          disabled: Boolean(why),
+        },
+        { text: 'Cerrar', kind: 'dark2' },
+      ],
+    });
   }
 
   onRaidBannerClick() {
@@ -900,6 +1069,7 @@ export default class BaseScene extends Phaser.Scene {
     const lines = [
       `Fuerza ${r.level} · atacantes derrotados: ${r.kills}`,
       r.damaged ? `Edificios dañados: ${r.damaged}` : 'Ningún edificio dañado',
+      r.protected ? `Libraron el daño por estar en obras: ${r.protected}` : null,
       stolen ? `Robaron: ${stolen}` : 'No robaron nada',
       r.heroes?.length && r.xp ? `Héroes: +${r.xp} XP${r.heroLevelUps ? ' · ¡SUBEN DE NIVEL!' : ''}` : null,
     ].filter(Boolean);
@@ -951,7 +1121,7 @@ export default class BaseScene extends Phaser.Scene {
     const minus = ui.button(this, { x: W - 185, y: sy, w: 38, h: 28, kind: 'dark2', text: '−', size: 18, depth: d + 1, onClick: () => this.changeTrainQty(-1) });
     const plus = ui.button(this, { x: W - 99, y: sy, w: 38, h: 28, kind: 'dark2', text: '+', size: 18, depth: d + 1, onClick: () => this.changeTrainQty(1) });
     const max = ui.button(this, { x: W - 44, y: sy, w: 62, h: 28, kind: 'blue', text: 'Máx', size: 12, depth: d + 1, onClick: () => this.changeTrainQty(Infinity) });
-    this.qtyBar = { parts: [...bar, title, value, ...minus.objs, ...plus.objs, ...max.objs], value, minus, plus, max };
+    this.qtyBar = { title, parts: [...bar, title, value, ...minus.objs, ...plus.objs, ...max.objs], value, minus, plus, max };
     for (const p of this.qtyBar.parts) p.setVisible(false);
     this.trainQty = 1;
   }
@@ -980,7 +1150,10 @@ export default class BaseScene extends Phaser.Scene {
     for (const p of this.qtyBar.parts) p.setVisible(batch);
     if (batch) {
       const top = logic.batchSizeOf(b);
-      const busyNow = logic.isTraining(b) || logic.isUpgrading(b) || b.damaged;
+      const training = logic.isTraining(b);
+      const room = training && UNITS[b.training.unit] && (b.queue?.length ?? 0) < trainQueueLimit(b.level); // cabe otro lote en la cola
+      const busyNow = logic.isUpgrading(b) || b.damaged || (training && !room);
+      this.qtyBar.title.setText(training ? `En cola ${b.queue?.length ?? 0}/${trainQueueLimit(b.level)} · lote` : 'Entrenar a la vez');
       this.qtyBar.value.setText(`${qty}/${top}`);
       this.qtyBar.minus.setEnabled(!busyNow && qty > 1);
       this.qtyBar.plus.setEnabled(!busyNow && qty < top);
@@ -994,9 +1167,13 @@ export default class BaseScene extends Phaser.Scene {
       for (const p of card.parts) p.setVisible(Boolean(key));
       if (!key) return;
 
-      const busy = logic.isTraining(b) || logic.isUpgrading(b) || b.damaged;
+      const trainingNow = logic.isTraining(b);
+      const queueRoom = trainingNow && UNITS[b.training.unit] && (b.queue?.length ?? 0) < trainQueueLimit(b.level);
+      // Una unidad se puede dejar en cola mientras se entrena otra; héroes e investigaciones no.
+      const busy = logic.isUpgrading(b) || b.damaged || (trainingNow && !(UNITS[key] && queueRoom));
       const factor = logic.statsOf(b.type, b.level).trainFactor ?? 1;
       let usable = true;
+      card.cost.setColor(ui.TXT.gold);
 
       if (key === '__heroes') {
         // Un solo botón: abre la ventana de héroes (invocar, escuadra y árboles de poder).
@@ -1014,8 +1191,9 @@ export default class BaseScene extends Phaser.Scene {
         const c = logic.unitCombat(state, key);
         this.fitIcon(card.icon, u.sprite, card.ix, card.iy, 34);
         card.name.setText(`${u.name} nv. ${logic.unitLevel(state, key)}`);
-        card.cost.setText(locked ? `Pide nivel ${u.minLevel}` : compact(cost));
-        card.info.setText(`${logic.formatDuration(u.trainSec * batchTimeFactor(qty) * factor * 1000)} · ×${qty}`);
+        card.cost.setText(locked ? `Mejora a nivel ${u.minLevel}` : compact(cost));
+        card.cost.setColor(!locked && !affordable ? ui.TXT.bad : ui.TXT.gold); // en rojo si no alcanzan los recursos o la población
+        card.info.setText(`${trainingNow ? 'En cola · ' : ''}${logic.formatDuration(u.trainSec * batchTimeFactor(qty) * factor * 1000)} · ×${qty}`);
         card.stats.setText(`Vida ${c.hp} · Daño ${c.dmg}`);
       } else if (RESEARCH[key]) {
         const r = RESEARCH[key];
@@ -1026,6 +1204,7 @@ export default class BaseScene extends Phaser.Scene {
         this.fitIcon(card.icon, key === 'weapons' ? 'unit_knight' : key === 'armor' ? 'wall_3' : 'tower_2', card.ix, card.iy, 34);
         card.name.setText(`${r.name} ${level}`);
         card.cost.setText(maxed ? (level >= 10 ? 'Al máximo' : 'Mejora la Herrería') : logic.formatCost(step.cost));
+        if (!maxed && !logic.canAfford(state, step.cost)) card.cost.setColor(ui.TXT.bad);
         card.info.setText(maxed ? '' : logic.formatDuration(step.sec * factor * 1000));
         card.stats.setText(`Ahora +${pct(level * r.perLevel)}${maxed ? '' : ` → +${pct((level + 1) * r.perLevel)}`}`);
       }
@@ -1044,7 +1223,7 @@ export default class BaseScene extends Phaser.Scene {
     const qty = UNITS[key] ? this.trainQty ?? 1 : 1;
     this.doAction(
       () => logic.startTraining(store.get(), id, key, Date.now(), qty),
-      (r) => `${RESEARCH[key] ? 'Investigando' : 'Entrenando'} ${qtyName(key, r.qty ?? 1)}: ${logic.formatDuration(r.endsAt - Date.now())}`,
+      (r) => (r.queued ? `En cola (${r.position}): ${qtyName(key, r.qty ?? 1)}` : `${RESEARCH[key] ? 'Investigando' : 'Entrenando'} ${qtyName(key, r.qty ?? 1)}: ${logic.formatDuration(r.endsAt - Date.now())}`),
       'upgrade_start',
     );
     this.updatePanel();
@@ -1435,7 +1614,8 @@ export default class BaseScene extends Phaser.Scene {
     }
     if (logic.isTraining(b)) {
       const verb = RESEARCH[b.training.unit] ? 'Investigando' : HEROES[b.training.unit] ? 'Invocando a' : 'Entrenando';
-      detail.setText(`${verb} ${qtyName(b.training.unit, b.training.qty ?? 1)}…\nTermina en ${logic.formatDuration(b.training.endsAt - Date.now())}`);
+      const waiting = (b.queue ?? []).map((q) => qtyName(q.unit, q.qty));
+      detail.setText(`${verb} ${qtyName(b.training.unit, b.training.qty ?? 1)}…\nTermina en ${logic.formatDuration(b.training.endsAt - Date.now())}${waiting.length ? `\nEn cola: ${waiting.join(', ')}` : ''}`);
       hideButton();
       return;
     }
@@ -1458,12 +1638,19 @@ export default class BaseScene extends Phaser.Scene {
     }
 
     const capped = b.type !== 'townhall' && b.level >= logic.townHallLevel(state);
-    const affordable = logic.canAfford(state, next.upgradeCost) && logic.busyBuilders(state) < ECONOMY.builders && !capped;
+    const poor = !logic.canAfford(state, next.upgradeCost);
+    const queued = logic.isQueuedUpgrade(state, b.id);
+    const noWorker = logic.busyBuilders(state) >= ECONOMY.builders;
+    // Con los obreros ocupados la mejora se puede dejar encargada: se paga ya y empieza sola.
+    const wantsQueue = noWorker && !queued;
+    const affordable = queued || (!poor && !capped && (!noWorker || state.upgradeQueue.length < UPGRADE_QUEUE_MAX));
+    if (queued) detail.setText(`${lines.join('\n')}\nMejora en cola de obras (${state.upgradeQueue.indexOf(b.id) + 1}/${UPGRADE_QUEUE_MAX}): empieza al liberarse un obrero`);
     upgradeBtn.setVisible(true).setAlpha(affordable ? 1 : 0.5);
     upgradeLabel
-      .setText(`Mejorar · ${logic.formatDuration(next.upgradeSec * 1000)}\n${logic.formatCost(next.upgradeCost)}`)
+      .setText(queued ? 'Cancelar la cola\n(se devuelve todo)' : `${wantsQueue ? 'En cola' : 'Mejorar'} · ${logic.formatDuration(next.upgradeSec * 1000)}\n${logic.formatCost(next.upgradeCost)}`)
       .setVisible(true)
-      .setAlpha(affordable ? 1 : 0.5);
+      .setAlpha(affordable ? 1 : 0.5)
+      .setColor(poor ? '#ffb0a0' : '#ffffff'); // el costo se tiñe de rojo si no alcanzan los recursos
   }
 
   onUpgradeClick() {
@@ -1479,6 +1666,17 @@ export default class BaseScene extends Phaser.Scene {
         () => 'Reparado',
         'upgrade_done',
       );
+      this.updatePanel();
+      return;
+    }
+    const now = store.get();
+    if (logic.isQueuedUpgrade(now, id)) {
+      this.doAction(() => logic.cancelQueuedUpgrade(store.get(), id), () => 'Mejora en cola cancelada: te devolvimos lo pagado', 'close');
+      this.updatePanel();
+      return;
+    }
+    if (logic.busyBuilders(now) >= ECONOMY.builders) {
+      this.doAction(() => logic.queueUpgrade(store.get(), id), (r) => `En cola de obras (${r.position}/${UPGRADE_QUEUE_MAX}): empieza cuando se libere un obrero`, 'upgrade_start');
       this.updatePanel();
       return;
     }
@@ -1861,6 +2059,8 @@ export default class BaseScene extends Phaser.Scene {
           const c = this.centerOnScreen(done);
           sparkBurst(this, c.x, c.y - 8 * view.zoom, DEPTH.ghost - 5, 0x9fd8ff, 14);
         }
+      } else if (e.type === 'upgrade_cancelled') {
+        out.push(`${logic.displayName(e.building, 1)}: la mejora en cola no pudo empezar; te devolvimos lo pagado`);
       } else if (e.type === 'raid') {
         if (e.report.live && e.report.replay) this.startDefense(e.report); // llegó mientras jugabas: se ve la pelea
         else this.openRaidReport(e.report); // llegó mientras no estabas: solo el informe

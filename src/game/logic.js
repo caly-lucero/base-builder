@@ -1,6 +1,6 @@
 // Lógica pura del juego: no toca el DOM, Phaser ni localStorage.
 // Todas las funciones reciben el estado y el tiempo (`now`) para poder probarlas.
-import { ACHIEVEMENTS, ARMY_UNITS, BUILDINGS, ECONOMY, GRID, MAX_LEVEL, RAID, RESEARCH, RESEARCH_KEYS, RESOURCES, RESOURCE_NAMES, UNIQUE_BUILDINGS, UNITS, batchLimit, batchTimeFactor, researchStep } from '../data/config.js';
+import { ACHIEVEMENTS, ARMY_UNITS, BUILDINGS, ECONOMY, GRID, MAX_LEVEL, RAID, RESEARCH, RESEARCH_KEYS, RESOURCES, RESOURCE_NAMES, UNIQUE_BUILDINGS, UNITS, UPGRADE_QUEUE_MAX, batchLimit, batchTimeFactor, researchStep, trainQueueLimit } from '../data/config.js';
 import { HEROES, SQUAD_SIZE, heroCap, isHeroKey } from '../data/heroes.js';
 import { decorKey, generateDecor } from './decor.js';
 
@@ -13,7 +13,7 @@ export const TOWN_HALL_CELL = {
 };
 
 export function createBuilding(id, type, x, y, now, level = 1) {
-  return { id, type, level, upgradeEndsAt: null, training: null, damaged: false, x, y, stored: 0, lastTick: now };
+  return { id, type, level, upgradeEndsAt: null, training: null, queue: [], damaged: false, x, y, stored: 0, lastTick: now };
 }
 
 /** Ejército vacío: { soldier: 0, archer: 0, mage: 0, … }. */
@@ -32,10 +32,12 @@ export function createNewState(now = Date.now()) {
     nextId: 2,
     buildings: [createBuilding(1, 'townhall', TOWN_HALL_CELL.x, TOWN_HALL_CELL.y, now)],
     claimedQuests: [], // ids de las misiones ya reclamadas (ver quests.js)
-    raid: { nextAt: now + RAID.firstDelaySec * 1000, count: 0 }, // próximo ataque enemigo y cuántos ha habido (ver raids.js)
+    raid: { nextAt: now + RAID.firstDelaySec * 1000, count: 0, postponed: 0 }, // próximo ataque enemigo y cuántos ha habido (ver raids.js)
     army: emptyArmy(), // unidades entrenadas, por tipo
     heroes: {}, // héroes que tienes: { paladin: { level, xp }, … } (ver heroes.js)
     squad: [], // los (hasta 2) que salen a pelear, por clave
+    upgradeQueue: [], // ids de edificios con una mejora encargada que espera un obrero libre (ya pagada)
+    daily: { day: 0, streak: 0 }, // premio diario: último día reclamado y racha (ver daily.js)
     cleared: [], // adornos del mapa (árboles, rocas…) que el jugador quitó: sus claves "x,y" (ver decor.js)
     research: emptyResearch(), // nivel de cada investigación de la Herrería
     achievements: emptyAchievements(), // niveles reclamados de cada logro (ver achievements.js)
@@ -225,7 +227,10 @@ export function supplyUsed(state) {
   let used = 0;
   for (const u of ARMY_UNITS) used += (state.army[u] ?? 0) * UNITS[u].supply;
   for (const key of Object.keys(state.heroes)) used += HEROES[key]?.supply ?? 0;
-  for (const b of state.buildings) if (b.training) used += supplyOf(b.training.unit) * (b.training.qty ?? 1);
+  for (const b of state.buildings) {
+    if (b.training) used += supplyOf(b.training.unit) * (b.training.qty ?? 1);
+    for (const q of b.queue ?? []) used += supplyOf(q.unit) * q.qty; // lo que espera en cola ya está pagado y reservado
+  }
   return used;
 }
 
@@ -424,41 +429,114 @@ export function trainSecOf(state, key) {
   return null;
 }
 
-/** Termina el entrenamiento de un edificio si le toca: suma la unidad, crea al héroe o sube la investigación. */
-function tickTraining(state, b, now, events) {
-  if (!b.training) return;
-  const key = b.training.unit;
-  const sec = trainSecOf(state, key);
-  if (sec === null) {
-    b.training = null; // desconocido: se descarta
-    return;
-  }
-  // Igual que las mejoras: nunca queda más lejos que la duración completa.
-  const qty = b.training.qty ?? 1;
-  b.training.endsAt = Math.min(b.training.endsAt, now + sec * batchTimeFactor(qty) * 1000);
-  if (now < b.training.endsAt) return;
+/** Cuánto tarda en este edificio un lote de `qty` unidades de `key`, en milisegundos. */
+const batchMs = (b, key, qty) => Math.round(UNITS[key].trainSec * batchTimeFactor(qty) * 1000 * (statsOf(b.type, b.level).trainFactor ?? 1));
 
-  b.training = null;
-  if (HEROES[key]) {
-    if (!state.heroes[key]) state.heroes[key] = { level: 1, xp: 0 };
-    if (state.squad.length < SQUAD_SIZE && !state.squad.includes(key)) state.squad.push(key); // sale a pelear si hay lugar
-  } else if (RESEARCH[key]) {
-    state.research[key] = Math.min(MAX_LEVEL, researchLevel(state, key) + 1);
-  } else {
-    state.army[key] = (state.army[key] ?? 0) + qty;
+/**
+ * Termina el entrenamiento de un edificio si le toca: suma la unidad, crea al héroe o sube la investigación.
+ * Si hay lotes en cola, el siguiente empieza justo cuando terminó el anterior (también si pasó mientras no estabas).
+ */
+function tickTraining(state, b, now, events) {
+  for (let guard = 0; b.training && guard < 20; guard++) {
+    const key = b.training.unit;
+    const sec = trainSecOf(state, key);
+    if (sec === null) {
+      b.training = null; // desconocido: se descarta
+      b.queue = [];
+      return;
+    }
+    // Igual que las mejoras: nunca queda más lejos que la duración completa.
+    const qty = b.training.qty ?? 1;
+    b.training.endsAt = Math.min(b.training.endsAt, now + sec * batchTimeFactor(qty) * 1000);
+    if (now < b.training.endsAt) return;
+
+    const endedAt = b.training.endsAt;
+    b.training = null;
+    if (HEROES[key]) {
+      if (!state.heroes[key]) state.heroes[key] = { level: 1, xp: 0 };
+      if (state.squad.length < SQUAD_SIZE && !state.squad.includes(key)) state.squad.push(key); // sale a pelear si hay lugar
+    } else if (RESEARCH[key]) {
+      state.research[key] = Math.min(MAX_LEVEL, researchLevel(state, key) + 1);
+    } else {
+      state.army[key] = (state.army[key] ?? 0) + qty;
+    }
+    events?.push({ type: 'trained', id: b.id, unit: key, qty });
+
+    const next = b.queue?.shift();
+    if (next && UNITS[next.unit]) b.training = { unit: next.unit, qty: next.qty, endsAt: endedAt + batchMs(b, next.unit, next.qty) };
   }
-  events?.push({ type: 'trained', id: b.id, unit: key, qty });
+}
+
+/* ---------- cola de mejoras ---------- */
+
+export const isQueuedUpgrade = (state, id) => state.upgradeQueue.includes(id);
+
+/** Empieza las mejoras encargadas a medida que quedan obreros libres. `freed`: instantes en que se liberaron obreros. */
+function pumpUpgradeQueue(state, now, freed, events) {
+  for (let guard = 0; guard < 50 && state.upgradeQueue.length && busyBuilders(state) < ECONOMY.builders; guard++) {
+    const id = state.upgradeQueue.shift();
+    const b = state.buildings.find((x) => x.id === id);
+    const next = b && nextLevelOf(b);
+    if (!b || !next) continue; // el edificio ya no existe o no tiene más niveles
+    if (b.damaged || isTraining(b) || isUpgrading(b)) {
+      // Ya no puede empezar (un ataque lo dañó, p. ej.): se devuelve lo pagado.
+      for (const r of RESOURCES) state[r] = Math.max(state[r], Math.min(resourceCap(state), state[r] + costOf(next.upgradeCost, r)));
+      events?.push({ type: 'upgrade_cancelled', id: b.id, building: b.type });
+      continue;
+    }
+    freed.sort((p, q) => p - q);
+    const start = freed.length ? Math.min(now, freed.shift()) : now; // empieza cuando se liberó el obrero (aunque fuera mientras no estabas)
+    b.upgradeEndsAt = start + next.upgradeSec * 1000;
+    const ends = b.upgradeEndsAt;
+    tickBuilding(b, now, events); // si ya terminó (estuviste mucho fuera), sube de nivel en el acto
+    if (b.upgradeEndsAt === null) freed.push(ends);
+  }
+}
+
+/** Encarga una mejora cuando no hay obrero libre: se paga ya y empieza sola al liberarse uno. */
+export function queueUpgrade(state, id) {
+  const b = state.buildings.find((x) => x.id === id);
+  if (!b) return fail('No existe ese edificio');
+  if (b.damaged) return fail('Está dañado: repáralo primero');
+  if (isUpgrading(b)) return fail('Ya se está mejorando');
+  if (isTraining(b)) return fail('Espera a que termine el entrenamiento');
+  if (isQueuedUpgrade(state, id)) return fail('Ya está en la cola de obras');
+  const next = nextLevelOf(b);
+  if (!next) return fail('Ya está al nivel máximo');
+  if (b.type !== 'townhall' && b.level >= townHallLevel(state)) return fail('Mejora antes el Ayuntamiento');
+  if (busyBuilders(state) < ECONOMY.builders) return fail('Hay un obrero libre: mejóralo directamente');
+  if (state.upgradeQueue.length >= UPGRADE_QUEUE_MAX) return fail('La cola de obras está llena');
+  const missing = missingResource(state, next.upgradeCost);
+  if (missing) return fail(insufficient(missing));
+  spend(state, next.upgradeCost);
+  state.upgradeQueue.push(id);
+  return { ok: true, position: state.upgradeQueue.length };
+}
+
+/** Saca una mejora de la cola y devuelve todo lo pagado. */
+export function cancelQueuedUpgrade(state, id) {
+  const i = state.upgradeQueue.indexOf(id);
+  if (i === -1) return fail('No está en la cola');
+  const b = state.buildings.find((x) => x.id === id);
+  state.upgradeQueue.splice(i, 1);
+  const next = b && nextLevelOf(b);
+  if (next) for (const r of RESOURCES) state[r] = Math.max(state[r], Math.min(resourceCap(state), state[r] + costOf(next.upgradeCost, r)));
+  return { ok: true };
 }
 
 /** Avanza el tiempo de todos los edificios. Devuelve lo generado: { gold, wood }. */
 export function tickAll(state, now, events) {
   const gained = { gold: 0, wood: 0 };
+  const freed = []; // instantes en que terminó una obra (un obrero quedó libre)
   for (const b of state.buildings) {
+    const endsAt = b.upgradeEndsAt;
     const amount = tickBuilding(b, now, events);
+    if (endsAt !== null && b.upgradeEndsAt === null) freed.push(endsAt);
     const resource = statsOf(b.type, b.level).produces;
     if (amount && resource) gained[resource] += amount;
     tickTraining(state, b, now, events);
   }
+  pumpUpgradeQueue(state, now, freed, events);
   return gained;
 }
 
@@ -503,6 +581,7 @@ export function startUpgrade(state, id, now) {
   if (b.damaged) return fail('Está dañado: repáralo primero');
   if (isUpgrading(b)) return fail('Ya se está mejorando');
   if (isTraining(b)) return fail('Espera a que termine el entrenamiento');
+  if (isQueuedUpgrade(state, id)) return fail('Ya está en la cola de obras');
   const next = nextLevelOf(b);
   if (!next) return fail('Ya está al nivel máximo');
   if (b.type !== 'townhall' && b.level >= townHallLevel(state)) return fail('Mejora antes el Ayuntamiento');
@@ -528,7 +607,10 @@ export function startTraining(state, id, key, now, qty = 1) {
   if (!def.trains?.includes(key)) return fail('Este edificio no entrena eso');
   if (b.damaged) return fail('Está dañado: repáralo primero');
   if (isUpgrading(b)) return fail('El edificio está en obras');
-  if (isTraining(b)) return fail(RESEARCH[key] ? 'Ya está investigando' : 'Ya está entrenando');
+  // Una unidad se puede dejar en cola mientras el edificio entrena otra (no así héroes ni investigaciones).
+  const queuing = isTraining(b);
+  if (queuing && !(UNITS[key] && UNITS[b.training.unit])) return fail(RESEARCH[key] ? 'Ya está investigando' : 'Ya está entrenando');
+  if (queuing && (b.queue?.length ?? 0) >= trainQueueLimit(b.level)) return fail('La cola de este edificio está llena');
   const factor = statsOf(b.type, b.level).trainFactor ?? 1; // los edificios de nivel alto trabajan más rápido
 
   if (RESEARCH[key]) {
@@ -557,6 +639,10 @@ export function startTraining(state, id, key, now, qty = 1) {
   if (missing) return fail(insufficient(missing));
 
   spend(state, cost);
+  if (queuing) {
+    (b.queue ??= []).push({ unit: key, qty: count });
+    return { ok: true, queued: true, position: b.queue.length, qty: count, endsAt: b.training.endsAt };
+  }
   b.training = { unit: key, endsAt: now + Math.round(unit.trainSec * batchTimeFactor(count) * 1000 * factor), qty: count };
   return { ok: true, endsAt: b.training.endsAt, qty: count };
 }
@@ -582,6 +668,7 @@ export function demolish(state, id) {
     return fail('Gasta recursos antes: no cabrían sin este almacén');
   }
 
+  if (isQueuedUpgrade(state, id)) cancelQueuedUpgrade(state, id); // lo pagado por una mejora en cola vuelve entero
   const invested = investedCost(b);
   state.buildings.splice(index, 1);
   for (const r of RESOURCES) {

@@ -8,7 +8,7 @@ import { RAID, RESOURCES } from '../data/config.js';
 import { advanceBattle, createRaidBattle } from './battle.js';
 import { grantHeroXp } from './campaign.js';
 import { mulberry32 } from './decor.js';
-import { townHallLevel } from './logic.js';
+import { isTraining, isUpgrading, townHallLevel } from './logic.js';
 
 const MAX_RAID_LEVEL = 30;
 
@@ -24,7 +24,9 @@ export function raidLevel(state) {
 export function generateRaid(level, seed = 1) {
   const lvl = Math.max(1, Math.floor(level));
   const rand = mulberry32(5000 + lvl * 131 + seed * 7919);
-  const guards = 2 + Math.round(lvl * 1.5);
+  // El primer ataque de la partida (seed 1) es un aviso suave: pocos guardias y más flojos.
+  const first = seed <= 1;
+  const guards = first ? 2 : 2 + Math.round(lvl * 1.5);
   const brutes = Math.floor((lvl - 1) / 2);
   const attackers = [];
   const at = (kind) => attackers.push({ kind, x: 14 + rand() * 20, y: 1 + rand() * 3 });
@@ -33,13 +35,36 @@ export function generateRaid(level, seed = 1) {
   // Con el tiempo llegan también arañas (rápidas) y arqueros.
   for (let i = 0; i < (lvl >= 3 ? Math.floor(lvl / 3) : 0); i++) at('spider');
   for (let i = 0; i < (lvl >= 5 ? Math.floor((lvl - 3) / 4) : 0); i++) at('bowman');
-  return { level: lvl, hpScale: 1 + 0.1 * (lvl - 1), dmgScale: 1 + 0.07 * (lvl - 1), attackers };
+  const soft = first ? 0.7 : 1;
+  return { level: lvl, hpScale: (1 + 0.1 * (lvl - 1)) * soft, dmgScale: (1 + 0.07 * (lvl - 1)) * soft, attackers };
 }
 
 /* ---------- calendario ---------- */
 
 export const raidDue = (state, now) => state.raid.nextAt > 0 && now >= state.raid.nextAt;
 export const raidCountdownMs = (state, now) => Math.max(0, state.raid.nextAt - now);
+
+/** Lo que cuesta aplazar el próximo ataque: crece con el Ayuntamiento. */
+export const postponeCost = (state) => ({ gold: RAID.postponeGoldPerLevel * townHallLevel(state), wood: 0 });
+
+/** ¿Se puede aplazar ahora? Devuelve null si sí, o el motivo si no. */
+export function postponeBlocked(state, now) {
+  if (!(state.raid.nextAt > 0)) return 'No hay ningún ataque en camino';
+  if ((state.raid.postponed ?? 0) >= RAID.maxPostpones) return 'Ya aplazaste este ataque el máximo de veces';
+  if (raidCountdownMs(state, now) <= RAID.noPostponeSec * 1000) return 'Ya llegan: es tarde para aplazar';
+  if (state.gold < postponeCost(state).gold) return `Faltan ${postponeCost(state).gold - Math.floor(state.gold)} de oro`;
+  return null;
+}
+
+/** Paga y retrasa el próximo ataque. Se puede hacer pocas veces seguidas (RAID.maxPostpones). */
+export function postponeRaid(state, now) {
+  const why = postponeBlocked(state, now);
+  if (why) return { ok: false, reason: why };
+  state.gold -= postponeCost(state).gold;
+  state.raid.nextAt += RAID.postponeSec * 1000;
+  state.raid.postponed = (state.raid.postponed ?? 0) + 1;
+  return { ok: true, nextAt: state.raid.nextAt };
+}
 
 /* ---------- simulación y resultado ---------- */
 
@@ -57,9 +82,15 @@ export function simulateRaid(state, raid) {
 export function applyRaidResult(state, result) {
   const byId = new Map(state.buildings.map((b) => [b.id, b]));
   const damaged = [];
+  let protectedCount = 0;
   for (const id of result.destroyedIds) {
     const b = byId.get(id);
     if (b && b.type !== 'townhall' && !b.damaged) {
+      // Lo que está en obras (mejorando o entrenando) lo protegen las vallas: no queda dañado y no pierde horas de espera.
+      if (isUpgrading(b) || isTraining(b)) {
+        protectedCount++;
+        continue;
+      }
       b.damaged = true;
       damaged.push(b.type);
     }
@@ -82,6 +113,7 @@ export function applyRaidResult(state, result) {
     destroyed: result.destroyed,
     damaged: damaged.length, // edificios que quedaron dañados (incluye muros y puertas)
     damagedTypes: damaged,
+    protected: protectedCount, // edificios en obras que se libraron del daño
     hallDown: result.hallDown,
     stolen,
     xp,
@@ -103,5 +135,6 @@ export function resolveRaid(state, now) {
   Object.defineProperty(report, 'replay', { value: replay, enumerable: false });
   state.raid.count += 1;
   state.raid.nextAt = now + RAID.intervalSec * 1000;
+  state.raid.postponed = 0;
   return report;
 }

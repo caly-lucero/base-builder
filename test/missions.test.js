@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { GRID } from '../src/data/config.js';
 import { advanceBattle, createBattle } from '../src/game/battle.js';
-import { generateMission, missionName } from '../src/game/missions.js';
+import { garrisonSize, generateMission, missionName } from '../src/game/missions.js';
 import { sizeOf } from '../src/game/logic.js';
 import { findPath } from '../src/game/pathfinding.js';
 
@@ -100,4 +100,30 @@ test('equilibrio: con un ejército razonable la primera misión se gana y una al
 
 test('missionName', () => {
   assert.equal(missionName(3), 'Campaña 3');
+});
+
+test('la guarnición crece con el nivel cada vez más rápido y la generada coincide con garrisonSize', () => {
+  let prev = 0;
+  for (let l = 1; l <= 40; l++) {
+    const n = garrisonSize(l);
+    assert.ok(n >= prev, `nivel ${l}`);
+    prev = n;
+  }
+  assert.equal(garrisonSize(1), 3);
+  assert.ok(garrisonSize(30) > 6 * garrisonSize(10) / 2, 'en el 30 hay muchísimos más que en el 10');
+  for (const l of [1, 5, 12, 25]) {
+    const m = generateMission(l);
+    assert.ok(Math.abs(m.defenders.length - garrisonSize(l)) <= 2, `nivel ${l}: ${m.defenders.length} vs ${garrisonSize(l)}`);
+  }
+  assert.ok(generateMission(8).defenders.some((d) => d.kind === 'spider'), 'arañas desde el nivel 8');
+});
+
+test('la guarnición tiene un tope y de ahí en adelante crece la dureza (campaña sin fin sin romper la simulación)', () => {
+  assert.equal(garrisonSize(200), garrisonSize(60));
+  assert.ok(garrisonSize(60) <= 200);
+  const a = generateMission(40);
+  const b = generateMission(80);
+  assert.ok(b.hpScale > a.hpScale * 1.5 && b.dmgScale > a.dmgScale * 1.5);
+  assert.ok(generateMission(100).defenders.length <= 250);
+  for (const l of [31, 55, 100]) assert.ok(generateMission(l).buildings.every((e) => e.x >= 0 && e.y >= 0));
 });

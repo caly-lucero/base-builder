@@ -377,7 +377,70 @@ function step(b, dt) {
     else stepDefender(b, u, dt);
   }
   for (const e of b.buildings) if (e.alive && e.dmg) stepTower(b, e);
+  separateUnits(b);
   checkEnd(b);
+}
+
+/* ---------- que las unidades no se encimen ---------- */
+
+const SEP_MIN = 2 * UNIT_RADIUS * 0.8; // distancia mínima entre dos unidades (un poco menos que dos radios: pueden rozarse)
+const SEP_MAX_PUSH = 0.12; // lo más que se mueve una unidad por paso para despegarse
+
+/**
+ * Empuja suavemente a las unidades que quedaron una encima de otra, para que no se amontonen en el mismo punto.
+ * Nunca las mete en un edificio ni las saca del mapa, y no mueve a las que ya llegaron a donde las mandaste.
+ */
+function separateUnits(b) {
+  const alive = b.units.filter((u) => u.alive);
+  if (alive.length < 2) return;
+  const cells = new Map();
+  for (const u of alive) {
+    const key = Math.floor(u.x) * 1000 + Math.floor(u.y);
+    const list = cells.get(key);
+    if (list) list.push(u);
+    else cells.set(key, [u]);
+  }
+  const push = new Map(); // unidad -> [dx, dy]
+  const add = (u, dx, dy) => {
+    const p = push.get(u);
+    if (p) {
+      p[0] += dx;
+      p[1] += dy;
+    } else push.set(u, [dx, dy]);
+  };
+  for (const u of alive) {
+    const cx = Math.floor(u.x);
+    const cy = Math.floor(u.y);
+    for (let gy = cy - 1; gy <= cy + 1; gy++) {
+      for (let gx = cx - 1; gx <= cx + 1; gx++) {
+        for (const v of cells.get(gx * 1000 + gy) ?? []) {
+          if (v.id <= u.id) continue; // cada pareja una sola vez
+          let dx = u.x - v.x;
+          let dy = u.y - v.y;
+          let d = Math.hypot(dx, dy);
+          if (d >= SEP_MIN) continue;
+          if (d < 1e-6) {
+            // Justo en el mismo punto: se separan en una dirección que depende de sus ids (siempre la misma).
+            const a = (u.id * 2.399963 + v.id * 1.234567) % (Math.PI * 2);
+            dx = Math.cos(a);
+            dy = Math.sin(a);
+            d = 1;
+          }
+          const k = Math.min(SEP_MAX_PUSH, (SEP_MIN - d) / 2) / d;
+          add(u, dx * k, dy * k);
+          add(v, -dx * k, -dy * k);
+        }
+      }
+    }
+  }
+  for (const [u, [dx, dy]] of push) {
+    if (u.order?.type === 'move' && Math.hypot(u.order.x - u.x, u.order.y - u.y) < 2 * S) continue; // ya casi llegó
+    const nx = Math.min(GRID.cols - 1, Math.max(0, u.x + dx));
+    const ny = Math.min(GRID.rows - 1, Math.max(0, u.y + dy));
+    if (solidAt(b, Math.round(nx), Math.round(ny))) continue;
+    u.x = nx;
+    u.y = ny;
+  }
 }
 
 /* ---------- atacantes ---------- */
@@ -466,10 +529,20 @@ function moveToward(b, u, dest, dt) {
   const wall = next ? wallAt(b, next.x, next.y) : null;
   if (wall) return wall;
 
-  const wp = next ?? dest; // sin camino: en línea recta
+  // Cada unidad sigue el camino por su propio «carril» (un pequeño desvío fijo según su id): así una columna no se
+  // funde en una sola unidad al pasar por los mismos puntos.
+  const lane = laneOffset(u);
+  const wp = next ? { x: next.x + lane.x, y: next.y + lane.y } : dest; // sin camino: en línea recta
   walkTo(u, wp, dt);
-  if (next && u.x === next.x && u.y === next.y) u.path.shift();
+  if (next && u.x === wp.x && u.y === wp.y) u.path.shift();
   return null;
+}
+
+/** Desvío fijo de una unidad respecto al centro de los cuadros del camino (menos de medio cuadro: nunca invade el vecino). */
+function laneOffset(u) {
+  const a = (u.id * 2.399963) % (Math.PI * 2);
+  const r = 0.12 + 0.22 * ((u.id * 0.618034) % 1);
+  return { x: Math.cos(a) * r, y: Math.sin(a) * r };
 }
 
 /** El cuadro libre de alrededor de un edificio que queda más cerca de la unidad (o su centro si no hay ninguno). */
@@ -728,4 +801,30 @@ function finish(b) {
   const r = b.result;
   r.stars = (r.won ? 1 : 0) + (r.percent >= STARS.half ? 1 : 0) + (r.percent >= STARS.all ? 1 : 0);
   b.events.push({ type: 'end', won, stars: r.stars });
+}
+
+/* ---------- guardar y retomar una batalla ---------- */
+
+/**
+ * Una copia de la batalla como datos simples (JSON), para guardarla si se cierra la página. Los ids, las órdenes y
+ * los caminos son números y listas, así que se conserva todo; los índices (byId, grid) se rehacen al retomarla.
+ */
+export function snapshotBattle(b) {
+  const { byId: _byId, grid: _grid, events: _events, ...rest } = b;
+  return JSON.parse(JSON.stringify(rest));
+}
+
+/** Rehace una batalla guardada con snapshotBattle: sigue exactamente desde donde estaba. */
+export function restoreBattle(snap) {
+  const b = JSON.parse(JSON.stringify(snap));
+  b.events = [];
+  b.byId = new Map();
+  b.grid = new Map();
+  for (const u of b.units) b.byId.set(u.id, u);
+  for (const e of b.buildings) {
+    b.byId.set(e.id, e);
+    if (!e.alive) continue;
+    for (let cy = e.y; cy < e.y + e.h; cy++) for (let cx = e.x; cx < e.x + e.w; cx++) b.grid.set(cy * GRID.cols + cx, e);
+  }
+  return b;
 }

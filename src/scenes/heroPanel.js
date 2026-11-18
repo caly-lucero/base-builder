@@ -1,6 +1,6 @@
 // Ventana de héroes: los 5 héroes, quién sale a pelear (solo 2) y sus dos árboles de poder.
 // Se abre desde la barra de abajo. Se dibuja entera de nuevo cada vez que algo cambia (son pocas cosas).
-import { LAYOUT } from '../data/config.js';
+import { BUILDINGS, LAYOUT } from '../data/config.js';
 import { ABILITY_RANKS, HEROES, HERO_KEYS, PASSIVE_LEVELS, SQUAD_SIZE, abilityAt, heroStats, heroXpToNext } from '../data/heroes.js';
 import * as logic from '../game/logic.js';
 import * as store from '../game/store.js';
@@ -73,6 +73,31 @@ export function openHeroPanel(scene, altarId) {
     const cap = logic.heroLevelCap(state);
     const training = state.buildings.map((b) => b.training?.unit).filter((k) => HEROES[k]);
     const inner = right - left - 24;
+
+    // Sin Altar y sin héroes todavía: en vez de todo el detalle de habilidades, una explicación corta y el botón para construirlo.
+    if (!altar && !logic.heroCount(state)) {
+      const altarDef = BUILDINGS.altar;
+      const open = logic.limitFor(state, 'altar') > 0;
+      const need = logic.unlockLevel('altar');
+      const cardTop = top + 56;
+      add(ui.panel(scene, W / 2, cardTop + 120, inner, 240, 'dark', d + 2));
+      const pics = HERO_KEYS.slice(0, 5);
+      pics.forEach((key, i) => {
+        const px = left + 12 + (inner / pics.length) * (i + 0.5);
+        const img = add(scene.add.image(0, 0, HEROES[key].sprite).setDepth(d + 3));
+        scene.fitIcon(img, HEROES[key].sprite, px + 0, cardTop + 44, 52);
+      });
+      text(W / 2, cardTop + 92, 'Los héroes son tus campeones', 16, ui.TXT.gold, { bold: true, origin: [0.5, 0.5] });
+      text(W / 2, cardTop + 120, 'Salen a pelear junto a tu ejército (hasta 2 a la vez), suben de nivel y tienen habilidades propias.', 12, ui.TXT.light, { origin: [0.5, 0], align: 'center', wrap: inner - 40 });
+      text(W / 2, cardTop + 176, open ? `Para invocarlos construye un Altar.\nCuesta ${logic.formatCost(altarDef.cost)}.` : `El Altar se abre con el ${logic.displayName('townhall', need)} (nivel ${need}).`, 12, open ? ui.TXT.good : ui.TXT.bad, { origin: [0.5, 0], align: 'center', wrap: inner - 40 });
+      const build = ui.button(scene, { x: W / 2, y: cardTop + 290, w: inner, h: 48, kind: open ? 'green' : 'dark2', text: open ? 'Construir el Altar' : 'Aún no disponible', icon: 'hammer', iconSize: 20, size: 15, depth: d + 3, onClick: () => {
+        scene.closeModal();
+        scene.selectTool('altar');
+      }, onDisabled: () => scene.showToast(`El Altar se abre con el Ayuntamiento nivel ${need}`) });
+      build.setEnabled(open);
+      build.objs.forEach(add);
+      return;
+    }
 
     text(right - 76, top + 28, `Escuadra ${state.squad.length}/${SQUAD_SIZE}`, 12, ui.TXT.blue, { origin: [1, 0.5] });
 

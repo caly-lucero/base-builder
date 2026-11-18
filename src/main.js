@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { LAYOUT, fitLayout } from './data/config.js';
+import { loadPending } from './game/battleSave.js';
 import { notice, registerMenu } from './game/menu.js';
 import * as prefs from './game/prefs.js';
 import { MAX_SAVE_BYTES, parseSave, serialize } from './game/save.js';
@@ -38,7 +39,9 @@ if (import.meta.env.DEV) {
   window.__store = store;
 }
 game.scene.add('BattleScene', BattleScene, false);
-game.scene.add('BaseScene', BaseScene, true, { gained: boot.gained });
+// Una batalla que quedó a medias al cerrar la página: la pantalla de inicio ofrece retomarla.
+const pending = boot.source === 'none' ? null : loadPending(store.get());
+game.scene.add('BaseScene', BaseScene, true, { gained: boot.gained, title: true, fresh: boot.source === 'none', pending });
 
 /* ---------- sonido ---------- */
 
@@ -65,6 +68,19 @@ registerMenu({
 });
 
 /* ---------- guardado en momentos clave ---------- */
+
+// Giro del celular: el alto del mapa se calcula al abrir según la pantalla. Si la orientación cambia, se recarga
+// (la partida y la batalla en curso se guardan solas al salir) para que el juego vuelva a ocupar toda la pantalla.
+const wasPortrait = window.innerHeight >= window.innerWidth;
+let rotateTimer = null;
+window.addEventListener('resize', () => {
+  clearTimeout(rotateTimer);
+  rotateTimer = setTimeout(() => {
+    if (window.innerHeight >= window.innerWidth === wasPortrait) return;
+    store.persist();
+    window.location.reload();
+  }, 500);
+});
 
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'hidden') store.persist();
