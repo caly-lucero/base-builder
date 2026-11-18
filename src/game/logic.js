@@ -2,6 +2,7 @@
 // Todas las funciones reciben el estado y el tiempo (`now`) para poder probarlas.
 import { ACHIEVEMENTS, ARMY_UNITS, BUILDINGS, ECONOMY, GRID, MAX_LEVEL, RAID, RESEARCH, RESEARCH_KEYS, RESOURCES, RESOURCE_NAMES, UNIQUE_BUILDINGS, UNITS, batchLimit, batchTimeFactor, researchStep } from '../data/config.js';
 import { HEROES, SQUAD_SIZE, heroCap, isHeroKey } from '../data/heroes.js';
+import { decorKey, generateDecor } from './decor.js';
 
 export const MAX_BUILDINGS = GRID.cols * GRID.rows;
 
@@ -35,6 +36,7 @@ export function createNewState(now = Date.now()) {
     army: emptyArmy(), // unidades entrenadas, por tipo
     heroes: {}, // héroes que tienes: { paladin: { level, xp }, … } (ver heroes.js)
     squad: [], // los (hasta 2) que salen a pelear, por clave
+    cleared: [], // adornos del mapa (árboles, rocas…) que el jugador quitó: sus claves "x,y" (ver decor.js)
     research: emptyResearch(), // nivel de cada investigación de la Herrería
     achievements: emptyAchievements(), // niveles reclamados de cada logro (ver achievements.js)
     campaign: { cleared: 0, stars: {} }, // niveles superados y mejores estrellas (0-3) de cada nivel
@@ -123,6 +125,34 @@ export function findFreeSpot(state, type, cx, cy, ignoreId = null) {
     }
   }
   return null;
+}
+
+/* ---------- adornos del mapa (árboles, rocas, arbustos) ---------- */
+
+/** Claves de todos los adornos que se pueden quitar. */
+export const allDecorKeys = () => generateDecor().map(decorKey);
+
+/** Quita un adorno del mapa (gratis). */
+export function clearDecor(state, key) {
+  if (!allDecorKeys().includes(key)) return fail('Eso no se puede quitar');
+  if (state.cleared.includes(key)) return fail('Ya está quitado');
+  state.cleared.push(key);
+  return { ok: true };
+}
+
+/** Quita todos los adornos de una vez (mapa limpio). */
+export function clearAllDecor(state) {
+  const all = allDecorKeys();
+  if (state.cleared.length >= all.length) return fail('El mapa ya está limpio');
+  state.cleared = all;
+  return { ok: true, removed: all.length };
+}
+
+/** Devuelve todos los adornos al mapa. */
+export function restoreDecor(state) {
+  if (!state.cleared.length) return fail('No hay adornos quitados');
+  state.cleared = [];
+  return { ok: true };
 }
 
 /* ---------- costos ---------- */

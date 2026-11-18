@@ -560,3 +560,31 @@ test('migración v10 → v11: cada casilla vieja pasa a ser 2×2 cuadros y los m
   bad.sum = checksum(bad.data);
   assert.equal(parseSave(JSON.stringify(bad)).ok, false, 'dos edificios en los mismos cuadros se rechazan');
 });
+
+test('los adornos quitados se guardan; los que ya no existen o se repiten se descartan; una partida v11 se abre con todos puestos', async () => {
+  const { allDecorKeys } = await import('../src/game/logic.js');
+  const s = sampleState();
+  const keys = allDecorKeys();
+  s.cleared = [keys[0], keys[5]];
+  const r = parseSave(serialize(s));
+  assert.equal(r.ok, true, r.error);
+  assert.deepEqual(r.state.cleared, [keys[0], keys[5]]);
+
+  const messy = JSON.parse(serialize(s));
+  messy.data.cleared = [keys[0], keys[0], '77,77', 3, keys[2]];
+  messy.sum = checksum(messy.data);
+  assert.deepEqual(parseSave(JSON.stringify(messy)).state.cleared, [keys[0], keys[2]]);
+
+  const old = JSON.parse(serialize(sampleState()));
+  delete old.data.cleared;
+  old.v = 11;
+  old.sum = checksum(old.data);
+  const migrated = parseSave(JSON.stringify(old));
+  assert.equal(migrated.ok, true, migrated.error);
+  assert.deepEqual(migrated.state.cleared, []);
+
+  const bad = JSON.parse(serialize(s));
+  bad.data.cleared = 'todos';
+  bad.sum = checksum(bad.data);
+  assert.equal(parseSave(JSON.stringify(bad)).ok, false);
+});

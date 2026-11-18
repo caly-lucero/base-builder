@@ -8,6 +8,7 @@ import { ACHIEVEMENTS, ARMY_UNITS, BUILDINGS, ECONOMY, GRID, QUESTS, RESEARCH_KE
 import { HERO_MAX_LEVEL, SQUAD_SIZE, isHeroKey } from '../data/heroes.js';
 import {
   MAX_BUILDINGS,
+  allDecorKeys,
   costOf,
   createBuilding,
   emptyAchievements,
@@ -22,7 +23,7 @@ import {
   supplyUsed,
 } from './logic.js';
 
-export const SAVE_VERSION = 11;
+export const SAVE_VERSION = 12;
 export const MAX_SAVE_BYTES = 900_000; // con muros de a un cuadro una base grande llega a miles de edificios
 
 const KEY = 'basebuilder.save';
@@ -136,6 +137,9 @@ function migrate(data, version) {
 
   // v10 → v11: el mapa pasó de 24×24 casillas a 48×48 cuadros y cada edificio ocupa varios.
   if (version < 11) d = migrateV10toV11(d);
+
+  // v11 → v12: aparecieron los adornos que se pueden quitar (empiezan todos puestos).
+  if (version < 12) d = { ...d, cleared: [] };
 
   return d;
 }
@@ -372,6 +376,11 @@ export function validateState(d) {
   }
   const campaign = { cleared: d.campaign.cleared, stars };
 
+  // Adornos quitados: se descartan sin avisar los que ya no existan (si cambia el paisaje) y los repetidos.
+  if (!Array.isArray(d.cleared) || d.cleared.length > 5000) bad('Adornos inválidos');
+  const known = new Set(allDecorKeys());
+  const cleared = [...new Set(d.cleared.filter((k) => typeof k === 'string' && known.has(k)))];
+
   if (!isPlainObject(d.raid) || !isNum(d.raid.nextAt, 0, MAX_TIME) || !isInt(d.raid.count, 0, 1_000_000)) bad('Calendario de ataques inválido');
   const raid = { nextAt: d.raid.nextAt, count: d.raid.count };
 
@@ -456,6 +465,7 @@ export function validateState(d) {
     research,
     achievements,
     campaign,
+    cleared,
     raid,
     buildings,
   };

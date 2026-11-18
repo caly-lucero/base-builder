@@ -3,6 +3,7 @@ import { ARMY_UNITS, CAMERA, LAYOUT, RAID, STARS, TERRAIN } from '../data/config
 import { HEROES } from '../data/heroes.js';
 import { abilityStatus, advanceBattle, attackers, battleStatus, castHeroAbility, clearOrders, createBattle, defenderUnits, orderAttack, orderMove, retreat, unitIdsOfKinds } from '../game/battle.js';
 import { applyBattleResult } from '../game/campaign.js';
+import * as logic from '../game/logic.js';
 import { formatDuration, squadHeroes, statsOf, unitCombat } from '../game/logic.js';
 import { generateMission, missionName } from '../game/missions.js';
 import * as prefs from '../game/prefs.js';
@@ -11,7 +12,7 @@ import * as store from '../game/store.js';
 import { ASSET_BASE } from '../data/assets.js';
 import { fitIcon as fitIconArt, missingRotationArt, placeOnTile as placeOnTileArt, viewFrame } from './artPlace.js';
 import { darken, ensureTerrainTextures, ensureThemedGround, grassKey } from './terrainArt.js';
-import { generateDecor, mulberry32 } from '../game/decor.js';
+import { decorKey, generateDecor, generateOuterDecor, mulberry32 } from '../game/decor.js';
 import { flowerSpots, occupiedBlocks, pathTiles, pondTiles } from '../game/landscape.js';
 import { mapOfLevel, themeOf } from '../game/campaignMap.js';
 import * as ui from './ui.js';
@@ -198,16 +199,17 @@ export default class BattleScene extends Phaser.Scene {
     const water = pondTiles();
     this.ponds = water.map((t) => ({ ...t, sand: this.add.image(0, 0, 'iso_sand').setDepth(DEPTH.terrain + 0.2), water: this.add.image(0, 0, 'iso_water').setDepth(DEPTH.terrain + 0.3) }));
     const wet = new Set(water.map((t) => `${t.x},${t.y}`));
-    const seed = this.raid ? 4141 : 9000 + this.level * 17;
-    const rand = mulberry32(seed);
+    // Defendiendo tu base se ve el mismo paisaje que en ella (con lo que quitaste); atacando, el del mapa de campaña.
+    const state = store.get();
+    const clean = state.cleared.length >= logic.allDecorKeys().length; // mapa limpio: tampoco hay adornos de más en las batallas
+    const seed = this.raid ? undefined : 9000 + this.level * 17;
+    const rand = mulberry32(seed ?? 1);
     const kinds = theme?.decor ?? ['tree_a', 'tree_b', 'tree_c', 'rock_a', 'rock_c', 'bush_a', 'bush_b'];
-    const items = generateDecor(seed).map((d) => ({ x: d.x, y: d.y, key: theme ? kinds[Math.floor(rand() * kinds.length)] : d.key }));
-    for (let y = -ext; y < TERRAIN.rows + ext; y++) {
-      for (let x = -ext; x < TERRAIN.cols + ext; x++) {
-        const outside = x < 0 || y < 0 || x >= TERRAIN.cols || y >= TERRAIN.rows;
-        if (outside && rand() < 0.42) items.push({ x, y, key: kinds[Math.floor(rand() * kinds.length)] });
-      }
-    }
+    const cleared = new Set(state.cleared);
+    const inner = generateDecor(seed)
+      .filter((d) => (this.raid ? !cleared.has(decorKey(d)) : !clean))
+      .map((d) => ({ x: d.x, y: d.y, key: theme ? kinds[Math.floor(rand() * kinds.length)] : d.key }));
+    const items = [...inner, ...generateOuterDecor(ext).map((d) => ({ x: d.x, y: d.y, key: theme ? kinds[Math.floor(rand() * kinds.length)] : d.key }))];
     const landing = (x, y) => y >= TERRAIN.rows - 4 && x >= 6 && x <= 18; // el desembarco queda despejado
     this.decor = items
       .filter((d) => !wet.has(`${d.x},${d.y}`) && !this.occupied.has(`${d.x},${d.y}`) && !this.pathSet.has(`${d.x},${d.y}`) && !landing(d.x, d.y))

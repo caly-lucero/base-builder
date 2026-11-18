@@ -24,6 +24,27 @@ export function mulberry32(seed) {
   };
 }
 
+/** Clave de un adorno del mapa ("x,y" de su bloque de terreno): así se anota cuál quitó el jugador. */
+export const decorKey = (d) => `${d.x},${d.y}`;
+
+/**
+ * Bosque y rocas fuera del mapa (hasta `outer` bloques de cada borde), siempre los mismos: el suelo no termina en un
+ * borde vacío. No se pueden quitar.
+ */
+export function generateOuterDecor(outer = 6) {
+  const rand = mulberry32(5150);
+  const items = [];
+  for (let y = -outer; y < TERRAIN.rows + outer; y++) {
+    for (let x = -outer; x < TERRAIN.cols + outer; x++) {
+      if (x >= 0 && y >= 0 && x < TERRAIN.cols && y < TERRAIN.rows) continue;
+      const roll = rand();
+      const pick = rand();
+      if (roll < 0.45) items.push({ x, y, key: pick < 0.55 ? 'tree_a' : pick < 0.8 ? 'tree_b' : pick < 0.9 ? 'rock_a' : 'bush_a', outer: true });
+    }
+  }
+  return items;
+}
+
 /** Devuelve [{ x, y, key }] (x, y = bloque de terreno de 2×2 cuadros). Hay más decoración hacia los bordes y el centro queda despejado. */
 export function generateDecor(seed = DECOR_SEED) {
   const rand = mulberry32(seed);

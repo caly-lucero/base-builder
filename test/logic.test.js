@@ -917,3 +917,23 @@ test('construir comprueba todo el rectángulo del edificio, no solo su esquina',
   assert.equal(place(s, 'storage', 45, 10, T0).reason, 'Fuera del mapa', 'un almacén de 4×3 no cabe en el borde');
   assert.equal(place(s, 'wall', 47, 10, T0).ok, true, 'un muro (1×1) sí');
 });
+
+/* ---------- adornos que se pueden quitar ---------- */
+
+test('los árboles y rocas se pueden quitar de uno en uno, todos a la vez y devolver', async () => {
+  const { clearDecor, clearAllDecor, restoreDecor, allDecorKeys } = await import('../src/game/logic.js');
+  const s = fresh();
+  const all = allDecorKeys();
+  assert.ok(all.length > 100);
+  assert.deepEqual(s.cleared, []);
+  assert.equal(clearDecor(s, all[0]).ok, true);
+  assert.equal(clearDecor(s, all[0]).reason, 'Ya está quitado');
+  assert.equal(clearDecor(s, '999,999').reason, 'Eso no se puede quitar');
+  assert.deepEqual(s.cleared, [all[0]]);
+  assert.equal(clearAllDecor(s).ok, true);
+  assert.equal(s.cleared.length, all.length);
+  assert.equal(clearAllDecor(s).reason, 'El mapa ya está limpio');
+  assert.equal(restoreDecor(s).ok, true);
+  assert.deepEqual(s.cleared, []);
+  assert.equal(restoreDecor(s).reason, 'No hay adornos quitados');
+});

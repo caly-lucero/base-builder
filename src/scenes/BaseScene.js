@@ -2,7 +2,7 @@ import Phaser from 'phaser';
 import { ASSET_BASE, IMAGES, SHEETS, SOUNDS } from '../data/assets.js';
 import { ARMY_UNITS, BUILDINGS, CAMERA, ECONOMY, GRID, LAYOUT, TERRAIN, RESEARCH, RESOURCES, TOOL_PAGES, UNIQUE_BUILDINGS, UNITS, batchTimeFactor, researchStep } from '../data/config.js';
 import { HEROES, HERO_KEYS, heroXpToNext } from '../data/heroes.js';
-import { generateDecor, mulberry32 } from '../game/decor.js';
+import { decorKey, generateDecor, generateOuterDecor } from '../game/decor.js';
 import * as logic from '../game/logic.js';
 import * as prefs from '../game/prefs.js';
 import {
@@ -282,17 +282,7 @@ export default class BaseScene extends Phaser.Scene {
   createDecor() {
     const water = new Set(pondTiles().map((t) => `${t.x},${t.y}`));
     // Más allá del mapa también hay bosque y rocas (siempre los mismos), para que no parezca flotar.
-    const rand = mulberry32(5150);
-    const ring = [];
-    for (let y = -OUTER; y < TERRAIN.rows + OUTER; y++) {
-      for (let x = -OUTER; x < TERRAIN.cols + OUTER; x++) {
-        if (x >= 0 && y >= 0 && x < TERRAIN.cols && y < TERRAIN.rows) continue;
-        const roll = rand();
-        const pick = rand();
-        if (roll < 0.45) ring.push({ x, y, key: pick < 0.55 ? 'tree_a' : pick < 0.8 ? 'tree_b' : pick < 0.9 ? 'rock_a' : 'bush_a' });
-      }
-    }
-    this.decor = [...generateDecor(), ...ring].filter((d) => !water.has(`${d.x},${d.y}`)).map((d) => {
+    this.decor = [...generateDecor(), ...generateOuterDecor(OUTER)].filter((d) => !water.has(`${d.x},${d.y}`)).map((d) => {
       const kind = shadowKindOf(d.key);
       return {
         ...d,
@@ -751,6 +741,9 @@ export default class BaseScene extends Phaser.Scene {
       width: 330,
       buttons: [
         { text: `Sonido: ${isSoundOn() ? 'sí' : 'no'}`, kind: 'dark2', onClick: () => runMenu('toggleSound') },
+        store.get().cleared.length < logic.allDecorKeys().length
+          ? { text: 'Quitar todos los adornos', kind: 'dark2', onClick: () => this.doAction(() => logic.clearAllDecor(store.get()), () => 'Mapa limpio: sin árboles ni rocas', 'demolish') }
+          : { text: 'Devolver los adornos', kind: 'dark2', onClick: () => this.doAction(() => logic.restoreDecor(store.get()), () => 'Árboles y rocas de vuelta', 'place') },
         { text: 'Exportar partida', kind: 'blue', onClick: () => runMenu('export') },
         { text: 'Importar partida', kind: 'blue', onClick: () => runMenu('import') },
         { text: 'Nueva partida', kind: 'red', onClick: () => runMenu('reset') },
@@ -1511,6 +1504,7 @@ export default class BaseScene extends Phaser.Scene {
 
     const tile = screenToTile(pointer.x, pointer.y);
     const target = this.buildingAtPoint(pointer.x, pointer.y);
+    const decor = target ? null : this.decorAtPoint(pointer.x, pointer.y);
     const g = {
       id: pointer.id,
       startX: pointer.x,
@@ -1521,6 +1515,7 @@ export default class BaseScene extends Phaser.Scene {
       intent: 'ground',
       tile,
       buildingId: target?.id ?? null,
+      decorKey: decor ? decorKey(decor) : null, // un árbol, roca o arbusto bajo el dedo (se quita al tocarlo)
       paintedKey: null,
     };
     this.gesture = g;
@@ -1610,6 +1605,8 @@ export default class BaseScene extends Phaser.Scene {
     if (g.intent === 'place' && tile) {
       const at = this.anchorAt(this.tool, g.startX, g.startY);
       this.doAction(() => logic.place(state, this.tool, at.x, at.y, Date.now()), () => null, 'place');
+    } else if ((g.intent === 'demolish' || g.intent === 'ground') && g.buildingId === null && g.decorKey) {
+      this.removeDecor(g.decorKey);
     } else if (g.intent === 'demolish' && g.buildingId !== null) {
       this.doAction(() => logic.demolish(state, g.buildingId), () => 'Edificio demolido', 'demolish');
     } else if (g.intent === 'building') {
@@ -1749,6 +1746,30 @@ export default class BaseScene extends Phaser.Scene {
     this.placeOnTile(this.ghost, key, at.x + (w - 1) / 2, at.y + (h - 1) / 2, BUILDING_GROW).setAlpha(0.78).setDepth(DEPTH.ghost).setVisible(true).clearTint();
     this.ghostCell.clear().setVisible(true);
     strokeCell(this.ghostCell, at.x, at.y, ok ? 0x66ee66 : 0xff5a5a, 1, Math.max(2, 3 * view.zoom), 0.4, w, h);
+  }
+
+  /** Árbol, roca o arbusto (de los que se pueden quitar) bajo un punto de pantalla, por lo que se ve. */
+  decorAtPoint(px, py) {
+    let best = null;
+    for (const d of this.decor) {
+      const img = d.img;
+      if (d.outer || !img.visible || !img.width) continue;
+      const lx = (px - img.x) / img.scaleX + img.originX * img.width;
+      const ly = (py - img.y) / img.scaleY + img.originY * img.height;
+      if (lx < 0 || ly < 0 || lx >= img.width || ly >= img.height) continue;
+      if (this.textures.getPixelAlpha(Math.floor(lx), Math.floor(ly), img.texture.key) < 60) continue;
+      if (!best || img.depth > best.img.depth) best = d;
+    }
+    return best;
+  }
+
+  /** Quita un adorno: una nube de polvo y el sonido de demoler. */
+  removeDecor(key) {
+    const d = this.decor.find((x) => !x.outer && decorKey(x) === key);
+    const at = d && { x: d.img.x, y: d.img.y };
+    this.doAction(() => logic.clearDecor(store.get(), key), () => null, 'demolish');
+    if (at) this.dust(at.x, at.y);
+    this.viewDirty = true;
   }
 
   /** Esquina de arriba del edificio `type` para que su centro quede bajo el punto de pantalla (px, py). */
@@ -1947,10 +1968,11 @@ export default class BaseScene extends Phaser.Scene {
     this.renderLandscape(state);
 
     const occupied = occupiedBlocks(state.buildings);
+    const cleared = new Set(state.cleared); // adornos que el jugador quitó
     for (const d of this.decor) {
       const cx = d.x * 2 + 0.5;
       const cy = d.y * 2 + 0.5;
-      const visible = isTileVisible(cx, cy) && !occupied.has(`${d.x},${d.y}`);
+      const visible = isTileVisible(cx, cy) && !occupied.has(`${d.x},${d.y}`) && (d.outer || !cleared.has(decorKey(d)));
       d.img.setVisible(visible);
       if (visible) this.placeOnTile(d.img, d.key, cx, cy, DECOR_GROW).setDepth(DEPTH.world + depthOf(cx, cy));
       if (d.shadow) {
