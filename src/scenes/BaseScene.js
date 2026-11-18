@@ -577,7 +577,7 @@ export default class BaseScene extends Phaser.Scene {
     const icon = add(this.add.image(0, 0, iconKey('mine')).setDepth(d + 1));
     const title = add(ui.label(this, 86, top + 14, '', { size: 16, bold: true, depth: d + 1, color: ui.TXT.gold }));
     const detail = add(ui.label(this, 86, top + 38, '', { size: 12, color: ui.TXT.light, depth: d + 1, wrap: W - 86 - 134, lineSpacing: 4 }));
-    const hint = add(ui.label(this, 86, top + H - 14, 'Arrastra el edificio para moverlo', { size: 10, color: ui.TXT.faint, origin: [0, 0.5], depth: d + 1 }));
+    const hint = add(ui.label(this, 86, top + H - 14, 'Mantén pulsado y arrastra para moverlo', { size: 10, color: ui.TXT.faint, origin: [0, 0.5], depth: d + 1 }));
 
     const up = ui.button(this, { x: W - 76, y: top + 86, w: 124, h: 66, kind: 'blue', text: '', size: 12, depth: d + 1, onClick: () => this.onUpgradeClick() });
     up.objs.forEach(add);
@@ -1097,9 +1097,9 @@ export default class BaseScene extends Phaser.Scene {
     this.camp = camp ? { x: camp.x, y: camp.y } : null;
     this.shrine = shrine ? { x: shrine.x, y: shrine.y } : null;
 
-    // Se muestran como mucho 24 unidades para no saturar la pantalla (las armas de asedio, aparte).
+    // Se muestran como mucho 12 unidades para no saturar la pantalla (las armas de asedio, aparte).
     const want = [];
-    for (const u of ARMY_UNITS) for (let i = 0; i < (state.army[u] ?? 0) && want.length < 24; i++) want.push(u);
+    for (const u of ARMY_UNITS) for (let i = 0; i < (state.army[u] ?? 0) && want.length < 12; i++) want.push(u);
     const signature = want.join(',');
     if (signature !== this.armySignature) {
       this.armySignature = signature;
@@ -1416,6 +1416,22 @@ export default class BaseScene extends Phaser.Scene {
     else if (target) g.intent = 'building';
 
     if (g.intent === 'place') this.updateHoverGhost(pointer);
+
+    // Con el dedo, un edificio solo se mueve tras mantenerlo pulsado (si no, arrastrar desplaza el mapa).
+    g.armed = !pointer.wasTouch;
+    if (g.intent === 'building' && !g.armed) {
+      this.time.delayedCall(CAMERA.holdToMoveMs, () => {
+        if (this.gesture !== g || g.mode !== 'pending') return;
+        g.armed = true;
+        this.selectBuilding(g.buildingId);
+        this.play('select');
+        try {
+          navigator.vibrate?.(25);
+        } catch {
+          /* sin vibración */
+        }
+      });
+    }
   }
 
   onPointerMove(pointer) {
@@ -1431,7 +1447,7 @@ export default class BaseScene extends Phaser.Scene {
 
     if (g.mode === 'pending') {
       if (Math.hypot(pointer.x - g.startX, pointer.y - g.startY) < CAMERA.dragThreshold) return;
-      if (g.intent === 'building') this.beginMove(g);
+      if (g.intent === 'building' && g.armed) this.beginMove(g);
       else g.mode = 'pan';
     }
 

@@ -45,7 +45,7 @@ Cada vez que se sube algo a la rama `main`, GitHub corre las pruebas, compila y 
 - **Pensado para el celular**: el juego ocupa toda la pantalla en vertical, con la barra de abajo (Construir, Atacar, Héroes, Logros, Menú) y una **hoja de construcción** que se abre sobre el mapa con tres pestañas (*Economía*, *Ejército*, *Defensa*) y el botón *Demoler*. Al elegir un edificio la hoja se cierra y un aviso arriba dice qué estás colocando (con una ✕ para cancelar). Hay vibración corta al tocar los botones. Sonido, exportar, importar y nueva partida están en el **Menú**.
 - **Misiones**: una cadena de 32 objetivos que guía la partida («Construye un Aserradero», «Sube el Ayuntamiento a Fortaleza», «Construye una Herrería»…). El cartel de arriba a la izquierda muestra la actual; al cumplirla se pone verde y la tocas para **reclamar el premio**.
 - **Logros** (botón 🏆, con un punto rojo cuando hay premio): 11 familias con varios niveles (Constructor, Muralla, Gran ciudad, Obra maestra, Gran ejército, Señor del asedio, Conquistador, Colección de héroes, Leyenda, Herrero, Superviviente). Se reclaman de a un nivel y los premios crecen mucho.
-- **Mover edificios** arrastrándolos (gratis). **Demoler** devuelve el 50 % de lo invertido.
+- **Mover edificios** arrastrándolos (gratis; con el dedo hay que mantenerlos pulsados un momento, así arrastrar sobre ellos desplaza el mapa). **Demoler** devuelve el 50 % de lo invertido.
 - La producción, las mejoras, el entrenamiento y las investigaciones **siguen mientras no juegas** (máximo 8 h de producción); al volver, el juego avisa qué terminó.
 - **Animación de verdad**: cada personaje tiene cuadros de **caminar, atacar, quieto y caído**, mirando en las cuatro diagonales. En la base, tus tropas y héroes **pasean** alrededor de su puesto; en la batalla caminan, **golpean con su arma** hacia el objetivo y caen al morir. Mientras un edificio se mejora, un **martillo** lo golpea y levanta polvo; la fragua echa brasas, el altar brilla, la mina destella y el aserradero suelta astillas.
 - **Vida**: un **aldeano** por cada mina y aserradero camina entre el Ayuntamiento y su edificio llevando la carga (es adorno). Al recolectar suben números flotantes y chispas; al construir, el edificio «salta» con una nube de polvo; los árboles se mecen con el viento.
@@ -65,7 +65,7 @@ Cada vez que se sube algo a la rama `main`, GitHub corre las pruebas, compila y 
 | En batalla: habilidad de un héroe | botón con su cara, a la derecha | igual |
 | En batalla: elegir tropas | botones de abajo, tocar una unidad, o ▭ y arrastrar un recuadro | igual |
 | En batalla: ordenar | tocar un enemigo (atacar) o el suelo (mover) | igual |
-| Mover un edificio | arrastrarlo a otra casilla (verde = se puede, rojo = no) | igual |
+| Mover un edificio | táctil: mantenerlo pulsado y arrastrar; ratón: arrastrarlo (verde = se puede, rojo = no) | igual |
 | Desplazar el mapa | arrastrar el suelo, flechas o WASD | arrastrar el suelo |
 | Zoom | rueda, botones **+ / −** | pellizcar, botones **+ / −** |
 | Volver al centro | botón **⌂** | igual |

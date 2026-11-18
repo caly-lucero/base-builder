@@ -35,6 +35,7 @@ export const CAMERA = {
   minZoom: 0.25, // con 0.25 casi todo el mapa (un rombo de 24×24 casillas) cabe en la ventana
   maxZoom: 1.6,
   startZoom: 0.72,
+  holdToMoveMs: 380, // con el dedo, tiempo que hay que mantener pulsado un edificio antes de poder arrastrarlo
   dragThreshold: 8, // píxeles que hay que mover antes de que un toque sea un arrastre
   keyPanSpeed: 420, // píxeles por segundo con las flechas
 };
