@@ -6,6 +6,7 @@
 // editados a mano sin querer. En un juego de un jugador está bien así.
 import { ACHIEVEMENTS, ARMY_UNITS, BUILDINGS, DAILY, ECONOMY, GRID, QUESTS, RESEARCH_KEYS, UNIQUE_BUILDINGS, UNITS, UPGRADE_QUEUE_MAX, researchStep } from '../data/config.js';
 import { HERO_MAX_LEVEL, SQUAD_SIZE, isHeroKey } from '../data/heroes.js';
+import { DEFAULT_RACE, isRace } from '../data/races.js';
 import {
   MAX_BUILDINGS,
   allDecorKeys,
@@ -23,7 +24,7 @@ import {
   supplyUsed,
 } from './logic.js';
 
-export const SAVE_VERSION = 13;
+export const SAVE_VERSION = 14;
 export const MAX_SAVE_BYTES = 900_000; // con muros de a un cuadro una base grande llega a miles de edificios
 
 const KEY = 'basebuilder.save';
@@ -150,6 +151,9 @@ function migrate(data, version) {
       buildings: Array.isArray(d.buildings) ? d.buildings.map((b) => (isPlainObject(b) ? { ...b, queue: [] } : b)) : d.buildings,
     };
   }
+
+  // v13 → v14: apareció la elección de raza (las partidas anteriores son del Reino).
+  if (version < 14) d = { ...d, race: DEFAULT_RACE };
 
   return d;
 }
@@ -399,6 +403,7 @@ export function validateState(d) {
   // Premio diario: el día (número de día del calendario) en que se reclamó el último y los días seguidos.
   if (!isPlainObject(d.daily) || !isInt(d.daily.day, 0, 1_000_000) || !isInt(d.daily.streak, 0, DAILY.days)) bad('Premio diario inválido');
   const daily = { day: d.daily.day, streak: d.daily.streak };
+  if (!isRace(d.race)) bad('Raza inválida');
 
   const ids = new Set();
   const cells = new Set();
@@ -506,6 +511,7 @@ export function validateState(d) {
     cleared,
     upgradeQueue: [...queued],
     daily,
+    race: d.race,
     raid,
     buildings,
   };

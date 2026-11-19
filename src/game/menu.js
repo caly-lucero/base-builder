@@ -7,6 +7,9 @@ const listeners = new Set();
 /** Registra las acciones: { export, import, reset, toggleSound, isSoundOn }. */
 export const registerMenu = (a) => Object.assign(actions, a);
 
+/** Registra lo que hace «empezar de cero» tras borrar la partida (recargar y elegir raza). */
+export const registerNewGame = (fn) => (actions.newGame = fn);
+
 /** Ejecuta una acción del menú (si existe). */
 export const runMenu = (name) => actions[name]?.();
 

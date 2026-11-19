@@ -1,7 +1,9 @@
 import Phaser from 'phaser';
 import { LAYOUT, fitLayout } from './data/config.js';
+import { applyRace, current as currentRace } from './data/races.js';
+import { RES, fitRes } from './game/res.js';
 import { loadPending } from './game/battleSave.js';
-import { notice, registerMenu } from './game/menu.js';
+import { notice, registerMenu, registerNewGame } from './game/menu.js';
 import * as prefs from './game/prefs.js';
 import { MAX_SAVE_BYTES, parseSave, serialize } from './game/save.js';
 import * as store from './game/store.js';
@@ -21,13 +23,33 @@ store.onStatus(setStatus);
 /* ---------- arranque ---------- */
 
 const boot = store.init();
+applyRace(store.get().race); // nombres de la raza (el arte se elige al cargar, en BaseScene)
+
+// Banderas de una sola vez entre recargas (cambiar de raza o empezar de cero recarga la página para cargar otro arte).
+function takeFlag(name) {
+  try {
+    const on = window.sessionStorage.getItem(name) === '1';
+    window.sessionStorage.removeItem(name);
+    return on;
+  } catch {
+    return false;
+  }
+}
+const flags = { newGame: takeFlag('bb-newgame'), raceChosen: takeFlag('bb-racechosen') };
 
 fitLayout(window.innerWidth, window.innerHeight); // el lienzo toma la proporción de la pantalla
+fitRes(window.innerWidth, window.innerHeight, Number(new URLSearchParams(window.location.search).get('dpr')) || window.devicePixelRatio); // y se dibuja a la resolución real de la pantalla
+// Todo texto se dibuja a la resolución del lienzo (si no, saldría borroso al ampliarlo con el zoom de la cámara).
+const addText = Phaser.GameObjects.GameObjectFactory.prototype.text;
+Phaser.GameObjects.GameObjectFactory.prototype.text = function text(x, y, str, style) {
+  return addText.call(this, x, y, str, { resolution: RES.k, ...style });
+};
+
 const game = new Phaser.Game({
   type: Phaser.AUTO,
   parent: 'game',
-  width: LAYOUT.width,
-  height: LAYOUT.height,
+  width: LAYOUT.width * RES.k,
+  height: Math.round(LAYOUT.height * RES.k),
   backgroundColor: '#1a120b',
   banner: false,
   scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH },
@@ -41,7 +63,7 @@ if (import.meta.env.DEV) {
 game.scene.add('BattleScene', BattleScene, false);
 // Una batalla que quedó a medias al cerrar la página: la pantalla de inicio ofrece retomarla.
 const pending = boot.source === 'none' ? null : loadPending(store.get());
-game.scene.add('BaseScene', BaseScene, true, { gained: boot.gained, title: true, fresh: boot.source === 'none', pending });
+game.scene.add('BaseScene', BaseScene, true, { gained: boot.gained, title: true, fresh: boot.source === 'none' || flags.newGame, raceChosen: flags.raceChosen, pending });
 
 /* ---------- sonido ---------- */
 
@@ -131,13 +153,25 @@ fileInput.addEventListener('change', async () => {
   if (!window.confirm('Esto reemplazará tu partida actual. ¿Continuar?')) return;
 
   store.replace(result.state);
+  if (result.state.race !== currentRace.race) window.location.reload(); // otra raza = otro arte
   setStatus('Partida importada.');
 });
+
+/** Empezar de cero: se recarga la página y al abrir se elige la raza (que trae su propio arte). */
+function newGameReload() {
+  try {
+    window.sessionStorage.setItem('bb-newgame', '1');
+  } catch {
+    /* sin sessionStorage solo se pierde la pantalla de elegir raza */
+  }
+  window.location.reload();
+}
+registerNewGame(newGameReload);
 
 $('btn-reset').addEventListener('click', () => {
   if (!window.confirm('Se borrará tu partida actual y empezarás de cero. ¿Continuar?')) return;
   store.reset();
-  setStatus('Nueva partida iniciada.');
+  newGameReload();
 });
 
 /* ---------- PWA ---------- */

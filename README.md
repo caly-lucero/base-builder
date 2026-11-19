@@ -54,6 +54,7 @@ Cada vez que se sube algo a la rama `main`, GitHub corre las pruebas, compila y 
 - La producción, las mejoras, el entrenamiento y las investigaciones **siguen mientras no juegas** (máximo 8 h de producción); al volver, el juego avisa qué terminó.
 - **Animación de verdad**: cada personaje tiene cuadros de **caminar, atacar, quieto y caído**, mirando en las cuatro diagonales. En la base, tus tropas y héroes **pasean** alrededor de su puesto; en la batalla caminan, **golpean con su arma** hacia el objetivo y caen al morir. Mientras un edificio se mejora, un **martillo** lo golpea y levanta polvo; la fragua echa brasas, el altar brilla, la mina destella y el aserradero suelta astillas.
 - **Vida**: unos pocos **aldeanos** (3 como máximo, alternando oro y madera) caminan entre el Ayuntamiento y una mina o aserradero llevando la carga (es adorno). Al recolectar suben números flotantes y chispas; al construir, el edificio «salta» con una nube de polvo; los árboles se mecen con el viento.
+- **Dos razas**: al empezar una partida eliges entre **El Reino** (humanos: piedra clara, tejados azul pizarra) y **Los Silvanos** (gente del bosque: casas de madera con techos verdes, cristales, cuernos de ciervo). Cambian el **arte** (edificios, tropas, héroes, aldeanos) y los **nombres** (Árbol Madre, Lancero, Guardián…); las estadísticas y costos son los mismos, así que el equilibrio no cambia. La raza queda en el guardado y no se cambia después (solo empezando de cero). Las partidas anteriores son del Reino.
 - **Arte** (concepto del **Reino**: piedra clara, tejados azul pizarra y detalles dorados; la Horda enemiga va en rojo oscuro): edificios de 3 etapas compuestos con piezas de los kits 3D de Kenney (CC0), personajes de Mini Characters con **armas, escudos, capas, sombreros y aureolas modelados para el proyecto**, todo dibujado con la herramienta `tools/iso`. Hay 15 efectos de sonido y un botón de sonido en el Menú.
 - **Pantalla de inicio**: al abrir el juego, *Continuar*, *Nueva partida* (con confirmación) o *Cómo se juega* (un minitutorial de 4 pantallas, que sale solo la primera vez). Si cerraste la página en plena batalla, también ofrece **retomarla**.
 - **Premio diario**: al abrir el juego (o en el Menú) puedes reclamar un premio de oro y madera. Son 7 días seguidos que van subiendo (el 7.º es el gordo) y crecen con el nivel del Ayuntamiento; si falta un día, la racha vuelve al día 1. El día cuenta por la medianoche del dispositivo.
@@ -118,7 +119,9 @@ En Windows PowerShell, si `npm` da error de «ejecución de scripts deshabilitad
 - `src/game/achievements.js` — logros: cómo se mide cada uno y cómo se reclaman.
 - `src/scenes/terrainArt.js` — terreno isométrico dibujado por código (césped, tierra, arena, agua) y el borde de roca de la isla.
 - `src/scenes/artPlace.js` — cómo se apoya cada dibujo en el centro de su rectángulo (y elige el dibujo del giro de cámara).
-- `src/data/artBoxes.js` — tamaño y punto de apoyo de cada dibujo de edificio (lo genera `tools/iso`).
+- `src/data/artBoxes.js`, `artBoxesSylvan.js` — tamaño y punto de apoyo de cada dibujo de edificio, por raza (los genera `tools/iso`).
+- `src/data/races.js` — las razas: carpeta de arte y nombres de edificios, unidades y héroes (`applyRace`).
+- `src/game/res.js` — resolución del lienzo (nitidez): zoom de cámara y puntero en píxeles lógicos.
 - `src/game/raids.js` — ataques enemigos a tu base: fuerza y generación de oleadas, calendario, daño, robo y reparación del informe.
 - `src/game/campaign.js` — aplica el resultado de una batalla (bajas, botín, campaña, experiencia del héroe).
 - `src/scenes/BattleScene.js` — escena de la batalla (tuya o la defensa de tu base): dibujo, selección, órdenes, habilidades y resultado.
@@ -136,9 +139,12 @@ En Windows PowerShell, si `npm` da error de «ejecución de scripts deshabilitad
 - `sw.template.js` — plantilla del service worker; el build genera `dist/sw.js` con la lista de archivos.
 
 ## Arte
-El juego se dibuja en **vista isométrica 2:1** (casillas de 96×48 px a zoom 1). El arte sale de modelos 3D CC0 de Kenney que se montan, recolorean y fotografían desde una cámara isométrica con `tools/iso` (ver su README); el resultado son PNG normales en `public/assets/iso/`: edificios de 192×256, adornos de 160×176 y hojas de animación de personajes de 8×4 cuadros de 96×120. Cada tipo se apoya en su casilla por un punto fijo (`sprites.js`). La lógica, el guardado y la economía solo hablan en casillas `(x, y)` y no saben nada de cómo se dibuja.
+El juego se dibuja en **vista isométrica 2:1** (casillas de 96×48 px a zoom 1). El arte sale de modelos 3D CC0 de Kenney que se montan, recolorean y fotografían desde una cámara isométrica con `tools/iso` (ver su README); el resultado son PNG normales en `public/assets/iso/` (y `iso/sylvan/` para los Silvanos), dibujados a **1,5× el tamaño en pantalla** (`ART_SCALE` en `config.js`): adornos de 240×264 y hojas de animación de personajes de 8×4 cuadros de 144×180; los edificios se recortan a lo que ocupan. Cada tipo se apoya en su casilla por un punto fijo (`sprites.js`). La lógica, el guardado y la economía solo hablan en casillas `(x, y)` y no saben nada de cómo se dibuja.
 
-Más adelante, para **razas**: bastan otra paleta (`reino()` en `tools/iso/buildings.js`) y otras piezas por edificio.
+Una **raza nueva** pide: su paleta y sus piezas por edificio (como `tools/iso/sylvan.js`), sus personajes (`designsSylvan.js`), sus medidas (`node tools/iso/boxes.mjs <boxes.json> <raza>`), una entrada en `src/data/races.js` y una carpeta `public/assets/iso/<raza>/` (que no se precarga: se baja al elegir esa raza).
+
+### Nitidez
+El lienzo se dibuja a la resolución real de la pantalla (hasta 2× el tamaño lógico de 432 px de ancho, según la densidad: `res.js`): la cámara hace zoom y el puntero se convierte a píxeles lógicos, así que el juego sigue hablando en píxeles lógicos. Los textos se dibujan a esa resolución. Para probarlo sin un celular: `?dpr=2.5` al final de la dirección.
 
 ## Créditos
 Modelos 3D y sonido de [Kenney](https://kenney.nl) (Castle Kit, Fantasy Town Kit, Mini Characters, Interface Sounds y RPG Audio), licencia **CC0**; el arte isométrico se generó con ellos y las piezas propias de `tools/iso`. Detalle y correspondencia de archivos en `public/assets/CREDITS.md`; licencias originales en `public/assets/licenses/`.
@@ -154,9 +160,10 @@ Modelos 3D y sonido de [Kenney](https://kenney.nl) (Castle Kit, Fantasy Town Kit
 - Las pruebas de PWA se hicieron a mano (instalación, sin conexión); falta pasar **Lighthouse**.
 - El pellizco con dos dedos, el recuadro de selección y los botones de habilidad **no se han probado en un móvil real** (solo con ratón y teclado).
 - Las mejoras usan la hora del sistema: adelantar el reloj las termina antes. El juego limita el daño (una mejora nunca puede quedar más lejos que su duración total), pero no puede impedirlo del todo; es aceptable sin ranking.
-- Si cambia el formato del guardado, subir `SAVE_VERSION` y añadir el paso en `migrate()` de `save.js`. Ejemplos: v1→v2 (niveles), v2→v3 (mapa 12×12 → 24×24, madera y Ayuntamiento), v3→v4 (misiones), v4→v5 (ejército, héroe y entrenamiento), v5→v6 (campaña y experiencia), v6→v7 (ataques enemigos y edificios dañados), v7→v8 (casas, nuevas unidades, 5 héroes con escuadra, herrería y logros) v9→v10 (edificios militares únicos y entrenamiento por lotes) v10→v11 (mapa de 48×48 cuadros y edificios de varios cuadros: cada casilla vieja pasa a 2×2 cuadros y cada muro a 4) v11→v12 (adornos quitados) y v12→v13 (colas de entrenamiento y de obras, premio diario). Una base avanzada que se migra tendrá varias misiones ya cumplidas y podrá reclamarlas.
+- Si cambia el formato del guardado, subir `SAVE_VERSION` y añadir el paso en `migrate()` de `save.js`. Ejemplos: v1→v2 (niveles), v2→v3 (mapa 12×12 → 24×24, madera y Ayuntamiento), v3→v4 (misiones), v4→v5 (ejército, héroe y entrenamiento), v5→v6 (campaña y experiencia), v6→v7 (ataques enemigos y edificios dañados), v7→v8 (casas, nuevas unidades, 5 héroes con escuadra, herrería y logros) v9→v10 (edificios militares únicos y entrenamiento por lotes) v10→v11 (mapa de 48×48 cuadros y edificios de varios cuadros: cada casilla vieja pasa a 2×2 cuadros y cada muro a 4) v11→v12 (adornos quitados), v12→v13 (colas de entrenamiento y de obras, premio diario) y v13→v14 (raza elegida). Una base avanzada que se migra tendrá varias misiones ya cumplidas y podrá reclamarlas.
 - Los sonidos son `.ogg`: algunos navegadores antiguos de Apple no los reproducen (el juego funciona igual, sin sonido).
-- El lienzo es de 432 px de ancho (el alto se adapta a la pantalla al arrancar) y se escala; en pantallas grandes (y en celulares de mucha densidad) los dibujos y textos se ven algo suavizados: subir la nitidez pide dibujar el arte al doble de tamaño.
+- El lienzo es de 432 px lógicos de ancho (el alto se adapta a la pantalla al arrancar) y se dibuja hasta a 2× según la pantalla; las texturas de interfaz generadas por código (paneles, brillos, terreno) siguen a 1× y se ven algo suaves, y el arte a 1,5× se suaviza un poco si haces mucho zoom o la pantalla es muy densa.
+- Cambiar de raza recarga la página (cada una trae su arte): pasa al empezar de cero o al importar una partida de otra raza.
 - Los niveles 4 a 10 reutilizan el dibujo de la etapa 3 con un tinte; no tienen arte propio.
 - El arte nuevo se probó en un navegador de escritorio con tamaño de móvil; falta probarlo en un móvil real.
 - Los personajes miran en 4 diagonales (2 dibujadas y 2 volteadas): no giran con suavidad. Las máquinas de asedio solo se balancean al moverse y atacar.
@@ -168,7 +175,7 @@ Modelos 3D y sonido de [Kenney](https://kenney.nl) (Castle Kit, Fantasy Town Kit
 - Las unidades se separan con un empujón suave, no tienen colisiones duras: en un montón muy apretado pueden rozarse.
 - El equilibrio (fuerza de las oleadas, robo, costo de reparar y de las mejoras de nivel alto) se calibró con simulaciones (`tools/balance.mjs`), no jugando: las simulaciones no usan habilidades ni órdenes, así que un jugador atento rinde más. Un ejército de nivel alto sigue aplastando las primeras campañas (es lo normal: sirven para repetirlas y conseguir estrellas). Producción, tope de recursos y costos de los niveles 6 a 10 se revisaron: el tope de almacenamiento siempre alcanza para pagar la mejora más cara.
 - Los premios y las oleadas usan la hora del dispositivo: se pueden manipular cambiando la hora.
-- No hay segunda raza: pide dibujar edificios, tropas y héroes nuevos (ver `tools/iso`).
+- Las dos razas son iguales en estadísticas (solo cambian arte y nombres); las misiones y logros siguen hablando de «Aserradero», «Soldado»… con los nombres del Reino.
 
 ## Hoja de ruta
 Se decidió que el juego debía sentirse menos básico: *quieto, con poco que hacer, sin objetivos y sin combate*. Por etapas:
@@ -176,5 +183,5 @@ Se decidió que el juego debía sentirse menos básico: *quieto, con poco que ha
 1. **Vida y metas** — hecho: aldeanos, efectos y misiones.
 2. **Más contenido** — hecho: casas, cinco edificios militares con sus unidades, herrería, altar y 5 héroes con árboles de poder, puertas, logros y niveles hasta el 10.
 3. **Combate y campaña** — hecho: ataque **automático con control de grupos**, arqueros, magos, caballeros y asedio, habilidades de héroes, **ataques enemigos a tu base** que se ven en vivo, con daño y reparación. También hecho: campaña sin fin con guarnición creciente, ataques suaves al principio y aplazables, colas, premio diario y batalla guardada. Pendiente: elegir dónde desembarcan las tropas, más tipos de enemigo y jugar el equilibrio en un móvil real.
-4. **Gráficos** — hecho: **vista isométrica con arte 3D propio**, personajes con animación de caminar y atacar, sombras, terreno con caminos, estanques y flores, humo y fuego, efectos de habilidades e interfaz nueva. Pendiente: razas, etapas de arte propias para los niveles altos y mejorar el terreno de la batalla.
+4. **Gráficos** — hecho: **vista isométrica con arte 3D propio**, personajes con animación de caminar y atacar, sombras, terreno con caminos, estanques y flores, humo y fuego, efectos de habilidades e interfaz nueva. Pendiente: más razas con estilo propio (hoy solo cambian arte y nombres), etapas de arte propias para los niveles altos y mejorar el terreno de la batalla.
 5. En cualquier momento: probarlo en el celular, pasar Lighthouse y, si hace falta, alojarlo en otro sitio.

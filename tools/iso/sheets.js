@@ -77,15 +77,19 @@ function poseSpider(g, clip, t) {
 }
 
 /** Siege: un modelo del kit del castillo, sin esqueleto. */
-async function siege(name, scale) {
+async function siege(name, scale, tint = null) {
   const o = await I.make('castle', name);
+  if (tint) I.recolor(o, tint);
   const inner = new T.Group();
   inner.add(o);
   inner.userData.siege = true;
   return { obj: inner, scale, siege: true };
 }
 
-const designFor = async (key) => {
+// `race` (opcional): { dir, designs, siege } con los diseños propios de una raza (ver designsSylvan.js).
+const designFor = async (key, race = null) => {
+  if (race?.designs[key]) return race.designs[key]();
+  if (race?.siege?.[key]) return siege(...race.siege[key]);
   if (key === 'enemy_spider') return { obj: spider(), scale: 1.2, spider: true };
   if (key === 'unit_catapult') return siege('siege-catapult', 0.62);
   if (key === 'unit_ram') return siege('siege-ram', 0.62);
@@ -111,8 +115,8 @@ function drawFrame(d, clip, t, dir) {
 }
 
 /** Hoja completa de un personaje (canvas COLS×FRAME.W por ROWS×FRAME.H). */
-export async function sheet(key) {
-  const d = await designFor(key);
+export async function sheet(key, race = null) {
+  const d = await designFor(key, race);
   const out = document.createElement('canvas');
   out.width = COLS * FRAME.W;
   out.height = ROWS * FRAME.H;
@@ -131,12 +135,13 @@ export async function sheet(key) {
   return out;
 }
 
-export async function renderAll(keys = ALL_KEYS, save = true) {
+export async function renderAll(keys = null, save = true, race = null) {
+  keys ??= race?.keys ?? ALL_KEYS;
   document.getElementById('out').innerHTML = '';
   let n = 0;
   for (const k of keys) {
-    const c = await sheet(k);
-    if (save) await I.save(c, `units/${k}.png`);
+    const c = await sheet(k, race);
+    if (save) await I.save(c, `${race?.dir ?? ''}units/${k}.png`);
     c.style.width = '640px';
     I.show(c, k);
     n++;

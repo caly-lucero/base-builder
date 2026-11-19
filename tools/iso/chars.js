@@ -4,7 +4,7 @@
 const I = window.iso;
 const T = I.THREE;
 
-export const FRAME = { W: 96, H: 120, ox: 48, oy: 98 }; // tamaño de cada cuadro y el píxel donde pisa el personaje
+export const FRAME = { W: 96 * I.ART, H: 120 * I.ART, ox: 48 * I.ART, oy: 98 * I.ART }; // tamaño de cada cuadro y el píxel donde pisa el personaje
 export const DIRS = { SE: 90, NE: 180 }; // giro (grados) del modelo: miran hacia +x (abajo-derecha) y -z (arriba-derecha)
 
 /** Un hueso del esqueleto por nombre. */

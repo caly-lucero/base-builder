@@ -3,6 +3,8 @@
 // El arte (edificios, decoración, personajes) sale de modelos 3D CC0 de Kenney dibujados en vista
 // isométrica con tools/iso (ver tools/iso/README.md). Créditos y licencias: public/assets/CREDITS.md
 
+import { RACES, current } from './races.js';
+
 export const ASSET_BASE = 'assets/';
 
 // Edificios: 3 dibujos por tipo (niveles 1, 2 y 3; del 4 en adelante se reutiliza el 3 con tinte), cada uno en 4 giros
@@ -38,4 +40,10 @@ const SFX = [
 const folderOf = (k) => (BUILDING_ART.includes(k) ? 'iso/buildings' : 'iso/decor');
 export const IMAGES = Object.fromEntries([...BUILDING_ART, ...DECOR_ART].map((k) => [k, `${folderOf(k)}/${k}.png`]));
 export const SHEETS = Object.fromEntries(SHEET_KEYS.map((k) => [k, `iso/units/${k}.png`]));
+// Los dibujos de edificios y de las tropas y héroes propios dependen de la raza (RACES[...].artDir); el resto es común.
+// IMAGES y SHEETS dicen dónde está el arte del Reino; estas funciones dan la ruta real según la raza.
+const raceArt = (file, race) => file.replace(/^iso\/(buildings|units)\//, (_, kind) => `${RACES[race]?.artDir ?? 'iso'}/${kind}/`);
+export const imageFile = (key, race = current.race) => raceArt(IMAGES[key], race);
+export const sheetFile = (key, race = current.race) => (key.startsWith('enemy_') ? SHEETS[key] : raceArt(SHEETS[key], race));
+
 export const SOUNDS = Object.fromEntries(SFX.map((k) => [k, `audio/${k}.ogg`]));

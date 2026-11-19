@@ -3,7 +3,9 @@
 //   fila 2: atacar abajo-derecha (4) + arriba-derecha (4)
 //   fila 3: quieto SE, quieto NE, caído SE, caído NE
 // Hacia la izquierda se usa el mismo cuadro volteado (flipX).
-export const SHEET = { frameWidth: 96, frameHeight: 120, cols: 8, anchorX: 48, anchorY: 98 };
+import { ART_SCALE } from '../data/config.js';
+
+export const SHEET = { frameWidth: 96 * ART_SCALE, frameHeight: 120 * ART_SCALE, cols: 8, anchorX: 48 * ART_SCALE, anchorY: 98 * ART_SCALE };
 export const WALK_FRAMES = 6;
 export const ATTACK_FRAMES = 4;
 

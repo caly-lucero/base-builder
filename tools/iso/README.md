@@ -21,10 +21,22 @@ Convierte modelos 3D CC0 de Kenney (Castle Kit, Fantasy Town Kit, Mini Character
 4. Copia las carpetas `buildings/`, `decor/` y `units/` de la salida a `public/assets/iso/` y ejecuta
    `node tools/iso/boxes.mjs <salida>/buildings/boxes.json` para regenerar `src/data/artBoxes.js`.
 
+### Otra raza (Silvanos)
+Las razas se dibujan con las mismas funciones pasando un objeto de raza (`SYLVAN` en `sylvan.js`, `SYLVAN_UNITS` en `designsSylvan.js`), y salen en `sylvan/buildings/` y `sylvan/units/` (la decoración es común):
+```js
+const S = await import('/sylvan.js');       await buildings.renderAll(buildings.TYPES, true, [0, 1, 2, 3], S.SYLVAN);
+const U = await import('/designsSylvan.js'); const Sh = await import('/sheets.js'); await Sh.renderAll(null, true, U.SYLVAN_UNITS);
+```
+Copia `sylvan/buildings` y `sylvan/units` a `public/assets/iso/sylvan/` y regenera sus medidas con `node tools/iso/boxes.mjs <salida>/sylvan/buildings/boxes.json sylvan`.
+
+### Tamaño del arte
+Todo se dibuja a `ART` (1,5) veces el tamaño en pantalla (`iso.ART`, el mismo valor que `ART_SCALE` en `src/data/config.js`): así se ve nítido en pantallas de mucha densidad. Si lo cambias, cambia también `ART_SCALE` y vuelve a dibujar y a generar las medidas de todo.
+
 Si cambias un módulo y la consola sigue usando el viejo, recarga la página de la herramienta (el navegador guarda los módulos importados).
 
 ## Archivos
 - `iso.js` — cámara isométrica, luces, sombras, recolor de paletas, render a canvas y guardado.
+- `sylvan.js`, `designsSylvan.js` — edificios y personajes de los Silvanos (paleta `sylvanPalette`, setos, árboles, cristales, cuernos de ciervo).
 - `buildings.js` — cómo se arma cada edificio y su paleta del *Reino* (`reino()`); `HEIGHT` limita la altura de cada uno; `PLAN` fija el tamaño en cuadros, el suelo y cuánto se agranda su modelo; `renderAll` dibuja los 4 giros.
 - `boxes.mjs` — convierte `boxes.json` en `src/data/artBoxes.js`.
 - `chars.js` y `designs.js` — el diseño de cada personaje (armas, escudos, sombreros, capas) sobre los modelos de Mini Characters.

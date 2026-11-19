@@ -1,7 +1,7 @@
 // Cómo se colocan los dibujos en pantalla (lo comparten la base y la batalla).
 import { artTurn, rotateVec, spriteScale, tileBase, view } from '../game/projection.js';
 import { PORTRAIT_FRAME, unitFrame } from '../game/unitArt.js';
-import { IMAGES } from '../data/assets.js';
+import { IMAGES, imageFile } from '../data/assets.js';
 import { anchorOf, contentBounds, isSheet } from '../game/sprites.js';
 
 const BUILDING_ART = /^(townhall|mine|sawmill|storage|tower|wall|gate|house|barracks|archery|atelier|stable|siege|forge|altar)_\d$/;
@@ -27,7 +27,9 @@ export function viewKey(key) {
 export function missingRotationArt(scene, rot) {
   const turn = artTurn(rot);
   if (!turn) return [];
-  return Object.entries(IMAGES).filter(([key]) => key.endsWith(`_r${turn}`) && !scene.textures.exists(key));
+  return Object.keys(IMAGES)
+    .filter((key) => key.endsWith(`_r${turn}`) && !scene.textures.exists(key))
+    .map((key) => [key, imageFile(key)]);
 }
 
 /** Cuadro de animación de un personaje que se mueve o mira en la dirección (dx, dy) del mapa, vista con la cámara girada. */

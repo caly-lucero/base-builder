@@ -5,7 +5,7 @@ const I = window.iso;
 const T = I.THREE;
 
 /** Pone una pieza en un grupo. o: x, y, z, ry (giro en grados), s (escala), sx/sy/sz (escalas por eje). */
-async function put(g, pack, name, o = {}) {
+export async function put(g, pack, name, o = {}) {
   const m = await I.make(pack, name);
   const h = new T.Group();
   h.add(m);
@@ -17,7 +17,7 @@ async function put(g, pack, name, o = {}) {
 }
 
 /** Cuatro paredes alrededor de una casilla (la cara +x es la 0 y la +z la 1: las dos que se ven). */
-async function walls(g, { floors = 1, faces = ['wall-door', 'wall-window-shutters', 'wall', 'wall'], upper = ['wall-window-shutters', 'wall-window-small', 'wall', 'wall'], wood = false, y0 = 0, size = 1 } = {}) {
+export async function walls(g, { floors = 1, faces = ['wall-door', 'wall-window-shutters', 'wall', 'wall'], upper = ['wall-window-shutters', 'wall-window-small', 'wall', 'wall'], wood = false, y0 = 0, size = 1 } = {}) {
   const pre = wood ? 'wall-wood' : 'wall';
   for (let f = 0; f < floors; f++) {
     for (let k = 0; k < 4; k++) {
@@ -214,7 +214,7 @@ export const BUILDERS = {
 };
 
 // Altura máxima (en casillas) de cada edificio por etapa: así los más altos no se comen el mapa.
-const HEIGHT = {
+export const HEIGHT = {
   townhall: [2.1, 2.5, 3.0], tower: [1.9, 2.2, 2.6], house: [1.3, 1.6, 1.9], mine: [1.1, 1.2, 1.3], sawmill: [1.4, 1.5, 1.6],
   storage: [1.3, 1.4, 1.5], wall: [0.9, 1.1, 1.3], gate: [1.2, 1.4, 1.6], barracks: [1.5, 1.7, 1.9], archery: [1.5, 1.6, 1.8],
   atelier: [1.9, 2.3, 2.7], stable: [1.4, 1.5, 1.7], siege: [1.5, 1.7, 1.9], forge: [1.7, 1.8, 2.0], altar: [1.2, 1.5, 1.7],
@@ -231,8 +231,8 @@ function fit(g, maxH, maxW = 1.5) {
 }
 
 /** Arma un edificio, lo pinta con la paleta del reino y lo ajusta a su altura. */
-export async function build(type, stage, palette = reino) {
-  const g = await BUILDERS[type](stage);
+export async function build(type, stage, palette = reino, builders = BUILDERS) {
+  const g = await builders[type](stage);
   if (palette) I.recolor(g, palette);
   const wrap = new T.Group();
   wrap.add(g);
@@ -274,9 +274,9 @@ const COLORS = {
 };
 
 /** Suelo del edificio: una losa con borde, del tamaño de su rectángulo. */
-function plate(kind, w, h) {
+function plate(kind, w, h, colors = COLORS) {
   const g = new T.Group();
-  const c = COLORS[kind];
+  const c = colors[kind];
   const W = w * CELL;
   const D = h * CELL;
   const border = new T.Mesh(new T.BoxGeometry(W, 0.07, D), new T.MeshStandardMaterial({ color: c.border, roughness: 0.9 }));
@@ -349,19 +349,20 @@ async function castleProps(g, stage, w, h) {
 }
 
 /** El edificio tal como se ve en el mapa: su modelo (agrandado) sobre su suelo, centrado en el medio de su rectángulo. */
-export async function buildSized(type, stage, palette = reino) {
+// `race` (opcional) cambia las piezas, la paleta y los adornos: { palette, builders, colors, castleProps, yardProps } (ver sylvan.js).
+export async function buildSized(type, stage, race = null) {
   const plan = PLAN[type];
-  const model = await build(type, stage, palette);
+  const model = await build(type, stage, race?.palette ?? reino, race?.builders ?? BUILDERS);
   const g = new T.Group();
   if (plan.plate) {
-    const pl = plate(plan.plate, plan.w, plan.h);
+    const pl = plate(plan.plate, plan.w, plan.h, race?.colors ?? COLORS);
     g.add(pl);
   }
   model.scale.multiplyScalar(Array.isArray(plan.body) ? plan.body[stage - 1] : plan.body);
   if (plan.plate) model.position.y = 0.09;
   g.add(model);
-  if (plan.plate === 'castle') await castleProps(g, stage, plan.w, plan.h);
-  else if (plan.plate === 'yard') await yardProps(g, type, plan.w, plan.h);
+  if (plan.plate === 'castle') await (race?.castleProps ?? castleProps)(g, stage, plan.w, plan.h);
+  else if (plan.plate === 'yard') await (race?.yardProps ?? yardProps)(g, type, plan.w, plan.h);
   return g;
 }
 
@@ -373,7 +374,8 @@ export function renderSized(group, turns = 0) {
   const wrap = new T.Group();
   wrap.add(group);
   wrap.rotation.y = (turns * Math.PI) / 2;
-  const BIG = { W: 900, H: 900, ox: 450, oy: 620, SS: 2, ground: true };
+  const A = I.ART;
+  const BIG = { W: 900 * A, H: 900 * A, ox: 450 * A, oy: 620 * A, SS: 2, ground: true };
   const big = I.render(wrap, BIG);
   const ctx = big.getContext('2d');
   const { data, width, height } = ctx.getImageData(0, 0, BIG.W, BIG.H);
@@ -409,23 +411,24 @@ export function renderSized(group, turns = 0) {
 export const SIZES = Object.fromEntries(Object.entries(PLAN).map(([t, p]) => [t, { w: p.w, h: p.h }]));
 
 /** Dibuja y guarda todos los edificios: 3 etapas × 4 giros. Escribe también boxes.json con el apoyo de cada imagen. */
-export async function renderAll(types = TYPES, save = true, turnsList = [0, 1, 2, 3]) {
+export async function renderAll(types = TYPES, save = true, turnsList = [0, 1, 2, 3], race = null) {
+  const dir = race?.dir ?? ''; // carpeta de salida de la raza («sylvan/»)
   const boxes = {};
   const out = document.getElementById('out');
   out.innerHTML = '';
   for (const type of types) {
     for (const stage of [1, 2, 3]) {
       for (const turns of turnsList) {
-        const g = await buildSized(type, stage);
+        const g = await buildSized(type, stage, race);
         const { canvas, box } = renderSized(g, turns);
         const key = turns ? `${type}_${stage}_r${turns}` : `${type}_${stage}`;
         boxes[key] = box;
-        if (save) await I.save(canvas, `buildings/${key}.png`);
+        if (save) await I.save(canvas, `${dir}buildings/${key}.png`);
         if (turns === 0) I.show(canvas, key);
       }
     }
   }
-  if (save) await fetch('/save?name=buildings/boxes.json', { method: 'POST', body: JSON.stringify(boxes) });
+  if (save) await fetch(`/save?name=${dir}buildings/boxes.json`, { method: 'POST', body: JSON.stringify(boxes) });
   return boxes;
 }
 window.buildings.buildSized = buildSized;

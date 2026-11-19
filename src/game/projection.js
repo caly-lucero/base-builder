@@ -8,7 +8,7 @@
 //
 // El mapa se ve por una «ventana» rectangular (LAYOUT.viewHeight de alto, entre el HUD y la
 // barra de abajo). `view` dice dónde cae en pantalla el vértice de arriba de la casilla (0, 0).
-import { CAMERA, GRID, LAYOUT, TERRAIN } from '../data/config.js';
+import { ART_SCALE, CAMERA, GRID, LAYOUT, TERRAIN } from '../data/config.js';
 import { TOWN_HALL_CELL, inBounds } from './logic.js';
 
 export const TILE_W = 48;
@@ -19,8 +19,8 @@ const HH = TILE_H / 2;
 /** Largo (px, a zoom 1) de «un cuadro» recorrido en línea recta: sirve para tamaños de efectos y alcances. */
 export const TILE_LEN = Math.hypot(HW, HH);
 
-/** El arte ya viene dibujado al tamaño de pantalla a zoom 1. */
-export const SPRITE_SCALE = 1;
+/** El arte viene dibujado a ART_SCALE veces el tamaño de pantalla a zoom 1. */
+export const SPRITE_SCALE = 1 / ART_SCALE;
 
 /** Alto (a zoom 1) del borde de tierra que se ve bajo la isla. */
 export const CLIFF = 34;

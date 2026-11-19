@@ -16,6 +16,7 @@ import { darken, ensureTerrainTextures, ensureThemedGround, grassKey } from './t
 import { decorKey, generateDecor, generateOuterDecor, mulberry32 } from '../game/decor.js';
 import { flowerSpots, occupiedBlocks, pathTiles, pondTiles } from '../game/landscape.js';
 import { mapOfLevel, themeOf } from '../game/campaignMap.js';
+import { fitCamera, logical, onPointer } from '../game/res.js';
 import * as ui from './ui.js';
 import { addGloss, addVignette, emberPuff, ensureTextures, smokePuff, sparkBurst } from './look.js';
 
@@ -129,11 +130,11 @@ export default class BattleScene extends Phaser.Scene {
     this.boxRect = null;
 
     this.events.once('shutdown', ui.watchOtherTab(this, store.onSuperseded));
-    this.input.on('pointerdown', this.onPointerDown, this);
-    this.input.on('pointermove', this.onPointerMove, this);
-    this.input.on('pointerup', this.onPointerUp, this);
-    this.input.on('pointerupoutside', this.onPointerUp, this);
-    this.input.on('wheel', this.onWheel, this);
+    onPointer(this, 'pointerdown', this.onPointerDown);
+    onPointer(this, 'pointermove', this.onPointerMove);
+    onPointer(this, 'pointerup', this.onPointerUp);
+    onPointer(this, 'pointerupoutside', this.onPointerUp);
+    onPointer(this, 'wheel', this.onWheel);
 
     if (!this.raid) this.watchPageLeave();
     this.showToast(this.resume ? `Batalla retomada: ${missionName(this.level)}` : this.raid ? `¡Ataque enemigo! Fuerza ${this.level}: tus defensas pelean solas` : `${missionName(this.level)}: destruye el Ayuntamiento enemigo`, 2600);
@@ -189,6 +190,7 @@ export default class BattleScene extends Phaser.Scene {
     // el paisaje del mapa de campaña (o el de tu base si te atacan): árboles, rocas, estanques, flores y caminos.
     const theme = this.raid ? null : themeOf(mapOfLevel(this.level));
     const ground = theme ? ensureThemedGround(this, `m${mapOfLevel(this.level)}`, theme.top, theme.bottom) : [0, 1, 2, 3].map((v) => `iso_grass_${v}`);
+    fitCamera(this);
     this.cameras.main.setBackgroundColor(theme ? darken(theme.bottom, 0.45) : 0x3d6b30);
     const EXT = 6; // bloques de terreno que se dibujan más allá de cada borde
     this.terrain = []; // bloques de terreno de 2×2 cuadros
@@ -614,7 +616,8 @@ export default class BattleScene extends Phaser.Scene {
   pinchState() {
     const a = this.input.pointer1;
     const b = this.input.pointer2;
-    return { dist: Math.hypot(a.x - b.x, a.y - b.y) || 1, x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+    const [la, lb] = [logical(a), logical(b)];
+    return { dist: Math.hypot(la.x - lb.x, la.y - lb.y) || 1, x: (la.x + lb.x) / 2, y: (la.y + lb.y) / 2 };
   }
 
   /* ---------- eventos de la simulación ---------- */

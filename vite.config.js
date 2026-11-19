@@ -66,7 +66,8 @@ function serviceWorkerPlugin() {
         .sort();
       // Los dibujos de edificios de las vistas giradas (_r1 a _r3) pesan mucho y casi nadie los usa al instalar:
       // se descargan al girar la cámara y entonces quedan en la caché (ver el manejador de fetch de abajo).
-      const precached = files.filter((f) => !/_r[1-3]\.png$/.test(f));
+      // El arte de las razas que no son la tuya (assets/iso/<raza>/) tampoco se precarga: se baja al elegirla.
+      const precached = files.filter((f) => !/_r[1-3]\.png$/.test(f) && !f.startsWith('assets/iso/sylvan/'));
 
       const template = readFileSync(join(root, 'sw.template.js'), 'utf8');
 

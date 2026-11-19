@@ -2,6 +2,7 @@
 // Todas las funciones reciben el estado y el tiempo (`now`) para poder probarlas.
 import { ACHIEVEMENTS, ARMY_UNITS, BUILDINGS, ECONOMY, GRID, MAX_LEVEL, RAID, RESEARCH, RESEARCH_KEYS, RESOURCES, RESOURCE_NAMES, UNIQUE_BUILDINGS, UNITS, UPGRADE_QUEUE_MAX, batchLimit, batchTimeFactor, researchStep, trainQueueLimit } from '../data/config.js';
 import { HEROES, SQUAD_SIZE, heroCap, isHeroKey } from '../data/heroes.js';
+import { DEFAULT_RACE, isRace } from '../data/races.js';
 import { decorKey, generateDecor } from './decor.js';
 
 export const MAX_BUILDINGS = GRID.cols * GRID.rows;
@@ -25,7 +26,7 @@ export const emptyAchievements = () => Object.fromEntries(ACHIEVEMENTS.map((a) =
 /** Investigaciones de la Herrería, todas en el nivel 0. */
 export const emptyResearch = () => Object.fromEntries(RESEARCH_KEYS.map((k) => [k, 0]));
 
-export function createNewState(now = Date.now()) {
+export function createNewState(now = Date.now(), race = DEFAULT_RACE) {
   return {
     gold: ECONOMY.start.gold,
     wood: ECONOMY.start.wood,
@@ -37,6 +38,7 @@ export function createNewState(now = Date.now()) {
     heroes: {}, // héroes que tienes: { paladin: { level, xp }, … } (ver heroes.js)
     squad: [], // los (hasta 2) que salen a pelear, por clave
     upgradeQueue: [], // ids de edificios con una mejora encargada que espera un obrero libre (ya pagada)
+    race: isRace(race) ? race : DEFAULT_RACE, // raza elegida al empezar (ver data/races.js)
     daily: { day: 0, streak: 0 }, // premio diario: último día reclamado y racha (ver daily.js)
     cleared: [], // adornos del mapa (árboles, rocas…) que el jugador quitó: sus claves "x,y" (ver decor.js)
     research: emptyResearch(), // nivel de cada investigación de la Herrería

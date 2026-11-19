@@ -4,7 +4,10 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 
-export const TILE_W = 96; // ancho en píxeles de una casilla (rombo) a zoom 1: la altura es la mitad
+// El arte se dibuja a ART veces el tamaño lógico del juego (ART_SCALE en src/data/config.js): así se ve nítido en pantallas
+// de mucha densidad. Si cambias ART, cambia también ART_SCALE, SHEET (unitArt.js) y regenera artBoxes.js.
+export const ART = 1.5;
+export const TILE_W = 96 * ART; // ancho en píxeles de un bloque de 2×2 cuadros a zoom 1: la altura es la mitad
 const YAW = Math.PI / 4;
 const PITCH = Math.PI / 6; // 30°: da el rombo 2:1
 const PPU = TILE_W / (2 * Math.cos(YAW)); // píxeles por unidad del modelo (a lo largo de x o z)
@@ -190,5 +193,5 @@ export function pose(obj, clipName, t) {
   return clip.duration;
 }
 
-window.iso = { THREE, load, make, sizeOf, recolor, hsv, rgb, render, save, show, pose, TILE_W, PPU };
+window.iso = { THREE, load, make, sizeOf, recolor, hsv, rgb, render, save, show, pose, TILE_W, PPU, ART };
 document.title = 'iso listo';

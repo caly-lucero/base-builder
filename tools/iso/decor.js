@@ -75,9 +75,10 @@ export const KEYS = [...Object.keys(TREES), ...Object.keys(ROCKS), 'bush_a', 'bu
 /** Flores (3 colores) y mata de hierba: dibujadas a mano, pequeñas (32×24, centro en 16,16). */
 function flower(kind) {
   const c = document.createElement('canvas');
-  c.width = 32;
-  c.height = 24;
+  c.width = 32 * I.ART;
+  c.height = 24 * I.ART;
   const x = c.getContext('2d');
+  x.scale(I.ART, I.ART);
   const stem = '#3f7a35';
   const petals = ['#f4d34b', '#f08ab0', '#f4f4ee'][kind % 3];
   x.fillStyle = 'rgba(30,50,20,0.18)';
@@ -108,9 +109,10 @@ function flower(kind) {
 
 function tuft() {
   const c = document.createElement('canvas');
-  c.width = 32;
-  c.height = 24;
+  c.width = 32 * I.ART;
+  c.height = 24 * I.ART;
   const x = c.getContext('2d');
+  x.scale(I.ART, I.ART);
   x.fillStyle = 'rgba(30,50,20,0.16)';
   x.beginPath();
   x.ellipse(16, 17, 8, 3, 0, 0, Math.PI * 2);
@@ -133,7 +135,8 @@ export async function renderAll(save = true) {
   document.getElementById('out').innerHTML = '';
   for (const key of KEYS) {
     const o = await build(key);
-    const c = I.render(o, { W: 160, H: 176, ox: 80, oy: 128, ground: true });
+    const A = I.ART;
+    const c = I.render(o, { W: 160 * A, H: 176 * A, ox: 80 * A, oy: 128 * A, ground: true });
     I.show(c, key);
     if (save) await I.save(c, `decor/${key}.png`);
   }

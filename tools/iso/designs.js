@@ -13,9 +13,9 @@ function bone(obj, name) {
   return found;
 }
 
-const mat = (color, extra = {}) => new T.MeshStandardMaterial({ color, roughness: 0.55, metalness: 0.15, ...extra });
-const glow = (color, k = 1.2) => new T.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: k, roughness: 0.3 });
-const mesh = (geo, m, x = 0, y = 0, z = 0) => {
+export const mat = (color, extra = {}) => new T.MeshStandardMaterial({ color, roughness: 0.55, metalness: 0.15, ...extra });
+export const glow = (color, k = 1.2) => new T.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: k, roughness: 0.3 });
+export const mesh = (geo, m, x = 0, y = 0, z = 0) => {
   const o = new T.Mesh(geo, m);
   o.position.set(x, y, z);
   return o;
@@ -24,7 +24,7 @@ export const C = { azul: 0x3b6cc4, azulOsc: 0x24418a, oro: 0xf3c34f, marfil: 0xf
 
 /* ---------- piezas ---------- */
 
-function sword(blade = C.acero, guard = C.oro, len = 0.34) {
+export function sword(blade = C.acero, guard = C.oro, len = 0.34) {
   const g = new T.Group();
   g.add(mesh(new T.BoxGeometry(0.05, len, 0.016), mat(blade, { metalness: 0.4 }), 0, len / 2 + 0.04, 0));
   g.add(mesh(new T.BoxGeometry(0.15, 0.03, 0.04), mat(guard), 0, 0.04, 0));
@@ -32,13 +32,13 @@ function sword(blade = C.acero, guard = C.oro, len = 0.34) {
   g.add(mesh(new T.SphereGeometry(0.03, 8, 6), mat(guard), 0, -0.045, 0));
   return g;
 }
-function spear(tip = C.acero, len = 0.78) {
+export function spear(tip = C.acero, len = 0.78) {
   const g = new T.Group();
   g.add(mesh(new T.CylinderGeometry(0.014, 0.014, len, 6), mat(C.madera), 0, len / 2 - 0.15, 0));
   g.add(mesh(new T.ConeGeometry(0.04, 0.14, 6), mat(tip, { metalness: 0.4 }), 0, len - 0.1, 0));
   return g;
 }
-function axe(len = 0.55) {
+export function axe(len = 0.55) {
   const g = new T.Group();
   g.add(mesh(new T.CylinderGeometry(0.018, 0.018, len, 6), mat(C.madera), 0, len / 2 - 0.15, 0));
   for (const s of [-1, 1]) {
@@ -48,7 +48,7 @@ function axe(len = 0.55) {
   }
   return g;
 }
-function club() {
+export function club() {
   const g = new T.Group();
   g.add(mesh(new T.CylinderGeometry(0.03, 0.05, 0.5, 7), mat(C.madera), 0, 0.2, 0));
   for (let k = 0; k < 6; k++) {
@@ -58,7 +58,7 @@ function club() {
   }
   return g;
 }
-function bow(wood = C.madera, len = 0.5) {
+export function bow(wood = C.madera, len = 0.5) {
   const g = new T.Group();
   const arc = mesh(new T.TorusGeometry(len / 2, 0.016, 6, 16, Math.PI), mat(wood), 0, 0, 0);
   arc.rotation.z = Math.PI / 2;
@@ -66,14 +66,14 @@ function bow(wood = C.madera, len = 0.5) {
   g.add(mesh(new T.CylinderGeometry(0.004, 0.004, len, 4), mat(0xf3ecd8), 0, 0, 0));
   return g;
 }
-function staff(orb = C.cian, len = 0.7) {
+export function staff(orb = C.cian, len = 0.7) {
   const g = new T.Group();
   g.add(mesh(new T.CylinderGeometry(0.015, 0.02, len, 6), mat(C.madera), 0, len / 2 - 0.15, 0));
   g.add(mesh(new T.TorusGeometry(0.05, 0.012, 6, 12), mat(C.oro), 0, len - 0.1, 0));
   g.add(mesh(new T.SphereGeometry(0.055, 12, 10), glow(orb), 0, len - 0.1, 0));
   return g;
 }
-function shield(field = C.azul, round = true, trim = C.oro) {
+export function shield(field = C.azul, round = true, trim = C.oro) {
   const g = new T.Group();
   if (round) {
     const d = mesh(new T.CylinderGeometry(0.17, 0.17, 0.035, 20), mat(field), 0, 0, 0);
@@ -88,14 +88,14 @@ function shield(field = C.azul, round = true, trim = C.oro) {
   }
   return g;
 }
-function wizardHat(color = C.azul, band = C.oro) {
+export function wizardHat(color = C.azul, band = C.oro) {
   const g = new T.Group();
   g.add(mesh(new T.CylinderGeometry(0.2, 0.2, 0.025, 14), mat(color), 0, 0, 0));
   g.add(mesh(new T.ConeGeometry(0.13, 0.34, 12), mat(color), 0, 0.18, 0));
   g.add(mesh(new T.CylinderGeometry(0.135, 0.135, 0.04, 12), mat(band), 0, 0.03, 0));
   return g;
 }
-function cape(color = C.azul, trim = C.oro, w = 0.28, h = 0.34) {
+export function cape(color = C.azul, trim = C.oro, w = 0.28, h = 0.34) {
   const g = new T.Group();
   const c = mesh(new T.BoxGeometry(w, h, 0.02), mat(color, { roughness: 0.9, metalness: 0 }), 0, -h / 2, 0);
   c.rotation.x = 0.16;
@@ -105,13 +105,13 @@ function cape(color = C.azul, trim = C.oro, w = 0.28, h = 0.34) {
   g.add(edge);
   return g;
 }
-const halo = (color = C.oro) => mesh(new T.TorusGeometry(0.12, 0.014, 6, 24), glow(color, 0.9), 0, 0, 0);
-const shoulderPads = (color = C.acero) => {
+export const halo = (color = C.oro) => mesh(new T.TorusGeometry(0.12, 0.014, 6, 24), glow(color, 0.9), 0, 0, 0);
+export const shoulderPads = (color = C.acero) => {
   const g = new T.Group();
   for (const s of [-1, 1]) g.add(mesh(new T.SphereGeometry(0.09, 10, 8), mat(color, { metalness: 0.3 }), s * 0.17, 0, 0));
   return g;
 };
-function quiver(arrowColor = C.marfil, tilt = 0.35) {
+export function quiver(arrowColor = C.marfil, tilt = 0.35) {
   const q = new T.Group();
   q.add(mesh(new T.CylinderGeometry(0.04, 0.035, 0.22, 8), mat(C.madera)));
   for (const x of [-0.015, 0.015, 0]) q.add(mesh(new T.ConeGeometry(0.014, 0.06, 4), mat(arrowColor), x, 0.14, 0));
@@ -122,7 +122,7 @@ function quiver(arrowColor = C.marfil, tilt = 0.35) {
 /* ---------- piezas de héroe: lo que los distingue a primera vista de las tropas ---------- */
 
 /** Anillo luminoso en el suelo bajo el héroe (su color lo identifica de lejos). */
-function groundRing(color, r = 0.4) {
+export function groundRing(color, r = 0.4) {
   const g = new T.Group();
   const ring = mesh(new T.TorusGeometry(r, 0.03, 8, 40), glow(color, 1.3), 0, 0.035, 0);
   ring.rotation.x = Math.PI / 2;
@@ -134,7 +134,7 @@ function groundRing(color, r = 0.4) {
   return g;
 }
 /** Penacho de casco. */
-function plume(color = C.rojo) {
+export function plume(color = C.rojo) {
   const g = new T.Group();
   g.add(mesh(new T.CylinderGeometry(0.03, 0.04, 0.05, 8), mat(C.oro), 0, 0, 0));
   for (const [x, y, rot, h] of [[0, 0.12, 0.5, 0.26], [0, 0.1, 0.25, 0.22], [0, 0.07, 0.8, 0.18]]) {
@@ -145,7 +145,7 @@ function plume(color = C.rojo) {
   return g;
 }
 /** Corona de oro con puntas. */
-function crown(gem = C.cian) {
+export function crown(gem = C.cian) {
   const g = new T.Group();
   g.add(mesh(new T.CylinderGeometry(0.1, 0.1, 0.05, 10, 1, true), mat(C.oro, { metalness: 0.5, side: T.DoubleSide }), 0, 0, 0));
   for (let k = 0; k < 6; k++) {
@@ -156,7 +156,7 @@ function crown(gem = C.cian) {
   return g;
 }
 /** Cuernos de casco. */
-function horns(color = C.marfil) {
+export function horns(color = C.marfil) {
   const g = new T.Group();
   for (const sx of [-1, 1]) {
     const h = mesh(new T.ConeGeometry(0.045, 0.24, 7), mat(color), sx * 0.15, 0.08, 0);
@@ -166,7 +166,7 @@ function horns(color = C.marfil) {
   return g;
 }
 /** Alas de plumas en la espalda. */
-function wings(color = C.marfil, tip = C.oro) {
+export function wings(color = C.marfil, tip = C.oro) {
   const g = new T.Group();
   for (const sx of [-1, 1]) {
     for (let k = 0; k < 4; k++) {
@@ -178,7 +178,7 @@ function wings(color = C.marfil, tip = C.oro) {
   return g;
 }
 /** Llama que arde sobre la mano del piromante. */
-function flame() {
+export function flame() {
   const g = new T.Group();
   g.add(mesh(new T.SphereGeometry(0.075, 12, 10), glow(C.fuego, 1.6), 0, 0, 0));
   for (const [x, z, h, col] of [[0, 0, 0.24, 0xffcf4a], [0.05, 0.02, 0.16, C.fuego], [-0.05, -0.02, 0.18, C.fuego]]) g.add(mesh(new T.ConeGeometry(0.05, h, 7), glow(col, 1.4), x, 0.1 + h / 2 - 0.05, z));
@@ -186,7 +186,7 @@ function flame() {
 }
 
 /** Cuelga `item` de un hueso: p = [x, y, z], r = [rx, ry, rz] en grados. */
-function attach(obj, boneName, item, p = [0, 0, 0], r = [0, 0, 0], s = 1) {
+export function attach(obj, boneName, item, p = [0, 0, 0], r = [0, 0, 0], s = 1) {
   item.position.set(...p);
   item.rotation.set(...r.map((d) => (d * Math.PI) / 180));
   item.scale.setScalar(s);
@@ -194,12 +194,12 @@ function attach(obj, boneName, item, p = [0, 0, 0], r = [0, 0, 0], s = 1) {
   return item;
 }
 const HAND = [0, -0.12, 0.04];
-const inHand = (obj, item, s = 1.25) => attach(obj, 'arm-right', item, HAND, [90, 0, 0], s);
-const onArm = (obj, item, s = 1.15) => attach(obj, 'arm-left', item, [0.075, -0.08, 0.02], [0, 90, 0], s);
-const withCape = (obj, c) => attach(obj, 'torso', c, [0, 0.26, -0.1]);
+export const inHand = (obj, item, s = 1.25) => attach(obj, 'arm-right', item, HAND, [90, 0, 0], s);
+export const onArm = (obj, item, s = 1.15) => attach(obj, 'arm-left', item, [0.075, -0.08, 0.02], [0, 90, 0], s);
+export const withCape = (obj, c) => attach(obj, 'torso', c, [0, 0.26, -0.1]);
 
-const acero = (r, g, b) => [Math.min(255, r * 1.12 + 10), Math.min(255, g * 1.1 + 10), Math.min(255, b * 1.14 + 14)];
-const oroGris = (r, g, b) => [Math.min(255, r * 1.2 + 24), Math.min(255, g * 1.08 + 14), Math.min(255, b * 0.8)];
+export const acero = (r, g, b) => [Math.min(255, r * 1.12 + 10), Math.min(255, g * 1.1 + 10), Math.min(255, b * 1.14 + 14)];
+export const oroGris = (r, g, b) => [Math.min(255, r * 1.2 + 24), Math.min(255, g * 1.08 + 14), Math.min(255, b * 0.8)];
 
 /* ---------- los personajes ---------- */
 

@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { ASSET_BASE, IMAGES, SHEETS, SOUNDS } from '../data/assets.js';
+import { ASSET_BASE, IMAGES, SHEETS, SOUNDS, imageFile, sheetFile } from '../data/assets.js';
 import { ARMY_UNITS, BUILDINGS, CAMERA, ECONOMY, DAILY, GRID, LAYOUT, RAID, TERRAIN, RESEARCH, RESOURCES, TOOL_PAGES, UNIQUE_BUILDINGS, UNITS, UPGRADE_QUEUE_MAX, batchTimeFactor, researchStep, trainQueueLimit } from '../data/config.js';
 import { HEROES, HERO_KEYS, heroXpToNext } from '../data/heroes.js';
 import { decorKey, generateDecor, generateOuterDecor } from '../game/decor.js';
@@ -44,6 +44,8 @@ import { openHeroPanel } from './heroPanel.js';
 import { openArmyPanel } from './armyPanel.js';
 import { openCampaignPanel } from './campaignPanel.js';
 import { NODES_PER_MAP, mapOfLevel, starsOf } from '../game/campaignMap.js';
+import { fitCamera, logical, onPointer } from '../game/res.js';
+import { RACES, RACE_KEYS, current as currentRace } from '../data/races.js';
 import * as ui from './ui.js';
 import { addGloss, addVignette, emberPuff, ensureTextures, smokePuff, sparkBurst } from './look.js';
 
@@ -157,9 +159,9 @@ export default class BaseScene extends Phaser.Scene {
   preload() {
     this.load.setPath(ASSET_BASE);
     // Los dibujos de los giros de cámara (_r1 a _r3) se cargan cuando hacen falta (ver turnView).
-    for (const [key, file] of Object.entries(IMAGES)) if (!/_r[1-3]$/.test(key)) this.load.image(key, file);
+    for (const key of Object.keys(IMAGES)) if (!/_r[1-3]$/.test(key)) this.load.image(key, imageFile(key));
     for (const [key, file] of missingRotationArt(this, view.rot)) this.load.image(key, file);
-    for (const [key, file] of Object.entries(SHEETS)) this.load.spritesheet(key, file, { frameWidth: SHEET.frameWidth, frameHeight: SHEET.frameHeight });
+    for (const key of Object.keys(SHEETS)) this.load.spritesheet(key, sheetFile(key), { frameWidth: SHEET.frameWidth, frameHeight: SHEET.frameHeight });
     for (const [key, file] of Object.entries(SOUNDS)) this.load.audio(key, file);
   }
 
@@ -172,6 +174,7 @@ export default class BaseScene extends Phaser.Scene {
 
     resetView(logic.townHall(store.get()) ?? undefined);
 
+    fitCamera(this);
     this.cameras.main.setBackgroundColor(0x3d6b30); // el suelo sigue más allá del mapa: tierra firme, no una isla en el cielo
     ensureTextures(this);
     ensureTerrainTextures(this);
@@ -214,11 +217,11 @@ export default class BaseScene extends Phaser.Scene {
     const off = onNotice((text) => this.showToast(text, 2400));
     this.events.once('shutdown', off);
 
-    this.input.on('pointerdown', this.onPointerDown, this);
-    this.input.on('pointermove', this.onPointerMove, this);
-    this.input.on('pointerup', this.onPointerUp, this);
-    this.input.on('pointerupoutside', this.onPointerUp, this);
-    this.input.on('wheel', this.onWheel, this);
+    onPointer(this, 'pointerdown', this.onPointerDown);
+    onPointer(this, 'pointermove', this.onPointerMove);
+    onPointer(this, 'pointerup', this.onPointerUp);
+    onPointer(this, 'pointerupoutside', this.onPointerUp);
+    onPointer(this, 'wheel', this.onWheel);
     this.input.on('pointerout', () => !this.gesture && this.hideGhost());
 
     // La UI HTML (importar / nueva partida) avisa cuando cambia el estado completo.
@@ -244,7 +247,7 @@ export default class BaseScene extends Phaser.Scene {
     }
     this.rebuildViews();
     // Al abrir el juego: pantalla de inicio (Continuar / Nueva partida / Cómo se juega). La primera vez, directo al tutorial.
-    if (data?.title) this.time.delayedCall(200, () => (data.fresh ? this.showTutorial(0) : this.showTitle(data.pending)));
+    if (data?.title) this.time.delayedCall(200, () => (data.raceChosen ? this.showTutorial(0) : data.fresh ? this.showRacePick() : this.showTitle(data.pending)));
     // De vuelta de ver la defensa: el informe del ataque.
     if (data?.raidReport) this.time.delayedCall(350, () => this.openRaidReport(data.raidReport));
   }
@@ -910,13 +913,36 @@ export default class BaseScene extends Phaser.Scene {
                   onClick: () => {
                     clearBattle();
                     store.reset();
-                    this.showTutorial(0);
+                    runMenu('newGame'); // recarga y pide elegir raza
                   },
                 },
               ],
             }),
         },
       ],
+    });
+  }
+
+  /** Elegir raza al empezar de cero. Cambiar de raza recarga la página (cada una trae su propio arte). */
+  showRacePick() {
+    const choose = (id) => {
+      const state = store.get();
+      state.race = id;
+      store.commit();
+      if (id === currentRace.race) return this.showTutorial(0);
+      try {
+        window.sessionStorage.setItem('bb-racechosen', '1');
+      } catch {
+        /* sin sessionStorage solo se pierde el tutorial */
+      }
+      window.location.reload();
+    };
+    this.dialog({
+      title: 'Elige tu raza',
+      icon: 'crown',
+      lines: RACE_KEYS.map((id) => `${RACES[id].name}: ${RACES[id].blurb}`),
+      vertical: true,
+      buttons: RACE_KEYS.map((id, i) => ({ text: RACES[id].name, kind: i ? 'blue' : 'green', onClick: () => choose(id) })),
     });
   }
 
@@ -1901,7 +1927,8 @@ export default class BaseScene extends Phaser.Scene {
   pinchState() {
     const a = this.input.pointer1;
     const b = this.input.pointer2;
-    return { dist: Math.hypot(a.x - b.x, a.y - b.y) || 1, x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+    const [la, lb] = [logical(a), logical(b)];
+    return { dist: Math.hypot(la.x - lb.x, la.y - lb.y) || 1, x: (la.x + lb.x) / 2, y: (la.y + lb.y) / 2 };
   }
 
   startPinch() {
@@ -2323,7 +2350,7 @@ export default class BaseScene extends Phaser.Scene {
     const g = this.gesture;
     if (g?.mode === 'move') {
       const margin = 36;
-      const p = this.input.activePointer;
+      const p = logical(this.input.activePointer);
       const step = (CAMERA.keyPanSpeed * delta) / 1000;
       let ex = 0;
       let ey = 0;

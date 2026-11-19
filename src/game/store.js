@@ -151,7 +151,7 @@ export function replace(newState) {
   emit();
 }
 
-export function reset(now = Date.now()) {
+export function reset(now = Date.now(), race = undefined) {
   clearSave();
-  replace(createNewState(now));
+  replace(createNewState(now, race));
 }

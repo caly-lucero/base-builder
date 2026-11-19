@@ -5,6 +5,9 @@
 export const GRID = { cols: 48, rows: 48, tile: 24 };
 export const TERRAIN = { cols: 24, rows: 24, cells: 2 };
 
+/** El arte (tools/iso) está dibujado a este múltiplo del tamaño lógico: se reduce al ponerlo en pantalla y así se ve nítido. */
+export const ART_SCALE = 1.5;
+
 /** Lado en píxeles de los sprites originales (pack Kenney Medieval RTS). */
 export const ART_SIZE = 64;
 

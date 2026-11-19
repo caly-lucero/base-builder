@@ -7,6 +7,7 @@ import { HEROES } from '../src/data/heroes.js';
 import { DECOR_KEYS, DECOR_SEED, generateDecor } from '../src/game/decor.js';
 import { GRID } from '../src/data/config.js';
 import { ART_BOXES } from '../src/data/artBoxes.js';
+import { ART_SCALE } from '../src/data/config.js';
 import { VIEW_TURNS } from '../src/data/assets.js';
 import { SHEET } from '../src/game/unitArt.js';
 
@@ -59,7 +60,7 @@ test('las hojas de animación tienen el tamaño de la cuadrícula (8×4 cuadros)
   }
 });
 
-test('cada dibujo de edificio mide lo que dice artBoxes.js (y su apoyo cae dentro) y la decoración 160×176', () => {
+test('cada dibujo de edificio mide lo que dice artBoxes.js (y su apoyo cae dentro) y la decoración 160×176 (por ART_SCALE)', () => {
   for (const [key, file] of Object.entries(IMAGES)) {
     const { w, h } = pngSize(new URL(file, ASSETS));
     if (file.startsWith('iso/buildings/')) {
@@ -68,8 +69,8 @@ test('cada dibujo de edificio mide lo que dice artBoxes.js (y su apoyo cae dentr
       assert.deepEqual([w, h], [box.w, box.h], key);
       assert.ok(box.x > 0 && box.x < box.w && box.y > 0 && box.y < box.h, `${key}: el punto de apoyo debe caer dentro del dibujo`);
     }
-    else if (/^(flower_|tuft)/.test(key)) assert.deepEqual([w, h], [32, 24], key);
-    else assert.deepEqual([w, h], [160, 176], key);
+    else if (/^(flower_|tuft)/.test(key)) assert.deepEqual([w, h], [32 * ART_SCALE, 24 * ART_SCALE], key);
+    else assert.deepEqual([w, h], [160 * ART_SCALE, 176 * ART_SCALE], key);
   }
 });
 
@@ -84,7 +85,7 @@ test('cada edificio tiene sus 3 dibujos en los 4 giros de cámara', () => {
 test('el dibujo de cada edificio cubre su rectángulo en el suelo (el arte tiene el ancho de sus cuadros)', () => {
   for (const [type, def] of Object.entries(BUILDINGS)) {
     const box = ART_BOXES[`${type}_1`];
-    const ground = (def.size.w + def.size.h) * 24; // ancho del rombo de su rectángulo a zoom 1
+    const ground = (def.size.w + def.size.h) * 24 * ART_SCALE; // ancho del rombo de su rectángulo a zoom 1
     assert.ok(box.w >= ground * 0.8, `${type}: el dibujo (${box.w}px) es más angosto que su suelo (${ground}px)`);
   }
 });
