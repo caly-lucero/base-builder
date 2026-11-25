@@ -48,6 +48,7 @@ import { fitCamera, logical, onPointer } from '../game/res.js';
 import { RACES, RACE_KEYS, current as currentRace } from '../data/races.js';
 import * as ui from './ui.js';
 import { addGloss, addVignette, emberPuff, ensureTextures, smokePuff, sparkBurst } from './look.js';
+import { twistQuarterTurn } from '../game/visualScale.js';
 
 const FONT = 'system-ui, "Segoe UI", Roboto, sans-serif';
 
@@ -196,6 +197,7 @@ export default class BaseScene extends Phaser.Scene {
     this.ghost = this.add.image(0, 0, iconKey('mine')).setAlpha(0.7).setVisible(false).setDepth(DEPTH.ghost);
     this.ghostCell = this.add.graphics().setVisible(false).setDepth(DEPTH.ghost - 1); // rombo verde/rojo bajo la vista previa
     this.selector = this.add.graphics().setVisible(false).setDepth(DEPTH.selector); // rombo blanco de la selección
+    this.wallLinks = this.add.graphics().setDepth(DEPTH.world - 0.05); // continuidad visual entre muros y puertas
     this.hallGlow = this.add.graphics().setDepth(DEPTH.terrain + 0.9); // halo dorado que late bajo el Ayuntamiento
     this.selectorCell = null;
     this.toast = this.add
@@ -1663,6 +1665,22 @@ export default class BaseScene extends Phaser.Scene {
       return;
     }
 
+    if (b.type === 'wall' || b.type === 'gate') {
+      const segment = logic.wallSegment(state, b.id);
+      const cost = logic.wallBatchCost(state, b.id);
+      const capped = b.level >= logic.townHallLevel(state);
+      const affordable = !capped && logic.canAfford(state, cost);
+      detail.setText(`${lines.join('\n')}\nTramo conectado: ${segment.length} pieza${segment.length === 1 ? '' : 's'} del nivel ${b.level}`);
+      this.panel.hint.setVisible(false);
+      upgradeBtn.setVisible(true).setAlpha(affordable ? 1 : 0.5);
+      upgradeLabel
+        .setText(`Mejorar tramo · ${segment.length}\n${logic.formatCost(cost)}`)
+        .setVisible(true)
+        .setAlpha(affordable ? 1 : 0.5)
+        .setColor(logic.canAfford(state, cost) ? '#ffffff' : '#ffb0a0');
+      return;
+    }
+
     const capped = b.type !== 'townhall' && b.level >= logic.townHallLevel(state);
     const poor = !logic.canAfford(state, next.upgradeCost);
     const queued = logic.isQueuedUpgrade(state, b.id);
@@ -1698,6 +1716,16 @@ export default class BaseScene extends Phaser.Scene {
     const now = store.get();
     if (logic.isQueuedUpgrade(now, id)) {
       this.doAction(() => logic.cancelQueuedUpgrade(store.get(), id), () => 'Mejora en cola cancelada: te devolvimos lo pagado', 'close');
+      this.updatePanel();
+      return;
+    }
+    const selected = now.buildings.find((b) => b.id === id);
+    if (selected?.type === 'wall' || selected?.type === 'gate') {
+      this.doAction(
+        () => logic.upgradeWallSegment(store.get(), id),
+        (r) => `${r.count} pieza${r.count === 1 ? '' : 's'} mejorada${r.count === 1 ? '' : 's'} al nivel ${r.level}`,
+        'upgrade_done',
+      );
       this.updatePanel();
       return;
     }
@@ -1928,14 +1956,14 @@ export default class BaseScene extends Phaser.Scene {
     const a = this.input.pointer1;
     const b = this.input.pointer2;
     const [la, lb] = [logical(a), logical(b)];
-    return { dist: Math.hypot(la.x - lb.x, la.y - lb.y) || 1, x: (la.x + lb.x) / 2, y: (la.y + lb.y) / 2 };
+    return { dist: Math.hypot(la.x - lb.x, la.y - lb.y) || 1, angle: Math.atan2(lb.y - la.y, lb.x - la.x), x: (la.x + lb.x) / 2, y: (la.y + lb.y) / 2 };
   }
 
   startPinch() {
     const p = this.pinchState();
     this.movingId = null;
     this.hideGhost();
-    this.gesture = { mode: 'pinch', dist: p.dist, zoom: view.zoom, x: p.x, y: p.y };
+    this.gesture = { mode: 'pinch', dist: p.dist, zoom: view.zoom, angle: p.angle, x: p.x, y: p.y };
   }
 
   updatePinch() {
@@ -1943,6 +1971,11 @@ export default class BaseScene extends Phaser.Scene {
     const p = this.pinchState();
     zoomAt(p.x, p.y, g.zoom * (p.dist / g.dist));
     panBy(p.x - g.x, p.y - g.y);
+    const turn = twistQuarterTurn(g.angle, p.angle);
+    if (turn) {
+      this.turnView(turn);
+      g.angle = p.angle;
+    }
     g.x = p.x;
     g.y = p.y;
     this.viewDirty = true;
@@ -2196,6 +2229,7 @@ export default class BaseScene extends Phaser.Scene {
     }
 
     this.renderLandscape(state);
+    this.renderWallLinks(state.buildings);
 
     const occupied = occupiedBlocks(state.buildings);
     const cleared = new Set(state.cleared); // adornos que el jugador quitó
@@ -2309,6 +2343,26 @@ export default class BaseScene extends Phaser.Scene {
       strokeCell(this.selector, sel.x, sel.y, 0xffffff, 1, Math.max(2, 3 * zoom), 0.18, sel.w, sel.h);
     } else {
       this.selector.setVisible(false);
+    }
+  }
+
+  /** Une visualmente piezas contiguas para que la muralla se lea como una sola estructura. */
+  renderWallLinks(buildings) {
+    const g = this.wallLinks;
+    g.clear();
+    const pieces = buildings.filter((b) => b.type === 'wall' || b.type === 'gate');
+    const at = new Map(pieces.map((b) => [`${b.x},${b.y}`, b]));
+    const colors = [0x8a6a42, 0xa88a60, 0xc2b49a, 0xd6bd72, 0xe3cf86];
+    for (const b of pieces) {
+      const from = tileBase(b.x, b.y);
+      for (const [dx, dy] of [[1, 0], [0, 1]]) {
+        const other = at.get(`${b.x + dx},${b.y + dy}`);
+        if (!other) continue;
+        const to = tileBase(other.x, other.y);
+        const width = Math.max(4, 10 * view.zoom);
+        g.lineStyle(width + Math.max(2, 3 * view.zoom), 0x2b2017, 0.78).lineBetween(from.x, from.y, to.x, to.y);
+        g.lineStyle(width, colors[Math.min(colors.length - 1, Math.min(b.level, other.level) - 1)], 0.96).lineBetween(from.x, from.y, to.x, to.y);
+      }
     }
   }
 

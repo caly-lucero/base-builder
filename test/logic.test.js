@@ -12,6 +12,7 @@ import {
   collect,
   collectAll,
   countOf,
+  createBuilding,
   createNewState,
   demolish,
   displayName,
@@ -46,6 +47,9 @@ import {
   tickAll,
   townHall,
   trainableUnits,
+  upgradeWallSegment,
+  wallBatchCost,
+  wallSegment,
 } from '../src/game/logic.js';
 
 const T0 = 1_700_000_000_000;
@@ -75,6 +79,35 @@ test('una partida nueva trae el Ayuntamiento en el centro y los recursos inicial
   assert.equal(s.gold, ECONOMY.start.gold);
   assert.equal(s.wood, ECONOMY.start.wood);
   assert.equal(s.nextId, 2);
+});
+
+test('un tramo mezcla muros y puertas contiguos del mismo nivel y se mejora de una vez', () => {
+  const s = fresh(1000, 1000, 3);
+  s.buildings.push(
+    createBuilding(2, 'wall', 2, 2, T0),
+    createBuilding(3, 'gate', 3, 2, T0),
+    createBuilding(4, 'wall', 4, 2, T0),
+    createBuilding(5, 'wall', 8, 8, T0),
+    createBuilding(6, 'wall', 4, 3, T0, 2),
+  );
+  assert.deepEqual(wallSegment(s, 2).map((b) => b.id), [2, 3, 4]);
+  assert.deepEqual(wallBatchCost(s, 2), { gold: 0, wood: 50 });
+  const result = upgradeWallSegment(s, 2);
+  assert.deepEqual({ ok: result.ok, count: result.count, level: result.level }, { ok: true, count: 3, level: 2 });
+  assert.equal(s.wood, 950);
+  assert.deepEqual(s.buildings.filter((b) => [2, 3, 4].includes(b.id)).map((b) => b.level), [2, 2, 2]);
+  assert.equal(s.buildings.find((b) => b.id === 5).level, 1);
+  assert.equal(s.buildings.find((b) => b.id === 6).level, 2);
+});
+
+test('la mejora de tramo es atómica si faltan recursos', () => {
+  const s = fresh(1000, 15, 3);
+  s.buildings.push(createBuilding(2, 'wall', 2, 2, T0), createBuilding(3, 'wall', 3, 2, T0));
+  const result = upgradeWallSegment(s, 2);
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, 'Madera insuficiente');
+  assert.deepEqual(s.buildings.filter((b) => b.type === 'wall').map((b) => b.level), [1, 1]);
+  assert.equal(s.wood, 15);
 });
 
 /* ---------- construir ---------- */

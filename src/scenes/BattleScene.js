@@ -19,6 +19,7 @@ import { mapOfLevel, themeOf } from '../game/campaignMap.js';
 import { fitCamera, logical, onPointer } from '../game/res.js';
 import * as ui from './ui.js';
 import { addGloss, addVignette, emberPuff, ensureTextures, smokePuff, sparkBurst } from './look.js';
+import { twistQuarterTurn, visualUnitGroups } from '../game/visualScale.js';
 
 const FONT = 'system-ui, "Segoe UI", Roboto, sans-serif';
 const DEPTH = { terrain: 0, shadow: 8, world: 10, fx: 60, vignette: 90, ui: 150, buttons: 160, modal: 400 };
@@ -63,6 +64,8 @@ export default class BattleScene extends Phaser.Scene {
     this.level = this.raid ? this.raid.level : (data?.level ?? 1);
     this.resume = data?.resume ?? null; // una batalla guardada que se retoma
     this.entries = new Map(); // id -> { ent, img, rubble, baseTint, lastX }
+    this.visualGroups = [];
+    this.visualGroupByUnit = new Map();
     this.selection = new Set();
     this.activeChip = null;
     this.gesture = null;
@@ -110,6 +113,7 @@ export default class BattleScene extends Phaser.Scene {
     ensureTerrainTextures(this);
     ui.ensureUi(this);
     this.createTerrain();
+    this.wallLinks = this.add.graphics().setDepth(DEPTH.world - 0.05);
     this.createEntities();
     addVignette(this, DEPTH.vignette);
     this.time.addEvent({ delay: 380, loop: true, callback: () => this.burnTick() });
@@ -251,7 +255,11 @@ export default class BattleScene extends Phaser.Scene {
     }
     for (const u of this.battle.units) {
       const img = this.add.image(0, 0, unitSprite(u), 0);
-      this.entries.set(u.id, { ent: u, img, shadow: shadow(), rubble: null, baseTint: null, lastX: u.x });
+      const count = this.add.text(0, 0, '', { fontFamily: FONT, fontSize: '12px', fontStyle: 'bold', color: '#ffffff', stroke: '#152015', strokeThickness: 4 })
+        .setOrigin(0.5)
+        .setDepth(DEPTH.fx - 1)
+        .setVisible(false);
+      this.entries.set(u.id, { ent: u, img, count, shadow: shadow(), rubble: null, baseTint: null, lastX: u.x });
     }
   }
 
@@ -485,7 +493,7 @@ export default class BattleScene extends Phaser.Scene {
     let best = null;
     let bestDist = ts * 0.55;
     for (const u of this.battle.units) {
-      if (!u.alive) continue;
+      if (!u.alive || !this.entries.get(u.id)?.img.visible) continue;
       const p = tileBase(u.x, u.y);
       const d = Math.hypot(px - p.x, py - (p.y - ts * 0.35));
       if (d < bestDist) {
@@ -544,7 +552,7 @@ export default class BattleScene extends Phaser.Scene {
     if (this.finished || over?.length || !inViewport(pointer.x, pointer.y)) return;
     if (this.input.pointer1.isDown && this.input.pointer2.isDown) {
       const p = this.pinchState();
-      this.gesture = { mode: 'pinch', dist: p.dist, zoom: view.zoom, x: p.x, y: p.y };
+      this.gesture = { mode: 'pinch', dist: p.dist, zoom: view.zoom, angle: p.angle, x: p.x, y: p.y };
       return;
     }
     this.gesture = {
@@ -559,6 +567,11 @@ export default class BattleScene extends Phaser.Scene {
       const p = this.pinchState();
       zoomAt(p.x, p.y, g.zoom * (p.dist / g.dist));
       panBy(p.x - g.x, p.y - g.y);
+      const turn = twistQuarterTurn(g.angle, p.angle);
+      if (turn) {
+        this.turnView(turn);
+        g.angle = p.angle;
+      }
       g.x = p.x;
       g.y = p.y;
       this.viewDirty = true;
@@ -617,7 +630,7 @@ export default class BattleScene extends Phaser.Scene {
     const a = this.input.pointer1;
     const b = this.input.pointer2;
     const [la, lb] = [logical(a), logical(b)];
-    return { dist: Math.hypot(la.x - lb.x, la.y - lb.y) || 1, x: (la.x + lb.x) / 2, y: (la.y + lb.y) / 2 };
+    return { dist: Math.hypot(la.x - lb.x, la.y - lb.y) || 1, angle: Math.atan2(lb.y - la.y, lb.x - la.x), x: (la.x + lb.x) / 2, y: (la.y + lb.y) / 2 };
   }
 
   /* ---------- eventos de la simulación ---------- */
@@ -918,11 +931,17 @@ export default class BattleScene extends Phaser.Scene {
 
   renderEntities(dt = 0.016) {
     const now = this.time.now;
+    this.visualGroups = visualUnitGroups(this.battle.units, view.zoom);
+    this.visualGroupByUnit = new Map(this.visualGroups.flatMap((group) => group.ids.map((id) => [id, group])));
+    this.renderWallLinks();
 
     for (const entry of this.entries.values()) {
       const e = entry.ent;
       const { img } = entry;
-      if (!img.active) continue; // ya se destruyó (unidad caída)
+      if (!img.active) {
+        entry.count?.setVisible(false);
+        continue; // ya se destruyó (unidad caída)
+      }
 
       if (e.kind === 'building') {
         const visible = isTileVisible(e.cx, e.cy, 0.8 + (e.w + e.h) / 8);
@@ -941,19 +960,48 @@ export default class BattleScene extends Phaser.Scene {
           entry.shadow.setVisible(false);
         }
       } else if (e.alive) {
+        const group = this.visualGroupByUnit.get(e.id);
+        if (group?.representativeId !== e.id) {
+          img.setVisible(false);
+          entry.shadow.setVisible(false);
+          entry.count?.setVisible(false);
+          continue;
+        }
         const visible = isTileVisible(Math.round(e.x), Math.round(e.y));
         img.setVisible(visible);
         entry.shadow.setVisible(visible);
+        entry.count?.setVisible(visible && group?.count > 1);
         if (!visible) continue;
         entry.shadow.setVisible(false);
         this.placeOnTile(img, unitSprite(e), e.x, e.y, UNIT_GROW).setDepth(DEPTH.world + depthOf(e.x, e.y) + 0.06);
+        entry.count?.setText(`×${group.count}`).setPosition(img.x, img.y - img.displayHeight * 0.72).setScale(Math.max(0.85, view.zoom));
         this.animateUnit(entry, img, e, dt);
         entry.lastX = e.x;
+      } else {
+        entry.count?.setVisible(false);
       }
       const flashing = (this.flash.get(e.id) ?? 0) > now;
       if (flashing) img.setTint(0xff5555);
       else if (entry.baseTint) img.setTint(entry.baseTint);
       else img.clearTint();
+    }
+  }
+
+  renderWallLinks() {
+    const g = this.wallLinks;
+    g.clear();
+    const pieces = this.battle.buildings.filter((b) => b.alive && (b.type === 'wall' || b.type === 'gate'));
+    const at = new Map(pieces.map((b) => [`${b.x},${b.y}`, b]));
+    for (const b of pieces) {
+      const from = tileBase(b.x, b.y);
+      for (const [dx, dy] of [[1, 0], [0, 1]]) {
+        const other = at.get(`${b.x + dx},${b.y + dy}`);
+        if (!other) continue;
+        const to = tileBase(other.x, other.y);
+        const width = Math.max(4, 10 * view.zoom);
+        g.lineStyle(width + Math.max(2, 3 * view.zoom), 0x2b2017, 0.8).lineBetween(from.x, from.y, to.x, to.y);
+        g.lineStyle(width, this.raid ? 0xa88a60 : 0xb56c5d, 0.96).lineBetween(from.x, from.y, to.x, to.y);
+      }
     }
   }
 
@@ -975,17 +1023,19 @@ export default class BattleScene extends Phaser.Scene {
       const w = Math.min(1.5, 0.45 + (e.w + e.h) / 10) * ts;
       bar(img.x, Math.max(top, img.y - ts * 2.6) - 6 * zoom, w, e.hp / e.maxHp, this.raid ? 0x55cc55 : 0xe05050);
     }
-    for (const u of this.battle.units) {
-      if (!u.alive || u.hp >= u.maxHp || !isTileVisible(Math.round(u.x), Math.round(u.y))) continue;
+    for (const group of this.visualGroups) {
+      const u = this.battle.byId.get(group.representativeId);
+      if (!u?.alive || group.hp >= group.maxHp || !this.entries.get(u.id)?.img.visible) continue;
       const p = tileBase(u.x, u.y);
       const friendly = this.raid ? u.side === 'd' : u.side === 'a'; // en una defensa, tus tropas son las defensoras
-      bar(p.x, p.y - ts * (u.type === 'hero' ? 1.35 : 1.0), ts * 0.6, u.hp / u.maxHp, friendly ? 0x55cc55 : 0xe05050);
+      bar(p.x, p.y - ts * (u.type === 'hero' ? 1.35 : 1.0), ts * 0.6, group.hp / group.maxHp, friendly ? 0x55cc55 : 0xe05050);
     }
 
     g.lineStyle(2, 0x66ff66, 1);
-    for (const id of this.selection) {
-      const u = this.battle.byId.get(id);
-      if (!u?.alive) continue;
+    for (const group of this.visualGroups) {
+      if (!group.ids.some((id) => this.selection.has(id))) continue;
+      const u = this.battle.byId.get(group.representativeId);
+      if (!u?.alive || !this.entries.get(u.id)?.img.visible) continue;
       const p = tileBase(u.x, u.y);
       g.strokeEllipse(p.x, p.y - 2 * zoom, ts * 0.75, ts * 0.32);
     }
