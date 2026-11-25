@@ -942,19 +942,17 @@ export default class BaseScene extends Phaser.Scene {
     this.dialog({
       title: 'Elige tu raza',
       icon: 'crown',
-      lines: RACE_KEYS.map((id) => `${RACES[id].name}: ${RACES[id].blurb}`),
+      lines: [...RACE_KEYS.map((id) => `${RACES[id].name}: ${RACES[id].blurb}`), 'La elección cambia el aspecto y los nombres, no la fuerza ni los costos.'],
       vertical: true,
       buttons: RACE_KEYS.map((id, i) => ({ text: RACES[id].name, kind: i ? 'blue' : 'green', onClick: () => choose(id) })),
     });
   }
 
-  /** Minitutorial de 4 pantallas. `fromTitle` hace que «Saltar» vuelva a la pantalla de inicio. */
+  /** Tutorial breve de 2 pantallas. `fromTitle` hace que «Saltar» vuelva a la pantalla de inicio. */
   showTutorial(page = 0, fromTitle = false) {
     const pages = [
-      { title: 'Recursos', icon: 'coin', lines: ['Las minas dan oro y los aserraderos madera.', 'Toca un edificio para mejorarlo.', 'Más obreros libres = más mejoras a la vez.'] },
-      { title: 'Construir', icon: 'hammer', lines: ['Botón Construir: elige un edificio y tócalo en el mapa.', 'Mantén pulsado para moverlo.', 'Dos dedos = zoom · flechas de giro = otra vista.'] },
-      { title: 'Ejército y héroes', icon: 'swords', lines: ['El Cuartel y demás edificios entrenan tropas.', 'Toca la población (arriba) para ver tu ejército.', 'Con un Altar invocas héroes.'] },
-      { title: 'Ataques y campaña', icon: 'warning', lines: ['Cada pocos minutos llega un ataque (cartel «Ataque en»).', 'Torres, muros y tropas defienden solos.', 'Atacar: mapa con 10 enemigos y estrellas.'] },
+      { title: 'Construye tu base', icon: 'hammer', lines: ['Minas = oro · aserraderos = madera · más obreros = más mejoras.', 'Construir: elige una pieza y toca el mapa. Mantén pulsado para mover.', 'Dos dedos: pellizca para zoom y gira para cambiar la vista.'] },
+      { title: 'Defiende y conquista', icon: 'swords', lines: ['Los edificios militares entrenan tropas; la población abre tu ejército.', 'Torres, murallas y tropas defienden solos cuando llega un ataque.', 'Atacar abre la campaña: derrota bases y consigue estrellas.'] },
     ];
     const p = pages[page];
     const last = page === pages.length - 1;
@@ -974,7 +972,15 @@ export default class BaseScene extends Phaser.Scene {
 
   /** Al abrir el juego: si hoy aún no reclamaste el premio, lo ofrece. */
   maybeDaily() {
-    if (dailyAvailable(store.get())) this.time.delayedCall(150, () => this.showDaily());
+    const state = store.get();
+    if (!dailyAvailable(state)) return;
+    // En la primera entrada ya hubo elección de raza + tutorial: no poner una tercera ventana antes de jugar.
+    const untouched = state.daily.day === 0 && state.buildings.length === 1 && state.campaign.cleared === 0 && state.claimedQuests.length === 0;
+    if (untouched) {
+      this.showToast('Tu premio diario está listo en Menú. Primero puedes explorar la base.', 3200);
+      return;
+    }
+    this.time.delayedCall(150, () => this.showDaily());
   }
 
   showDaily() {
