@@ -2219,6 +2219,8 @@ export default class BaseScene extends Phaser.Scene {
   renderWorld() {
     const state = store.get();
     const zoom = view.zoom;
+    const selectedBuilding = this.selectedId !== null && state.buildings.find((b) => b.id === this.selectedId);
+    const editingWall = selectedBuilding && (selectedBuilding.type === 'wall' || selectedBuilding.type === 'gate');
 
     for (const t of this.terrain) {
       const visible = isTileVisible(t.x * 2 + 0.5, t.y * 2 + 0.5, 0.5);
@@ -2282,9 +2284,10 @@ export default class BaseScene extends Phaser.Scene {
       if (b.damaged) v.sprite.setTint(DAMAGED_TINT); // dañado: oscuro y chamuscado
       else if (stats.tint) v.sprite.setTint(stats.tint); // los niveles 4 y 5 se ven dorados
       else v.sprite.clearTint();
-      v.sprite.setAlpha(this.movingId === b.id ? 0.35 : upgrading ? 0.35 : 1);
+      const tacticalAlpha = editingWall && b.type !== 'wall' && b.type !== 'gate' ? 0.42 : 1;
+      v.sprite.setAlpha((this.movingId === b.id || upgrading ? 0.35 : 1) * tacticalAlpha);
       if (v.thin) continue; // un muro o una puerta no lleva nada más
-      this.putShadow(v.shadow, mid.x, mid.y, 'building', 1, this.movingId === b.id ? 0.4 : 1);
+      this.putShadow(v.shadow, mid.x, mid.y, 'building', 1, (this.movingId === b.id ? 0.4 : 1) * tacticalAlpha);
       this.placeOnTile(v.crate, 'crate', mid.x, mid.y, 0.8).setVisible(upgrading);
       // Mientras se mejora, un martillo golpea sobre el edificio.
       const swing = Math.abs(Math.sin(this.time.now / 170));
@@ -2336,11 +2339,14 @@ export default class BaseScene extends Phaser.Scene {
       }
     }
 
-    const selected = this.selectedId !== null && state.buildings.find((b) => b.id === this.selectedId);
+    const selected = selectedBuilding;
     if (selected) {
-      const sel = logic.rectOf(selected);
       this.selector.clear().setVisible(true);
-      strokeCell(this.selector, sel.x, sel.y, 0xffffff, 1, Math.max(2, 3 * zoom), 0.18, sel.w, sel.h);
+      const segment = selected.type === 'wall' || selected.type === 'gate' ? logic.wallSegment(state, selected.id) : [selected];
+      for (const piece of segment) {
+        const sel = logic.rectOf(piece);
+        strokeCell(this.selector, sel.x, sel.y, editingWall ? 0x8dff88 : 0xffffff, 1, Math.max(2, 3 * zoom), editingWall ? 0.24 : 0.18, sel.w, sel.h);
+      }
     } else {
       this.selector.setVisible(false);
     }

@@ -11,11 +11,12 @@ export function unitBucketSize(aliveCount, zoom = 1) {
 
 /** Agrupa unidades cercanas del mismo bando y tipo. Los héroes siempre quedan solos. */
 export function visualUnitGroups(units, zoom = 1) {
-  const alive = units.filter((u) => u.alive);
-  const bucket = unitBucketSize(alive.length, zoom);
+  const aliveCount = units.reduce((sum, u) => sum + Number(Boolean(u.alive)), 0);
+  const bucket = unitBucketSize(aliveCount, zoom);
   const groups = new Map();
 
-  for (const u of alive) {
+  for (const u of units) {
+    if (!u.alive) continue;
     const key = u.type === 'hero'
       ? `hero:${u.id}`
       : `${u.side}:${u.type}:${Math.floor(u.x / bucket)}:${Math.floor(u.y / bucket)}`;

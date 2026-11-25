@@ -66,6 +66,9 @@ export default class BattleScene extends Phaser.Scene {
     this.entries = new Map(); // id -> { ent, img, rubble, baseTint, lastX }
     this.visualGroups = [];
     this.visualGroupByUnit = new Map();
+    this.groupLabels = [];
+    this.nextVisualGroupAt = 0;
+    this.visualZoom = null;
     this.selection = new Set();
     this.activeChip = null;
     this.gesture = null;
@@ -255,11 +258,7 @@ export default class BattleScene extends Phaser.Scene {
     }
     for (const u of this.battle.units) {
       const img = this.add.image(0, 0, unitSprite(u), 0);
-      const count = this.add.text(0, 0, '', { fontFamily: FONT, fontSize: '12px', fontStyle: 'bold', color: '#ffffff', stroke: '#152015', strokeThickness: 4 })
-        .setOrigin(0.5)
-        .setDepth(DEPTH.fx - 1)
-        .setVisible(false);
-      this.entries.set(u.id, { ent: u, img, count, shadow: shadow(), rubble: null, baseTint: null, lastX: u.x });
+      this.entries.set(u.id, { ent: u, img, shadow: shadow(), rubble: null, baseTint: null, lastX: u.x });
     }
   }
 
@@ -931,17 +930,21 @@ export default class BattleScene extends Phaser.Scene {
 
   renderEntities(dt = 0.016) {
     const now = this.time.now;
-    this.visualGroups = visualUnitGroups(this.battle.units, view.zoom);
-    this.visualGroupByUnit = new Map(this.visualGroups.flatMap((group) => group.ids.map((id) => [id, group])));
+    // Reagrupar a 8 fps es visualmente suficiente y evita reconstruir mapas y arrays en cada cuadro.
+    if (now >= this.nextVisualGroupAt || this.visualZoom !== view.zoom) {
+      this.visualGroups = visualUnitGroups(this.battle.units, view.zoom);
+      const byUnit = new Map();
+      for (const group of this.visualGroups) for (const id of group.ids) byUnit.set(id, group);
+      this.visualGroupByUnit = byUnit;
+      this.nextVisualGroupAt = now + 125;
+      this.visualZoom = view.zoom;
+    }
     this.renderWallLinks();
 
     for (const entry of this.entries.values()) {
       const e = entry.ent;
       const { img } = entry;
-      if (!img.active) {
-        entry.count?.setVisible(false);
-        continue; // ya se destruyó (unidad caída)
-      }
+      if (!img.active) continue; // ya se destruyó (unidad caída)
 
       if (e.kind === 'building') {
         const visible = isTileVisible(e.cx, e.cy, 0.8 + (e.w + e.h) / 8);
@@ -964,27 +967,43 @@ export default class BattleScene extends Phaser.Scene {
         if (group?.representativeId !== e.id) {
           img.setVisible(false);
           entry.shadow.setVisible(false);
-          entry.count?.setVisible(false);
           continue;
         }
         const visible = isTileVisible(Math.round(e.x), Math.round(e.y));
         img.setVisible(visible);
         entry.shadow.setVisible(visible);
-        entry.count?.setVisible(visible && group?.count > 1);
         if (!visible) continue;
         entry.shadow.setVisible(false);
         this.placeOnTile(img, unitSprite(e), e.x, e.y, UNIT_GROW).setDepth(DEPTH.world + depthOf(e.x, e.y) + 0.06);
-        entry.count?.setText(`×${group.count}`).setPosition(img.x, img.y - img.displayHeight * 0.72).setScale(Math.max(0.85, view.zoom));
         this.animateUnit(entry, img, e, dt);
         entry.lastX = e.x;
-      } else {
-        entry.count?.setVisible(false);
       }
       const flashing = (this.flash.get(e.id) ?? 0) > now;
       if (flashing) img.setTint(0xff5555);
       else if (entry.baseTint) img.setTint(entry.baseTint);
       else img.clearTint();
     }
+    this.renderGroupLabels();
+  }
+
+  /** Un pequeño pool: solo existen etiquetas para los grupos visibles, no una por cada soldado. */
+  renderGroupLabels() {
+    let used = 0;
+    for (const group of this.visualGroups) {
+      if (group.count <= 1) continue;
+      const entry = this.entries.get(group.representativeId);
+      if (!entry?.img.active || !entry.img.visible) continue;
+      let label = this.groupLabels[used];
+      if (!label) {
+        label = this.add.text(0, 0, '', { fontFamily: FONT, fontSize: '12px', fontStyle: 'bold', color: '#ffffff', stroke: '#152015', strokeThickness: 4 })
+          .setOrigin(0.5)
+          .setDepth(DEPTH.fx - 1);
+        this.groupLabels.push(label);
+      }
+      label.setText(`×${group.count}`).setPosition(entry.img.x, entry.img.y - entry.img.displayHeight * 0.72).setScale(Math.max(0.85, view.zoom)).setVisible(true);
+      used += 1;
+    }
+    for (let i = used; i < this.groupLabels.length; i += 1) this.groupLabels[i].setVisible(false);
   }
 
   renderWallLinks() {
