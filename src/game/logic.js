@@ -597,6 +597,56 @@ export function startUpgrade(state, id, now) {
   return { ok: true, endsAt: b.upgradeEndsAt };
 }
 
+export const WALL_BATCH_MAX = 25;
+const isWallPiece = (b) => b && (b.type === 'wall' || b.type === 'gate');
+
+/** Tramo ortogonal conectado al muro o puerta elegidos, del mismo nivel. */
+export function wallSegment(state, id, max = WALL_BATCH_MAX) {
+  const first = state.buildings.find((b) => b.id === id);
+  if (!isWallPiece(first)) return [];
+  const at = new Map(state.buildings.filter((b) => isWallPiece(b) && b.level === first.level).map((b) => [`${b.x},${b.y}`, b]));
+  const out = [];
+  const seen = new Set();
+  const queue = [first];
+  while (queue.length && out.length < max) {
+    const b = queue.shift();
+    if (!b || seen.has(b.id)) continue;
+    seen.add(b.id);
+    out.push(b);
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) queue.push(at.get(`${b.x + dx},${b.y + dy}`));
+  }
+  return out;
+}
+
+export function wallBatchCost(state, id, max = WALL_BATCH_MAX) {
+  const cost = Object.fromEntries(RESOURCES.map((r) => [r, 0]));
+  for (const b of wallSegment(state, id, max)) {
+    const next = nextLevelOf(b);
+    if (next) for (const r of RESOURCES) cost[r] += costOf(next.upgradeCost, r);
+  }
+  return cost;
+}
+
+/** Mejora un tramo de defensas de una vez. Los muros no ocupan obreros. */
+export function upgradeWallSegment(state, id, max = WALL_BATCH_MAX) {
+  const first = state.buildings.find((b) => b.id === id);
+  if (!isWallPiece(first)) return fail('Elige un muro o una puerta');
+  const segment = wallSegment(state, id, max);
+  if (!segment.length) return fail('No hay tramo para mejorar');
+  for (const b of segment) {
+    if (b.damaged) return fail('Repara primero todo el tramo');
+    if (isUpgrading(b) || isQueuedUpgrade(state, b.id)) return fail('Parte del tramo ya está en obras');
+    if (!nextLevelOf(b)) return fail('El tramo ya está al nivel máximo');
+    if (b.level >= townHallLevel(state)) return fail('Mejora antes el Ayuntamiento');
+  }
+  const cost = wallBatchCost(state, id, max);
+  const missing = missingResource(state, cost);
+  if (missing) return fail(insufficient(missing));
+  spend(state, cost);
+  for (const b of segment) b.level += 1;
+  return { ok: true, count: segment.length, level: first.level, cost };
+}
+
 /**
  * Empieza a entrenar en un edificio: una unidad (cuartel, arquería, atelier, caballeriza, taller), un héroe
  * (altar) o una investigación (herrería). Se paga y se reserva la población al empezar; llega cuando termina

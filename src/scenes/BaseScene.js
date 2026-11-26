@@ -48,6 +48,7 @@ import { fitCamera, logical, onPointer } from '../game/res.js';
 import { RACES, RACE_KEYS, current as currentRace } from '../data/races.js';
 import * as ui from './ui.js';
 import { addGloss, addVignette, emberPuff, ensureTextures, smokePuff, sparkBurst } from './look.js';
+import { twistQuarterTurn } from '../game/visualScale.js';
 
 const FONT = 'system-ui, "Segoe UI", Roboto, sans-serif';
 
@@ -196,6 +197,7 @@ export default class BaseScene extends Phaser.Scene {
     this.ghost = this.add.image(0, 0, iconKey('mine')).setAlpha(0.7).setVisible(false).setDepth(DEPTH.ghost);
     this.ghostCell = this.add.graphics().setVisible(false).setDepth(DEPTH.ghost - 1); // rombo verde/rojo bajo la vista previa
     this.selector = this.add.graphics().setVisible(false).setDepth(DEPTH.selector); // rombo blanco de la selección
+    this.wallLinks = this.add.graphics().setDepth(DEPTH.world - 0.05); // continuidad visual entre muros y puertas
     this.hallGlow = this.add.graphics().setDepth(DEPTH.terrain + 0.9); // halo dorado que late bajo el Ayuntamiento
     this.selectorCell = null;
     this.toast = this.add
@@ -940,19 +942,17 @@ export default class BaseScene extends Phaser.Scene {
     this.dialog({
       title: 'Elige tu raza',
       icon: 'crown',
-      lines: RACE_KEYS.map((id) => `${RACES[id].name}: ${RACES[id].blurb}`),
+      lines: [...RACE_KEYS.map((id) => `${RACES[id].name}: ${RACES[id].blurb}`), 'La elección cambia el aspecto y los nombres, no la fuerza ni los costos.'],
       vertical: true,
       buttons: RACE_KEYS.map((id, i) => ({ text: RACES[id].name, kind: i ? 'blue' : 'green', onClick: () => choose(id) })),
     });
   }
 
-  /** Minitutorial de 4 pantallas. `fromTitle` hace que «Saltar» vuelva a la pantalla de inicio. */
+  /** Tutorial breve de 2 pantallas. `fromTitle` hace que «Saltar» vuelva a la pantalla de inicio. */
   showTutorial(page = 0, fromTitle = false) {
     const pages = [
-      { title: 'Recursos', icon: 'coin', lines: ['Las minas dan oro y los aserraderos madera.', 'Toca un edificio para mejorarlo.', 'Más obreros libres = más mejoras a la vez.'] },
-      { title: 'Construir', icon: 'hammer', lines: ['Botón Construir: elige un edificio y tócalo en el mapa.', 'Mantén pulsado para moverlo.', 'Dos dedos = zoom · flechas de giro = otra vista.'] },
-      { title: 'Ejército y héroes', icon: 'swords', lines: ['El Cuartel y demás edificios entrenan tropas.', 'Toca la población (arriba) para ver tu ejército.', 'Con un Altar invocas héroes.'] },
-      { title: 'Ataques y campaña', icon: 'warning', lines: ['Cada pocos minutos llega un ataque (cartel «Ataque en»).', 'Torres, muros y tropas defienden solos.', 'Atacar: mapa con 10 enemigos y estrellas.'] },
+      { title: 'Construye tu base', icon: 'hammer', lines: ['Minas = oro · aserraderos = madera · más obreros = más mejoras.', 'Construir: elige una pieza y toca el mapa. Mantén pulsado para mover.', 'Dos dedos: pellizca para zoom y gira para cambiar la vista.'] },
+      { title: 'Defiende y conquista', icon: 'swords', lines: ['Los edificios militares entrenan tropas; la población abre tu ejército.', 'Torres, murallas y tropas defienden solos cuando llega un ataque.', 'Atacar abre la campaña: derrota bases y consigue estrellas.'] },
     ];
     const p = pages[page];
     const last = page === pages.length - 1;
@@ -972,7 +972,15 @@ export default class BaseScene extends Phaser.Scene {
 
   /** Al abrir el juego: si hoy aún no reclamaste el premio, lo ofrece. */
   maybeDaily() {
-    if (dailyAvailable(store.get())) this.time.delayedCall(150, () => this.showDaily());
+    const state = store.get();
+    if (!dailyAvailable(state)) return;
+    // En la primera entrada ya hubo elección de raza + tutorial: no poner una tercera ventana antes de jugar.
+    const untouched = state.daily.day === 0 && state.buildings.length === 1 && state.campaign.cleared === 0 && state.claimedQuests.length === 0;
+    if (untouched) {
+      this.showToast('Tu premio diario está listo en Menú. Primero puedes explorar la base.', 3200);
+      return;
+    }
+    this.time.delayedCall(150, () => this.showDaily());
   }
 
   showDaily() {
@@ -1663,6 +1671,22 @@ export default class BaseScene extends Phaser.Scene {
       return;
     }
 
+    if (b.type === 'wall' || b.type === 'gate') {
+      const segment = logic.wallSegment(state, b.id);
+      const cost = logic.wallBatchCost(state, b.id);
+      const capped = b.level >= logic.townHallLevel(state);
+      const affordable = !capped && logic.canAfford(state, cost);
+      detail.setText(`${lines.join('\n')}\nTramo conectado: ${segment.length} pieza${segment.length === 1 ? '' : 's'} del nivel ${b.level}`);
+      this.panel.hint.setVisible(false);
+      upgradeBtn.setVisible(true).setAlpha(affordable ? 1 : 0.5);
+      upgradeLabel
+        .setText(`Mejorar tramo · ${segment.length}\n${logic.formatCost(cost)}`)
+        .setVisible(true)
+        .setAlpha(affordable ? 1 : 0.5)
+        .setColor(logic.canAfford(state, cost) ? '#ffffff' : '#ffb0a0');
+      return;
+    }
+
     const capped = b.type !== 'townhall' && b.level >= logic.townHallLevel(state);
     const poor = !logic.canAfford(state, next.upgradeCost);
     const queued = logic.isQueuedUpgrade(state, b.id);
@@ -1698,6 +1722,16 @@ export default class BaseScene extends Phaser.Scene {
     const now = store.get();
     if (logic.isQueuedUpgrade(now, id)) {
       this.doAction(() => logic.cancelQueuedUpgrade(store.get(), id), () => 'Mejora en cola cancelada: te devolvimos lo pagado', 'close');
+      this.updatePanel();
+      return;
+    }
+    const selected = now.buildings.find((b) => b.id === id);
+    if (selected?.type === 'wall' || selected?.type === 'gate') {
+      this.doAction(
+        () => logic.upgradeWallSegment(store.get(), id),
+        (r) => `${r.count} pieza${r.count === 1 ? '' : 's'} mejorada${r.count === 1 ? '' : 's'} al nivel ${r.level}`,
+        'upgrade_done',
+      );
       this.updatePanel();
       return;
     }
@@ -1928,14 +1962,14 @@ export default class BaseScene extends Phaser.Scene {
     const a = this.input.pointer1;
     const b = this.input.pointer2;
     const [la, lb] = [logical(a), logical(b)];
-    return { dist: Math.hypot(la.x - lb.x, la.y - lb.y) || 1, x: (la.x + lb.x) / 2, y: (la.y + lb.y) / 2 };
+    return { dist: Math.hypot(la.x - lb.x, la.y - lb.y) || 1, angle: Math.atan2(lb.y - la.y, lb.x - la.x), x: (la.x + lb.x) / 2, y: (la.y + lb.y) / 2 };
   }
 
   startPinch() {
     const p = this.pinchState();
     this.movingId = null;
     this.hideGhost();
-    this.gesture = { mode: 'pinch', dist: p.dist, zoom: view.zoom, x: p.x, y: p.y };
+    this.gesture = { mode: 'pinch', dist: p.dist, zoom: view.zoom, angle: p.angle, x: p.x, y: p.y };
   }
 
   updatePinch() {
@@ -1943,6 +1977,11 @@ export default class BaseScene extends Phaser.Scene {
     const p = this.pinchState();
     zoomAt(p.x, p.y, g.zoom * (p.dist / g.dist));
     panBy(p.x - g.x, p.y - g.y);
+    const turn = twistQuarterTurn(g.angle, p.angle);
+    if (turn) {
+      this.turnView(turn);
+      g.angle = p.angle;
+    }
     g.x = p.x;
     g.y = p.y;
     this.viewDirty = true;
@@ -2186,6 +2225,8 @@ export default class BaseScene extends Phaser.Scene {
   renderWorld() {
     const state = store.get();
     const zoom = view.zoom;
+    const selectedBuilding = this.selectedId !== null && state.buildings.find((b) => b.id === this.selectedId);
+    const editingWall = selectedBuilding && (selectedBuilding.type === 'wall' || selectedBuilding.type === 'gate');
 
     for (const t of this.terrain) {
       const visible = isTileVisible(t.x * 2 + 0.5, t.y * 2 + 0.5, 0.5);
@@ -2196,6 +2237,7 @@ export default class BaseScene extends Phaser.Scene {
     }
 
     this.renderLandscape(state);
+    this.renderWallLinks(state.buildings);
 
     const occupied = occupiedBlocks(state.buildings);
     const cleared = new Set(state.cleared); // adornos que el jugador quitó
@@ -2248,9 +2290,10 @@ export default class BaseScene extends Phaser.Scene {
       if (b.damaged) v.sprite.setTint(DAMAGED_TINT); // dañado: oscuro y chamuscado
       else if (stats.tint) v.sprite.setTint(stats.tint); // los niveles 4 y 5 se ven dorados
       else v.sprite.clearTint();
-      v.sprite.setAlpha(this.movingId === b.id ? 0.35 : upgrading ? 0.35 : 1);
+      const tacticalAlpha = editingWall && b.type !== 'wall' && b.type !== 'gate' ? 0.42 : 1;
+      v.sprite.setAlpha((this.movingId === b.id || upgrading ? 0.35 : 1) * tacticalAlpha);
       if (v.thin) continue; // un muro o una puerta no lleva nada más
-      this.putShadow(v.shadow, mid.x, mid.y, 'building', 1, this.movingId === b.id ? 0.4 : 1);
+      this.putShadow(v.shadow, mid.x, mid.y, 'building', 1, (this.movingId === b.id ? 0.4 : 1) * tacticalAlpha);
       this.placeOnTile(v.crate, 'crate', mid.x, mid.y, 0.8).setVisible(upgrading);
       // Mientras se mejora, un martillo golpea sobre el edificio.
       const swing = Math.abs(Math.sin(this.time.now / 170));
@@ -2302,13 +2345,36 @@ export default class BaseScene extends Phaser.Scene {
       }
     }
 
-    const selected = this.selectedId !== null && state.buildings.find((b) => b.id === this.selectedId);
+    const selected = selectedBuilding;
     if (selected) {
-      const sel = logic.rectOf(selected);
       this.selector.clear().setVisible(true);
-      strokeCell(this.selector, sel.x, sel.y, 0xffffff, 1, Math.max(2, 3 * zoom), 0.18, sel.w, sel.h);
+      const segment = selected.type === 'wall' || selected.type === 'gate' ? logic.wallSegment(state, selected.id) : [selected];
+      for (const piece of segment) {
+        const sel = logic.rectOf(piece);
+        strokeCell(this.selector, sel.x, sel.y, editingWall ? 0x8dff88 : 0xffffff, 1, Math.max(2, 3 * zoom), editingWall ? 0.24 : 0.18, sel.w, sel.h);
+      }
     } else {
       this.selector.setVisible(false);
+    }
+  }
+
+  /** Une visualmente piezas contiguas para que la muralla se lea como una sola estructura. */
+  renderWallLinks(buildings) {
+    const g = this.wallLinks;
+    g.clear();
+    const pieces = buildings.filter((b) => b.type === 'wall' || b.type === 'gate');
+    const at = new Map(pieces.map((b) => [`${b.x},${b.y}`, b]));
+    const colors = [0x8a6a42, 0xa88a60, 0xc2b49a, 0xd6bd72, 0xe3cf86];
+    for (const b of pieces) {
+      const from = tileBase(b.x, b.y);
+      for (const [dx, dy] of [[1, 0], [0, 1]]) {
+        const other = at.get(`${b.x + dx},${b.y + dy}`);
+        if (!other) continue;
+        const to = tileBase(other.x, other.y);
+        const width = Math.max(4, 10 * view.zoom);
+        g.lineStyle(width + Math.max(2, 3 * view.zoom), 0x2b2017, 0.78).lineBetween(from.x, from.y, to.x, to.y);
+        g.lineStyle(width, colors[Math.min(colors.length - 1, Math.min(b.level, other.level) - 1)], 0.96).lineBetween(from.x, from.y, to.x, to.y);
+      }
     }
   }
 
